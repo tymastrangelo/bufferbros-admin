@@ -17,6 +17,10 @@ import { createClient } from "@/lib/supabase/client";
 import { fmtDateShort, minToLabel, todayYmd, WEEKDAYS } from "@/lib/time";
 import type { Block, PlanCadence, PlanPricing, Service, ServicePricing, SizeId, WeeklyHours } from "@/lib/types";
 
+// ponytail: tables fill 100% width; tighter cell padding on mobile so the pricing
+// grids fit a phone without side-scroll. overflow-x-auto stays as a last-resort guard.
+const GRID_TABLE = "tbl w-full [&_th]:px-2 [&_td]:px-2 sm:[&_th]:px-3 sm:[&_td]:px-3";
+
 const SIZE_IDS: SizeId[] = ["sedan", "midsize", "large"];
 const SIZE_SHORT = { sedan: "Sedan", midsize: "Midsize", large: "Large" };
 const CADENCE_IDS: PlanCadence[] = ["weekly", "biweekly", "monthly"];
@@ -115,11 +119,11 @@ function PricingSection({ services, pricing }: { services: Service[]; pricing: S
   return (
     <Section
       title="Services & pricing"
-      note="Until the website is switched to Supabase, public site prices are still edited in services.js — keep them in sync."
+      note="Saved to the database — drives both this dashboard and the public booking site."
     >
       <p className="label mb-1.5">The Standard Detail</p>
       <div className="overflow-x-auto">
-        <table className="tbl min-w-[380px]">
+        <table className={GRID_TABLE}>
           <thead>
             <tr>
               <th>Size</th>
@@ -134,7 +138,7 @@ function PricingSection({ services, pricing }: { services: Service[]; pricing: S
                 <td>
                   <input
                     type="number"
-                    className="input num w-[90px]! h-8!"
+                    className="input num max-w-[90px]! h-8!"
                     value={get("standard", size).price}
                     onChange={(e) => set("standard", size, "price", Number(e.target.value))}
                     aria-label={`${size} price`}
@@ -144,7 +148,7 @@ function PricingSection({ services, pricing }: { services: Service[]; pricing: S
                   <input
                     type="number"
                     step={15}
-                    className="input num w-[90px]! h-8!"
+                    className="input num max-w-[90px]! h-8!"
                     value={get("standard", size).minutes}
                     onChange={(e) => set("standard", size, "minutes", Number(e.target.value))}
                     aria-label={`${size} minutes`}
@@ -157,7 +161,7 @@ function PricingSection({ services, pricing }: { services: Service[]; pricing: S
       </div>
       <p className="label mt-4 mb-1.5">Add-ons</p>
       <div className="overflow-x-auto">
-        <table className="tbl min-w-[380px]">
+        <table className={GRID_TABLE}>
           <thead>
             <tr>
               <th>Add-on</th>
@@ -172,7 +176,7 @@ function PricingSection({ services, pricing }: { services: Service[]; pricing: S
                 <td>
                   <input
                     type="number"
-                    className="input num w-[90px]! h-8!"
+                    className="input num max-w-[90px]! h-8!"
                     value={get(a.id, "*").price}
                     onChange={(e) => set(a.id, "*", "price", Number(e.target.value))}
                     aria-label={`${a.name} price`}
@@ -182,7 +186,7 @@ function PricingSection({ services, pricing }: { services: Service[]; pricing: S
                   <input
                     type="number"
                     step={15}
-                    className="input num w-[90px]! h-8!"
+                    className="input num max-w-[90px]! h-8!"
                     value={get(a.id, "*").minutes}
                     onChange={(e) => set(a.id, "*", "minutes", Number(e.target.value))}
                     aria-label={`${a.name} minutes`}
@@ -206,7 +210,7 @@ function PlanPricingSection({ planPricing }: { planPricing: PlanPricing[] }) {
   return (
     <Section title="Maintenance plan pricing" note="Per-visit price by cadence and size. Auto-suggested when creating a plan.">
       <div className="overflow-x-auto">
-        <table className="tbl min-w-[380px]">
+        <table className={GRID_TABLE}>
           <thead>
             <tr>
               <th>Cadence</th>
@@ -223,7 +227,7 @@ function PlanPricingSection({ planPricing }: { planPricing: PlanPricing[] }) {
                   <td key={s}>
                     <input
                       type="number"
-                      className="input num w-[80px]! h-8!"
+                      className="input num max-w-[80px]! h-8!"
                       value={rows.get(`${c}:${s}`) ?? 0}
                       onChange={(e) => setRows(new Map(rows).set(`${c}:${s}`, Number(e.target.value)))}
                       aria-label={`${c} ${s} price`}
@@ -270,7 +274,7 @@ function HoursSection({ hours, settings }: { hours: WeeklyHours[]; settings: Rec
     <Section title="Hours & booking rules" note="Drives the public booking page and the availability engine.">
       <div className="flex flex-col divide-y divide-line border border-line rounded-md overflow-hidden">
         {rows.map((r) => (
-          <div key={r.weekday} className="flex items-center gap-3 px-3 py-2 bg-card">
+          <div key={r.weekday} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 bg-card">
             <label className="flex items-center gap-2.5 w-28 shrink-0 text-sm font-medium">
               <input type="checkbox" checked={r.enabled} onChange={(e) => setRow(r.weekday, { enabled: e.target.checked })} />
               {WEEKDAYS[r.weekday].slice(0, 3)}
@@ -424,7 +428,7 @@ function AccountSection({ userEmail }: { userEmail: string }) {
       <p className="text-sm">
         Signed in as <span className="font-medium">{userEmail}</span>
       </p>
-      <div className="mt-3 grid grid-cols-2 gap-3 max-w-sm">
+      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-sm">
         <input
           type="password"
           className="input"
