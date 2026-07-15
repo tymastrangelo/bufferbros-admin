@@ -91,7 +91,7 @@ export function PaymentsClient({ rows, openNew }: { rows: PaymentRow[]; openNew:
             }
           />
         ) : (
-          <table className="tbl tbl-link min-w-[560px]">
+          <table className="tbl tbl-link tbl-stack min-w-[560px]">
             <thead>
               <tr>
                 <th>Date</th>
@@ -105,8 +105,8 @@ export function PaymentsClient({ rows, openNew }: { rows: PaymentRow[]; openNew:
             <tbody>
               {filtered.map((r) => (
                 <tr key={r.id} onClick={() => setSheet({ entry: r })}>
-                  <td className="num whitespace-nowrap">{fmtDateShort(r.occurred_on)}</td>
-                  <td className="font-medium whitespace-nowrap">
+                  <td data-label="Date" className="num whitespace-nowrap">{fmtDateShort(r.occurred_on)}</td>
+                  <td data-label="Customer" className="font-medium whitespace-nowrap">
                     {r.customers ? (
                       <Link href={`/customers/${r.customers.id}`} className="hover:underline underline-offset-2" onClick={(e) => e.stopPropagation()}>
                         {r.customers.name}
@@ -115,10 +115,10 @@ export function PaymentsClient({ rows, openNew }: { rows: PaymentRow[]; openNew:
                       "—"
                     )}
                   </td>
-                  <td className="capitalize">{r.kind}</td>
-                  <td className="capitalize">{r.method ?? "—"}</td>
-                  <td className="text-ink-2 max-w-[220px] truncate">{r.memo}</td>
-                  <td className={`num text-right font-medium ${r.amount < 0 ? "text-bad" : "text-ok"}`}>
+                  <td data-label="Kind" className="capitalize">{r.kind}</td>
+                  <td data-label="Method" className="capitalize">{r.method ?? "—"}</td>
+                  <td data-label="Memo" className="text-ink-2 max-w-[220px] truncate">{r.memo}</td>
+                  <td data-label="Amount" className={`num text-right font-medium ${r.amount < 0 ? "text-bad" : "text-ok"}`}>
                     {r.amount < 0 ? "−" : "+"}
                     {money(Math.abs(r.amount))}
                   </td>

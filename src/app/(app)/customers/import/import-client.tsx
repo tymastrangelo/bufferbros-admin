@@ -151,7 +151,7 @@ export function ImportClient() {
           </div>
 
           <div className="mt-2 card overflow-x-auto max-h-[55dvh] overflow-y-auto">
-            <table className="tbl min-w-[560px]">
+            <table className="tbl tbl-stack min-w-[560px]">
               <thead className="sticky top-0 bg-card">
                 <tr>
                   <th className="w-8"></th>
@@ -172,13 +172,13 @@ export function ImportClient() {
                         onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, checked: e.target.checked } : x)))}
                       />
                     </td>
-                    <td className="font-medium whitespace-nowrap">
+                    <td data-label="Name" className="font-medium whitespace-nowrap">
                       {r.name}
                       {r.duplicate && <span className="chip bg-warn-wash text-warn ml-1.5">exists</span>}
                     </td>
-                    <td className="num whitespace-nowrap">{fmtPhone(r.phone)}</td>
-                    <td className="truncate max-w-[180px]">{r.email}</td>
-                    <td className="truncate max-w-[220px]">{r.address}</td>
+                    <td data-label="Phone" className="num whitespace-nowrap">{fmtPhone(r.phone)}</td>
+                    <td data-label="Email" className="truncate max-w-[180px]">{r.email}</td>
+                    <td data-label="Address" className="truncate max-w-[220px]">{r.address}</td>
                   </tr>
                 ))}
               </tbody>

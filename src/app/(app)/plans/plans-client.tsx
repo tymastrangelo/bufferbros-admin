@@ -71,7 +71,7 @@ export function PlansClient({
           />
         ) : (
           <div className="card overflow-x-auto">
-            <table className="tbl tbl-link min-w-[560px]">
+            <table className="tbl tbl-link tbl-stack min-w-[560px]">
               <thead>
                 <tr>
                   <th>Customer</th>
@@ -85,10 +85,10 @@ export function PlansClient({
               <tbody>
                 {[...active, ...rest].map((p) => (
                   <tr key={p.id} onClick={() => router.push(`/plans/${p.id}`)}>
-                    <td className="font-medium whitespace-nowrap">{p.customers?.name ?? "—"}</td>
-                    <td className="capitalize whitespace-nowrap">{cadenceLabel(p)}</td>
-                    <td className="num text-right">{money(p.per_visit_price)}</td>
-                    <td className="num whitespace-nowrap">
+                    <td data-label="Customer" className="font-medium whitespace-nowrap">{p.customers?.name ?? "—"}</td>
+                    <td data-label="Cadence" className="capitalize whitespace-nowrap">{cadenceLabel(p)}</td>
+                    <td data-label="Per visit" className="num text-right">{money(p.per_visit_price)}</td>
+                    <td data-label="Next visit" className="num whitespace-nowrap">
                       {p.status === "active" ? (
                         p.nextVisit ? (
                           fmtDateShort(p.nextVisit)
@@ -99,8 +99,8 @@ export function PlansClient({
                         "—"
                       )}
                     </td>
-                    <td className="text-ink-2 max-w-[200px] truncate">{p.billing_note}</td>
-                    <td>
+                    <td data-label="Billing" className="text-ink-2 max-w-[200px] truncate">{p.billing_note}</td>
+                    <td data-label="Status">
                       <StatusChip status={p.status} />
                     </td>
                   </tr>

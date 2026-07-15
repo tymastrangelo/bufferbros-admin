@@ -170,6 +170,38 @@
 
   .num { font-variant-numeric: tabular-nums; }
 
+  /* Responsive: on phones, .tbl-stack turns each row into a labeled card
+     (label from each cell's data-label) so wide tables never side-scroll. */
+  @media (max-width: 639.98px) {
+    .tbl-stack thead { display: none; }
+    .tbl-stack, .tbl-stack tbody { display: block; width: 100%; min-width: 0 !important; }
+    .tbl-stack tr {
+      display: block;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--color-line);
+    }
+    .tbl-stack tbody tr:last-child { border-bottom: none; }
+    .tbl-stack td {
+      display: block;
+      padding: 2px 12px;
+      border: none;
+      max-width: none !important;
+      white-space: normal !important;
+      overflow: visible !important;
+      text-align: left !important;
+    }
+    .tbl-stack td[data-label]::before {
+      content: attr(data-label);
+      display: block;
+      margin-bottom: 1px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--color-faint);
+    }
+  }
+
   /* Skeleton shimmer */
   .skeleton {
     background: linear-gradient(90deg, #eef1f6 25%, #f6f8fb 50%, #eef1f6 75%);

@@ -74,7 +74,7 @@ export function ExpensesClient({ rows }: { rows: Expense[] }) {
         {rows.length === 0 ? (
           <EmptyState title="No expenses yet." hint="Log supplies, fuel, gear — anything the business spends. It feeds the net number on the overview." />
         ) : (
-          <table className="tbl tbl-link min-w-[440px]">
+          <table className="tbl tbl-link tbl-stack min-w-[440px]">
             <thead>
               <tr>
                 <th>Date</th>
@@ -86,10 +86,10 @@ export function ExpensesClient({ rows }: { rows: Expense[] }) {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} onClick={() => setEdit(r)}>
-                  <td className="num whitespace-nowrap">{fmtDateShort(r.occurred_on)}</td>
-                  <td className="capitalize">{r.category}</td>
-                  <td className="text-ink-2 max-w-[240px] truncate">{r.memo}</td>
-                  <td className="num text-right font-medium">{money(r.amount)}</td>
+                  <td data-label="Date" className="num whitespace-nowrap">{fmtDateShort(r.occurred_on)}</td>
+                  <td data-label="Category" className="capitalize">{r.category}</td>
+                  <td data-label="Memo" className="text-ink-2 max-w-[240px] truncate">{r.memo}</td>
+                  <td data-label="Amount" className="num text-right font-medium">{money(r.amount)}</td>
                 </tr>
               ))}
             </tbody>

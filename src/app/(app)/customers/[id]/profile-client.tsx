@@ -325,7 +325,7 @@ function LedgerTable({ ledger, onEdit }: { ledger: LedgerEntry[]; onEdit: (e: Le
     totals[i] = run;
   }
   return (
-    <table className="tbl tbl-link min-w-[480px]">
+    <table className="tbl tbl-link tbl-stack min-w-[480px]">
       <thead>
         <tr>
           <th>Date</th>
@@ -337,17 +337,17 @@ function LedgerTable({ ledger, onEdit }: { ledger: LedgerEntry[]; onEdit: (e: Le
       <tbody>
         {ledger.map((e, i) => (
           <tr key={e.id} onClick={() => onEdit(e)}>
-            <td className="num whitespace-nowrap">{fmtDateShort(e.occurred_on)}</td>
-            <td>
+            <td data-label="Date" className="num whitespace-nowrap">{fmtDateShort(e.occurred_on)}</td>
+            <td data-label="Entry">
               <span className="capitalize font-medium">{e.kind}</span>
               {e.method && <span className="text-faint"> · {e.method}</span>}
               {e.memo && <span className="text-faint"> · {e.memo}</span>}
             </td>
-            <td className={`num text-right ${e.amount < 0 ? "text-bad" : "text-ok"}`}>
+            <td data-label="Amount" className={`num text-right ${e.amount < 0 ? "text-bad" : "text-ok"}`}>
               {e.amount < 0 ? "−" : "+"}
               {money(Math.abs(e.amount))}
             </td>
-            <td className="num text-right text-ink-2">{money(totals[i])}</td>
+            <td data-label="Balance" className="num text-right text-ink-2">{money(totals[i])}</td>
           </tr>
         ))}
       </tbody>
