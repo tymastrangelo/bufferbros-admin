@@ -47,7 +47,7 @@ export function Sheet({
             <IconX />
           </button>
         </div>
-        <div className="overflow-y-auto overscroll-contain px-4 py-4 grow">{children}</div>
+        <div className="overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 grow">{children}</div>
       </div>
     </>
   );

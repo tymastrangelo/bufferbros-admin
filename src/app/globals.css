@@ -109,6 +109,7 @@
 
   .input, .select, .textarea {
     width: 100%;
+    min-width: 0; /* let full-width inputs shrink inside grid/flex parents; else date/number controls overflow */
     height: 38px;
     padding: 0 10px;
     border: 1px solid var(--color-line-2);
