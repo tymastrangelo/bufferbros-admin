@@ -78,7 +78,8 @@ create table settings ( key text primary key, value text not null );
 
 -- "Today" in Buffer Bros wall-clock time (the DB clock is UTC — a day ahead of
 -- Florida every evening). Used by seeds and handy in ad-hoc SQL.
-create function et_today() returns date language sql stable as
+create function et_today() returns date language sql stable
+set search_path = '' as
 $fn$ select (now() at time zone 'America/New_York')::date $fn$;
 
 -- ============ RECURRING PLANS ============
@@ -335,6 +336,4 @@ insert into weekly_hours (weekday, enabled, open_min, close_min)
 insert into settings (key, value) values
   ('slot_granularity_min','30'), ('min_lead_min','180'),
   ('buffer_min','30'), ('timezone','America/New_York'),
-  -- mock values, editable in Settings — new pricing model lands soon:
-  ('prepay_discount_pct','10'),   -- pay a plan period up front -> 10% off per visit
   ('split_washer_pct','60');      -- 60% of collected revenue to the washer (Gabe), 40% to the business (Tyler)

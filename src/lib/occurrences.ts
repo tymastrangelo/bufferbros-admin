@@ -22,7 +22,7 @@ type PlanWithCustomer = Plan & {
   customers: { name: string; email: string | null; phone: string | null } | null;
 };
 
-const HORIZON_DAYS = 56; // 8 weeks
+const DEFAULT_HORIZON_DAYS = 56; // 8 weeks — used by the weekly cron
 
 function stepDays(plan: Plan): number {
   switch (plan.cadence) {
@@ -37,9 +37,13 @@ function stepDays(plan: Plan): number {
   }
 }
 
-export async function generateOccurrences(db: SupabaseClient, planId?: string): Promise<GenerateResult> {
+export async function generateOccurrences(
+  db: SupabaseClient,
+  planId?: string,
+  untilYmd?: string
+): Promise<GenerateResult> {
   const today = todayYmd();
-  const horizon = addDays(today, HORIZON_DAYS);
+  const horizon = untilYmd ?? addDays(today, DEFAULT_HORIZON_DAYS);
 
   let query = db.from("plans").select("*, customers(name,email,phone)").eq("status", "active");
   if (planId) query = query.eq("id", planId);

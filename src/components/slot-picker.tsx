@@ -3,6 +3,7 @@
 // Availability-aware time picker: shows real open slots from the RPC, with an
 // explicit off-grid custom time + "book anyway" escape hatch for the owners.
 import { useEffect, useState } from "react";
+import { Wheel } from "@/components/brand";
 import { createClient } from "@/lib/supabase/client";
 import { minToLabel } from "@/lib/time";
 
@@ -50,10 +51,8 @@ export function SlotPicker({
   return (
     <div>
       {slots === null ? (
-        <div className="flex flex-wrap gap-1.5">
-          {Array.from({ length: 8 }, (_, i) => (
-            <div key={i} className="skeleton h-8 w-[72px]" />
-          ))}
+        <div className="flex items-center gap-2.5 py-1 text-[13px] text-faint">
+          <Wheel size={22} /> Checking the schedule…
         </div>
       ) : slots.length === 0 && !custom ? (
         <p className="text-sm text-warn bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2">

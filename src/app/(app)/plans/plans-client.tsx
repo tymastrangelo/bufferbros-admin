@@ -4,12 +4,12 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { IconPlus } from "@/components/icons";
 import { PlanFormSheet } from "@/components/plan-form";
+import { ScheduleSheet } from "@/components/schedule-sheet";
 import type { PickedCustomer } from "@/components/customer-picker";
 import { EmptyState, StatusChip } from "@/components/ui";
-import { schedulePlanVisits } from "@/lib/actions/plans";
 import type { Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
-import { fmtDateShort } from "@/lib/time";
+import { fmtDateShort, todayYmd } from "@/lib/time";
 import type { Plan } from "@/lib/types";
 
 export type PlanRow = Plan & { customers: { id: string; name: string } | null; nextVisit: string | null };
@@ -40,30 +40,17 @@ export function PlansClient({
     window.history.replaceState(null, "", "/plans");
   };
   const [genMsg, setGenMsg] = useState<string | null>(null);
-  const [genPending, setGenPending] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
 
   const active = rows.filter((r) => r.status === "active");
   const rest = rows.filter((r) => r.status !== "active");
-
-  async function generateAll() {
-    setGenPending(true);
-    setGenMsg(null);
-    const res = await schedulePlanVisits();
-    setGenPending(false);
-    if (!res.ok) return setGenMsg(res.error);
-    setGenMsg(
-      `Scheduled ${res.result.created} visit${res.result.created === 1 ? "" : "s"}` +
-        (res.result.conflicts.length ? ` · ${res.result.conflicts.length} need manual placement` : "")
-    );
-    router.refresh();
-  }
 
   return (
     <div className="px-4 md:px-8 py-5 md:py-7 max-w-5xl">
       <header className="flex items-center gap-2 flex-wrap">
         <h1 className="text-xl md:text-2xl font-bold mr-auto">Plans</h1>
-        <button className="btn btn-sm" onClick={generateAll} disabled={genPending || active.length === 0}>
-          {genPending ? "Scheduling…" : "Schedule visits (8 wks)"}
+        <button className="btn btn-sm" onClick={() => setScheduleOpen(true)} disabled={active.length === 0}>
+          Schedule visits…
         </button>
         <button className="btn btn-primary btn-sm" onClick={() => setNewOpen(true)}>
           <IconPlus width={13} height={13} /> New plan
@@ -125,6 +112,19 @@ export function PlansClient({
       </div>
 
       {newOpen && <PlanFormSheet open onClose={closeNew} catalog={catalog} defaultCustomer={defaultCustomer} />}
+      <ScheduleSheet
+        open={scheduleOpen}
+        onClose={() => setScheduleOpen(false)}
+        today={todayYmd()}
+        scopeLabel={`all ${active.length} active plan${active.length === 1 ? "" : "s"}`}
+        onDone={(result) => {
+          setGenMsg(
+            `Scheduled ${result.created} visit${result.created === 1 ? "" : "s"}` +
+              (result.conflicts.length ? ` · ${result.conflicts.length} need manual placement` : "")
+          );
+          router.refresh();
+        }}
+      />
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { generateOccurrences, type GenerateResult } from "@/lib/occurrences";
 import { createClient } from "@/lib/supabase/server";
-import { todayYmd } from "@/lib/time";
+import { diffDays, todayYmd } from "@/lib/time";
 import type { PlanCadence, PlanStatus } from "@/lib/types";
 import type { ActionResult } from "./appointments";
 
@@ -56,12 +56,37 @@ export async function createPlan(fields: PlanFields): Promise<ActionResult> {
   return { ok: true, id: data.id };
 }
 
-export async function updatePlan(id: string, fields: PlanFields): Promise<ActionResult> {
+export async function updatePlan(
+  id: string,
+  fields: PlanFields,
+  /** also push price/duration/time/address onto this plan's future scheduled visits */
+  applyToScheduled = false
+): Promise<ActionResult & { updatedVisits?: number }> {
   const db = await createClient();
   const { error } = await db.from("plans").update(toRow(fields)).eq("id", id);
   if (error) return { ok: false, error: error.message };
+
+  let updatedVisits = 0;
+  if (applyToScheduled) {
+    const patch: Record<string, unknown> = {
+      price: fields.perVisitPrice,
+      duration_min: fields.durationMin,
+    };
+    if (fields.preferredMin != null) patch.start_min = fields.preferredMin;
+    if (fields.address?.trim()) patch.address = fields.address.trim();
+
+    const { data, error: applyErr } = await db
+      .from("appointments")
+      .update(patch)
+      .eq("plan_id", id)
+      .eq("status", "scheduled")
+      .gte("date", todayYmd())
+      .select("id");
+    if (applyErr) return { ok: false, error: `Plan saved, but updating visits failed: ${applyErr.message}` };
+    updatedVisits = data?.length ?? 0;
+  }
   refresh();
-  return { ok: true, id };
+  return { ok: true, id, updatedVisits };
 }
 
 /** Pause/resume/end. Pausing or ending cancels this plan's future generated visits. */
@@ -86,10 +111,22 @@ export async function setPlanStatus(id: string, status: PlanStatus): Promise<Act
   return { ok: true, id };
 }
 
-export async function schedulePlanVisits(planId?: string): Promise<{ ok: true; result: GenerateResult } | { ok: false; error: string }> {
+/** Materialize visits up to untilYmd (default: 8 weeks out, what the cron uses). */
+export async function schedulePlanVisits(
+  planId?: string,
+  untilYmd?: string
+): Promise<{ ok: true; result: GenerateResult } | { ok: false; error: string }> {
+  if (untilYmd) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(untilYmd)) return { ok: false, error: "Pick a valid date." };
+    const today = todayYmd();
+    if (untilYmd <= today) return { ok: false, error: "Pick a date in the future." };
+    if (diffDays(today, untilYmd) > 550) {
+      return { ok: false, error: "That's more than 18 months out — schedule in smaller stretches." };
+    }
+  }
   const db = await createClient();
   try {
-    const result = await generateOccurrences(db, planId);
+    const result = await generateOccurrences(db, planId, untilYmd);
     refresh();
     return { ok: true, result };
   } catch (e) {

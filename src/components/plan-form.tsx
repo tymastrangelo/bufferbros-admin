@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Wheel } from "@/components/brand";
 import { createPlan, updatePlan, type PlanFields } from "@/lib/actions/plans";
 import { planPrice, type Catalog } from "@/lib/catalog";
 import { createClient } from "@/lib/supabase/client";
@@ -23,12 +24,15 @@ export function PlanFormSheet({
   catalog,
   plan,
   defaultCustomer,
+  upcomingCount = 0,
 }: {
   open: boolean;
   onClose: () => void;
   catalog: Catalog;
   plan?: (Plan & { vehicles?: Vehicle[] }) | null;
   defaultCustomer?: PickedCustomer | null;
+  /** scheduled future visits on this plan — drives the "apply to visits?" ask */
+  upcomingCount?: number;
 }) {
   const router = useRouter();
   const supabase = createClient();
@@ -49,6 +53,7 @@ export function PlanFormSheet({
   const [emailConf, setEmailConf] = useState(plan?.email_confirmations ?? false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [confirmApply, setConfirmApply] = useState<PlanFields | null>(null);
 
   // For editing, load the plan's customer + vehicles once.
   useEffect(() => {
@@ -87,13 +92,18 @@ export function PlanFormSheet({
     }
   }
 
-  async function submit() {
+  function buildFields(): PlanFields | null {
     setError(null);
-    if (!customer && !plan) return setError("Pick a customer.");
+    if (!customer && !plan) {
+      setError("Pick a customer.");
+      return null;
+    }
     const preferredMin = labelToMin(time);
-    if (time && preferredMin == null) return setError("Time should look like 9:00 AM.");
-    setPending(true);
-    const fields: PlanFields = {
+    if (time && preferredMin == null) {
+      setError("Time should look like 9:00 AM.");
+      return null;
+    }
+    return {
       customerId: plan?.customer_id ?? customer!.id,
       vehicleId: vehicleId || null,
       cadence,
@@ -109,12 +119,44 @@ export function PlanFormSheet({
       notes,
       emailConfirmations: emailConf,
     };
-    const res = plan ? await updatePlan(plan.id, fields) : await createPlan(fields);
+  }
+
+  /** did price / duration / time / address change vs the saved plan? */
+  function visitFieldsChanged(f: PlanFields): boolean {
+    if (!plan) return false;
+    return (
+      f.perVisitPrice !== Number(plan.per_visit_price) ||
+      f.durationMin !== plan.duration_min ||
+      (f.preferredMin ?? null) !== (plan.preferred_min ?? null) ||
+      ((f.address ?? "").trim() || null) !== (plan.address ?? null)
+    );
+  }
+
+  function submit() {
+    const fields = buildFields();
+    if (!fields) return;
+    if (plan && upcomingCount > 0 && visitFieldsChanged(fields)) {
+      setConfirmApply(fields); // ask before touching the calendar
+      return;
+    }
+    void doSave(fields, false);
+  }
+
+  async function doSave(fields: PlanFields, applyToScheduled: boolean) {
+    setPending(true);
+    const res = plan ? await updatePlan(plan.id, fields, applyToScheduled) : await createPlan(fields);
     setPending(false);
-    if (!res.ok) return setError(res.error);
-    onClose();
-    if (!plan && res.id) router.push(`/plans/${res.id}`);
-    else router.refresh();
+    if (!res.ok) {
+      setConfirmApply(null);
+      return setError(res.error);
+    }
+    if (!plan && res.id) {
+      // navigate straight to the new plan — don't run onClose's URL rewrite first
+      router.push(`/plans/${res.id}`);
+    } else {
+      onClose();
+      router.refresh();
+    }
   }
 
   return (
@@ -225,9 +267,44 @@ export function PlanFormSheet({
         </label>
 
         <ErrorNote>{error}</ErrorNote>
-        <button className="btn btn-primary h-11" onClick={submit} disabled={pending}>
-          {pending ? "Saving…" : plan ? "Save plan" : "Create plan"}
-        </button>
+        {confirmApply ? (
+          <div className="card p-4 flex flex-col gap-3 bg-surface">
+            <p className="text-sm">
+              This plan already has{" "}
+              <span className="font-semibold">
+                {upcomingCount} scheduled visit{upcomingCount === 1 ? "" : "s"}
+              </span>{" "}
+              on the calendar. Apply the new price, duration, time and address to them too?
+            </p>
+            <button className="btn btn-primary h-11" disabled={pending} onClick={() => doSave(confirmApply, true)}>
+              {pending ? (
+                <>
+                  <Wheel size={18} /> Saving…
+                </>
+              ) : (
+                `Save + update ${upcomingCount} visit${upcomingCount === 1 ? "" : "s"}`
+              )}
+            </button>
+            <button className="btn" disabled={pending} onClick={() => doSave(confirmApply, false)}>
+              Save — future visits only
+            </button>
+            <button className="btn btn-ghost btn-sm" disabled={pending} onClick={() => setConfirmApply(null)}>
+              Back
+            </button>
+          </div>
+        ) : (
+          <button className="btn btn-primary h-11" onClick={submit} disabled={pending}>
+            {pending ? (
+              <>
+                <Wheel size={18} /> Saving…
+              </>
+            ) : plan ? (
+              "Save plan"
+            ) : (
+              "Create plan"
+            )}
+          </button>
+        )}
       </div>
     </Sheet>
   );

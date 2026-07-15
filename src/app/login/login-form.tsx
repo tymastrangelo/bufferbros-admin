@@ -2,13 +2,18 @@
 
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
+import { Wheel } from "@/components/brand";
 import { createClient } from "@/lib/supabase/client";
 import { ErrorNote, Field } from "@/components/ui";
 
 export function LoginForm() {
   const supabase = createClient();
   const params = useSearchParams();
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    params.get("error") === "reset"
+      ? "That reset link didn't work — it may have expired, or was opened on a different device than the one that requested it. Request a fresh one below."
+      : null
+  );
   const [pending, setPending] = useState(false);
   const [resetSent, setResetSent] = useState(false);
 
@@ -39,7 +44,7 @@ export function LoginForm() {
       return;
     }
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/login`,
+      redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
     });
     if (error) setError(error.message);
     else setResetSent(true);
@@ -65,7 +70,13 @@ export function LoginForm() {
       <ErrorNote>{error}</ErrorNote>
       {resetSent && <p className="text-sm text-ok">Password reset email sent — check your inbox.</p>}
       <button type="submit" className="btn btn-primary h-10" disabled={pending}>
-        {pending ? "Signing in…" : "Sign in"}
+        {pending ? (
+          <>
+            <Wheel size={16} /> Signing in…
+          </>
+        ) : (
+          "Sign in"
+        )}
       </button>
       <div className="flex items-center justify-between text-xs text-faint">
         <span>You&apos;ll stay signed in on this device.</span>

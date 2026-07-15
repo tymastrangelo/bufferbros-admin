@@ -5,13 +5,16 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { PlanFormSheet } from "@/components/plan-form";
-import { Balance, ErrorNote, StatusChip } from "@/components/ui";
-import { schedulePlanVisits, setPlanStatus } from "@/lib/actions/plans";
+import { ScheduleSheet } from "@/components/schedule-sheet";
+import { Balance, ErrorNote, Sheet, StatusChip } from "@/components/ui";
+import { setPlanStatus } from "@/lib/actions/plans";
 import type { Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { fmtDateShort, minToLabel, WEEKDAYS } from "@/lib/time";
 import type { Customer, LedgerEntry, Plan } from "@/lib/types";
 import type { OccurrenceConflict } from "@/lib/occurrences";
+
+const LIST_CAP = 6; // rows shown inline before "Show all" takes over
 
 export function PlanDetail({
   plan,
@@ -19,18 +22,18 @@ export function PlanDetail({
   ledger,
   catalog,
   today,
-  prepayDiscountPct,
 }: {
   plan: Plan & { customers: Customer };
   appointments: JobWithCustomer[];
   ledger: LedgerEntry[];
   catalog: Catalog;
   today: string;
-  prepayDiscountPct: number;
 }) {
   const router = useRouter();
   const [job, setJob] = useState<JobWithCustomer | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [showAll, setShowAll] = useState<{ title: string; jobs: JobWithCustomer[] } | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conflicts, setConflicts] = useState<OccurrenceConflict[]>([]);
@@ -38,6 +41,7 @@ export function PlanDetail({
 
   const completed = appointments.filter((a) => a.status === "completed");
   const upcoming = appointments.filter((a) => a.status === "scheduled" && a.date >= today).reverse();
+  const history = appointments.filter((a) => !(a.status === "scheduled" && a.date >= today));
   const revenue = ledger
     .filter((e) => e.plan_id === plan.id && e.kind === "charge")
     .reduce((s, e) => s + Math.abs(e.amount), 0);
@@ -51,18 +55,6 @@ export function PlanDetail({
     setPending(false);
     if (!res.ok) setError(res.error ?? "Something went wrong.");
     else router.refresh();
-  }
-
-  async function generate() {
-    setError(null);
-    setGenMsg(null);
-    setPending(true);
-    const res = await schedulePlanVisits(plan.id);
-    setPending(false);
-    if (!res.ok) return setError(res.error);
-    setConflicts(res.result.conflicts);
-    setGenMsg(`Scheduled ${res.result.created} visit${res.result.created === 1 ? "" : "s"}.`);
-    router.refresh();
   }
 
   return (
@@ -95,8 +87,8 @@ export function PlanDetail({
             Edit
           </button>
           {plan.status === "active" && (
-            <button className="btn btn-primary btn-sm" disabled={pending} onClick={generate}>
-              Schedule visits
+            <button className="btn btn-primary btn-sm" onClick={() => setScheduleOpen(true)}>
+              Schedule visits…
             </button>
           )}
         </div>
@@ -112,20 +104,13 @@ export function PlanDetail({
           value={balance > 0 ? `${visitsLeft} more visit${visitsLeft === 1 ? "" : "s"}` : "—"}
         />
       </div>
-      {prepayDiscountPct > 0 && plan.status === "active" && (
-        <p className="mt-2 text-[13px] text-ink-2">
-          Prepay pricing: {prepayDiscountPct}% off per visit when paid up front —{" "}
-          <span className="num font-medium">{money(plan.per_visit_price * (1 - prepayDiscountPct / 100))}</span>/visit
-          (edit in Settings).
-        </p>
-      )}
 
       <ErrorNote>{error}</ErrorNote>
       {genMsg && <p className="mt-3 text-sm text-ok">{genMsg}</p>}
       {conflicts.length > 0 && (
         <div className="mt-3 rounded-md border border-[#fde68a] bg-warn-wash px-4 py-3">
           <p className="text-sm font-medium text-warn">Needs manual placement:</p>
-          <ul className="mt-1 text-sm text-warn">
+          <ul className="mt-1 text-sm text-warn max-h-40 overflow-y-auto">
             {conflicts.map((c) => (
               <li key={c.date} className="num">
                 {fmtDateShort(c.date)} — {c.reason}
@@ -171,45 +156,93 @@ export function PlanDetail({
       )}
 
       {/* Visits */}
-      <section className="mt-6">
-        <h2 className="label mb-1.5">Upcoming — {upcoming.length}</h2>
-        <div className="card divide-y divide-line">
-          {upcoming.length === 0 && (
-            <p className="px-4 py-3 text-sm text-faint">
-              {plan.status === "active" ? "Nothing scheduled — hit “Schedule visits.”" : "Plan is not active."}
-            </p>
-          )}
-          {upcoming.map((j) => (
-            <VisitRow key={j.id} j={j} onOpen={() => setJob(j)} />
-          ))}
-        </div>
-      </section>
-      <section className="mt-5">
-        <h2 className="label mb-1.5">History — {completed.length} completed</h2>
-        <div className="card divide-y divide-line">
-          {appointments.filter((a) => !(a.status === "scheduled" && a.date >= today)).length === 0 && (
-            <p className="px-4 py-3 text-sm text-faint">No visits yet.</p>
-          )}
-          {appointments
-            .filter((a) => !(a.status === "scheduled" && a.date >= today))
-            .map((j) => (
-              <VisitRow key={j.id} j={j} onOpen={() => setJob(j)} />
-            ))}
-        </div>
-      </section>
+      <VisitSection
+        title={`Upcoming — ${upcoming.length}`}
+        jobs={upcoming}
+        empty={plan.status === "active" ? "Nothing scheduled — hit “Schedule visits.”" : "Plan is not active."}
+        onOpen={setJob}
+        onShowAll={() => setShowAll({ title: `All upcoming — ${upcoming.length}`, jobs: upcoming })}
+      />
+      <VisitSection
+        title={`History — ${completed.length} completed`}
+        jobs={history}
+        empty="No visits yet."
+        onOpen={setJob}
+        onShowAll={() => setShowAll({ title: `Full history — ${history.length}`, jobs: history })}
+      />
 
       {job && <JobSheet job={job} onClose={() => setJob(null)} catalog={catalog} />}
-      {editOpen && <PlanFormSheet open onClose={() => setEditOpen(false)} catalog={catalog} plan={plan} />}
+      {editOpen && (
+        <PlanFormSheet
+          open
+          onClose={() => setEditOpen(false)}
+          catalog={catalog}
+          plan={plan}
+          upcomingCount={upcoming.length}
+        />
+      )}
+      <ScheduleSheet
+        open={scheduleOpen}
+        onClose={() => setScheduleOpen(false)}
+        today={today}
+        planId={plan.id}
+        scopeLabel={`${plan.customers.name}'s plan`}
+        onDone={(result) => {
+          setConflicts(result.conflicts);
+          setGenMsg(`Scheduled ${result.created} visit${result.created === 1 ? "" : "s"}.`);
+          router.refresh();
+        }}
+      />
+      {showAll && (
+        <Sheet open onClose={() => setShowAll(null)} title={showAll.title}>
+          <div className="divide-y divide-line -mx-1">
+            {showAll.jobs.map((j) => (
+              <VisitRow
+                key={j.id}
+                j={j}
+                onOpen={() => {
+                  setShowAll(null);
+                  setJob(j);
+                }}
+              />
+            ))}
+          </div>
+        </Sheet>
+      )}
     </div>
   );
 }
 
-function Econ({ label, value }: { label: string; value: React.ReactNode }) {
+function VisitSection({
+  title,
+  jobs,
+  empty,
+  onOpen,
+  onShowAll,
+}: {
+  title: string;
+  jobs: JobWithCustomer[];
+  empty: string;
+  onOpen: (j: JobWithCustomer) => void;
+  onShowAll: () => void;
+}) {
+  const shown = jobs.slice(0, LIST_CAP);
+  const hidden = jobs.length - shown.length;
   return (
-    <div className="bg-card px-3.5 py-3">
-      <p className="label">{label}</p>
-      <p className="mt-1 text-lg font-semibold num leading-none">{value}</p>
-    </div>
+    <section className="mt-6">
+      <h2 className="label mb-1.5">{title}</h2>
+      <div className="card divide-y divide-line">
+        {jobs.length === 0 && <p className="px-4 py-3 text-sm text-faint">{empty}</p>}
+        {shown.map((j) => (
+          <VisitRow key={j.id} j={j} onOpen={() => onOpen(j)} />
+        ))}
+        {hidden > 0 && (
+          <button className="w-full px-4 py-2.5 text-sm font-medium text-brand-deep hover:bg-[#f8fafd]" onClick={onShowAll}>
+            Show all {jobs.length}
+          </button>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -222,5 +255,14 @@ function VisitRow({ j, onOpen }: { j: JobWithCustomer; onOpen: () => void }) {
       <span className="text-sm num shrink-0">{money(Number(j.price))}</span>
       <StatusChip status={j.status} />
     </button>
+  );
+}
+
+function Econ({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="bg-card px-3.5 py-3">
+      <p className="label">{label}</p>
+      <p className="mt-1 text-lg font-semibold num leading-none">{value}</p>
+    </div>
   );
 }

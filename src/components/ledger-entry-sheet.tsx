@@ -3,6 +3,7 @@
 // Record/edit any money event: payment, credit, discount, charge, refund.
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Wheel } from "@/components/brand";
 import { addLedgerEntry, deleteLedgerEntry, updateLedgerEntry } from "@/lib/actions/money";
 import { todayYmd } from "@/lib/time";
 import { PAYMENT_METHODS, type EntryKind, type LedgerEntry, type PaymentMethod } from "@/lib/types";
@@ -148,7 +149,15 @@ export function LedgerEntrySheet({
 
         <ErrorNote>{error}</ErrorNote>
         <button className="btn btn-primary h-11" onClick={submit} disabled={pending || !amount}>
-          {pending ? "Saving…" : entry ? "Save changes" : `Record ${kind}`}
+          {pending ? (
+            <>
+              <Wheel size={18} /> Saving…
+            </>
+          ) : entry ? (
+            "Save changes"
+          ) : (
+            `Record ${kind}`
+          )}
         </button>
         {entry && (
           <button

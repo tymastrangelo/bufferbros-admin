@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { cancelledEmail, confirmedEmail, sendEmail, updatedEmail, type JobEmailInfo } from "@/lib/email";
 import { normalizeEmail, normalizePhone } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
@@ -67,7 +68,8 @@ export async function createAppointment(input: NewAppointment): Promise<ActionRe
     const contact = await resolveContact(appt);
     if (contact.email) {
       const { subject, html } = confirmedEmail(emailInfo(appt, contact.name));
-      await sendEmail(contact.email, subject, html);
+      const to = contact.email;
+      after(() => sendEmail(to, subject, html)); // don't make the owner wait on Resend
     }
   }
   refresh();
@@ -125,7 +127,8 @@ export async function rescheduleAppointment(
         ...emailInfo({ ...before, ...{ date: next.date, start_min: next.startMin } }, contact.name),
         oldWhen: whenLabel(before.date, before.start_min),
       });
-      await sendEmail(contact.email, subject, html);
+      const to = contact.email;
+      after(() => sendEmail(to, subject, html));
     }
   }
   refresh();
@@ -143,7 +146,8 @@ export async function cancelAppointment(id: string, notify: boolean): Promise<Ac
     const contact = await resolveContact(appt);
     if (contact.email) {
       const { subject, html } = cancelledEmail({ name: contact.name, when: whenLabel(appt.date, appt.start_min) });
-      await sendEmail(contact.email, subject, html);
+      const to = contact.email;
+      after(() => sendEmail(to, subject, html));
     }
   }
   refresh();

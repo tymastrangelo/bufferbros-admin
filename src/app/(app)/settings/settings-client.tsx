@@ -334,28 +334,17 @@ function HoursSection({ hours, settings }: { hours: WeeklyHours[]; settings: Rec
 function SplitSection({ settings }: { settings: Record<string, string> }) {
   const { state, run } = useSave();
   const [washer, setWasher] = useState(settings.split_washer_pct ?? "60");
-  const [prepay, setPrepay] = useState(settings.prepay_discount_pct ?? "10");
   return (
-    <Section
-      title="Payout split & prepay discount"
-      note="Mock values for the new pricing model — the split is heading for a change, adjust anytime."
-    >
-      <div className="grid grid-cols-2 gap-3 max-w-sm">
-        <label className="block">
-          <span className="label block mb-1">Washer share (Gabe) %</span>
-          <input type="number" min={0} max={100} className="input num" value={washer} onChange={(e) => setWasher(e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="label block mb-1">Prepay discount %</span>
-          <input type="number" min={0} max={100} className="input num" value={prepay} onChange={(e) => setPrepay(e.target.value)} />
-        </label>
-      </div>
+    <Section title="Payout split" note="The split is heading for a change — adjust anytime.">
+      <label className="block max-w-[180px]">
+        <span className="label block mb-1">Washer share (Gabe) %</span>
+        <input type="number" min={0} max={100} className="input num" value={washer} onChange={(e) => setWasher(e.target.value)} />
+      </label>
       <p className="text-[13px] text-ink-2 mt-2">
-        Business share (Tyler) is the remaining {100 - Number(washer || 0)}%. The split shows on the Money overview;
-        the prepay price shows on each plan page.
+        Business share (Tyler) is the remaining {100 - Number(washer || 0)}%. The split shows on the Money overview.
       </p>
       <div className="mt-3">
-        <SaveButton state={state} onClick={() => run(() => saveSettings({ split_washer_pct: washer, prepay_discount_pct: prepay }))} />
+        <SaveButton state={state} onClick={() => run(() => saveSettings({ split_washer_pct: washer }))} />
       </div>
     </Section>
   );

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getCatalog, getSettingsMap } from "@/lib/queries";
+import { getCatalog } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { todayYmd } from "@/lib/time";
 import type { Customer, LedgerEntry, Plan } from "@/lib/types";
@@ -18,7 +18,7 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
   if (!planData) notFound();
   const plan = planData as Plan & { customers: Customer };
 
-  const [apptsQ, ledgerQ, catalog, settings] = await Promise.all([
+  const [apptsQ, ledgerQ, catalog] = await Promise.all([
     db
       .from("appointments")
       .select("*, customers(id,name,phone,email)")
@@ -27,7 +27,6 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
       .order("start_min"),
     db.from("ledger_entries").select("*").eq("customer_id", plan.customer_id),
     getCatalog(),
-    getSettingsMap(),
   ]);
 
   return (
@@ -37,7 +36,6 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
       ledger={((ledgerQ.data ?? []) as LedgerEntry[]).map((e) => ({ ...e, amount: Number(e.amount) }))}
       catalog={catalog}
       today={todayYmd()}
-      prepayDiscountPct={Number(settings.prepay_discount_pct ?? 0)}
     />
   );
 }

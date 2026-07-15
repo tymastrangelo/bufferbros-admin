@@ -221,7 +221,7 @@ function NewCustomerSheet({ open, onClose }: { open: boolean; onClose: () => voi
             });
             setPending(false);
             if (!res.ok) return setError(res.error);
-            onClose();
+            // navigate straight to the new profile — don't run onClose's URL rewrite first
             router.push(`/customers/${res.id}`);
           }}
         >

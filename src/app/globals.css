@@ -17,6 +17,13 @@
   --color-bad-wash: #fef2f2;
   --color-warn: #b45309;
   --color-warn-wash: #fffbeb;
+  /* dark "pit lane" surfaces — where the white logo lives */
+  --color-pit: #0a0e14;
+  --color-pit-2: #111826;
+  --color-pit-line: #1d2634;
+  --color-pit-text: #98a4b5;
+  --color-pit-bright: #e8edf4;
+  --color-brand-glow: #7fb0ff;
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -213,4 +220,45 @@
 
   /* Safe areas for the mobile tab bar */
   .tabbar { padding-bottom: env(safe-area-inset-bottom); }
+
+  /* The rim spins; the tire doesn't. */
+  .wheel-spin {
+    animation: wheel-turn 0.9s linear infinite;
+  }
+  @keyframes wheel-turn {
+    to { transform: rotate(360deg); }
+  }
+
+  /* Splash — ink screen with the logo, removed by its own inline script */
+  .splash {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: var(--color-pit);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 400ms ease;
+    /* safety net: even if JS stalls, the splash can never trap the screen */
+    animation: splash-bail 0.4s ease 5s forwards;
+  }
+  .splash-out { opacity: 0; pointer-events: none; }
+  @keyframes splash-bail {
+    to { opacity: 0; visibility: hidden; pointer-events: none; }
+  }
+
+  /* Page transitions: every route's root (and its skeleton) slides in on mount */
+  @media (prefers-reduced-motion: no-preference) {
+    main > *, .page-in {
+      animation: page-in 180ms ease;
+    }
+  }
+  @keyframes page-in {
+    from { opacity: 0; transform: translateY(4px); }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wheel-spin { animation: none; }
 }

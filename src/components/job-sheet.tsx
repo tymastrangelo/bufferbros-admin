@@ -13,6 +13,7 @@ import {
   setAppointmentStatus,
   updateAppointment,
 } from "@/lib/actions/appointments";
+import { Wheel } from "@/components/brand";
 import { computeQuote, type Catalog } from "@/lib/catalog";
 import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
@@ -320,7 +321,15 @@ function CompletePanel({
             )
           }
         >
-          {pending ? "Saving…" : collect ? `Complete + ${money(Number(amount || 0))}` : "Complete"}
+          {pending ? (
+            <>
+              <Wheel size={16} /> Saving…
+            </>
+          ) : collect ? (
+            `Complete + ${money(Number(amount || 0))}`
+          ) : (
+            "Complete"
+          )}
         </button>
       </div>
     </div>

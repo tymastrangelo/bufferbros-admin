@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LogoFull } from "@/components/brand";
 import { createClient } from "@/lib/supabase/client";
 import { fmtPhone } from "@/lib/format";
 import type { Customer } from "@/lib/types";
@@ -77,12 +78,13 @@ export function Shell({ children, userEmail }: { children: React.ReactNode; user
   }
 
   return (
-    <div className="min-h-dvh md:pl-[196px]">
-      {/* Desktop sidebar */}
-      <aside className="hidden md:flex fixed inset-y-0 left-0 w-[196px] flex-col border-r border-line bg-card z-30">
-        <Link href="/" className="px-4 pt-5 pb-4 block">
-          <span className="block text-[15px] font-bold tracking-[-0.01em] leading-none">BUFFER BROS</span>
-          <span className="label block mt-1">Operations</span>
+    <div className="min-h-dvh md:pl-[208px]">
+      {/* Desktop sidebar — light, with the logo on its ink plate (the artwork is white) */}
+      <aside className="hidden md:flex fixed inset-y-0 left-0 w-[208px] flex-col border-r border-line bg-card z-30">
+        <Link href="/" className="block px-3 pt-3 pb-3">
+          <span className="block bg-pit rounded-lg px-3 py-3.5">
+            <LogoFull className="w-full" />
+          </span>
         </Link>
         <div className="px-3 pb-2 flex gap-1.5">
           <button className="btn btn-primary btn-sm grow" onClick={() => setNewOpen(true)}>
@@ -93,24 +95,29 @@ export function Shell({ children, userEmail }: { children: React.ReactNode; user
           </button>
         </div>
         <nav className="px-3 py-2 flex flex-col gap-0.5">
-          {NAV.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors duration-150 ${
-                isActive(pathname, href) ? "bg-brand-wash text-brand-deep" : "text-ink-2 hover:bg-[#f1f4f9] hover:text-ink"
-              }`}
-            >
-              <Icon width={16} height={16} />
-              {label}
-            </Link>
-          ))}
+          {NAV.map(({ href, label, icon: Icon }) => {
+            const active = isActive(pathname, href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={`relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors duration-150 ${
+                  active ? "bg-brand-wash text-brand-deep" : "text-ink-2 hover:bg-[#f1f4f9] hover:text-ink"
+                }`}
+              >
+                {active && <span className="absolute left-0 top-1/2 -translate-y-1/2 h-4 w-[3px] rounded-full bg-brand" />}
+                <Icon width={16} height={16} />
+                {label}
+              </Link>
+            );
+          })}
         </nav>
         <div className="mt-auto px-4 py-4 border-t border-line">
-          <p className="text-xs text-faint truncate" title={userEmail}>
+          <p className="label mb-1">Signed in</p>
+          <p className="text-xs text-ink-2 truncate" title={userEmail}>
             {userEmail}
           </p>
-          <SignOutButton className="mt-1 text-xs text-ink-2 hover:text-ink underline underline-offset-2" />
+          <SignOutButton className="mt-1.5 text-xs text-ink-2 hover:text-ink underline underline-offset-2" />
         </div>
       </aside>
 
@@ -119,21 +126,24 @@ export function Shell({ children, userEmail }: { children: React.ReactNode; user
 
       {/* Mobile bottom tab bar */}
       <nav className="tabbar md:hidden fixed bottom-0 inset-x-0 z-30 bg-card border-t border-line grid grid-cols-5">
-        {NAV.slice(0, 4).map(({ href, label, icon: Icon }) => (
-          <Link
-            key={href}
-            href={href}
-            className={`flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-[10px] font-semibold ${
-              isActive(pathname, href) && !moreOpen ? "text-brand" : "text-faint"
-            }`}
-          >
-            <Icon width={20} height={20} />
-            {label}
-          </Link>
-        ))}
+        {NAV.slice(0, 4).map(({ href, label, icon: Icon }) => {
+          const active = isActive(pathname, href) && !moreOpen;
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={`flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-[10px] font-semibold transition-colors duration-150 ${
+                active ? "text-brand" : "text-faint"
+              }`}
+            >
+              <Icon width={20} height={20} />
+              {label}
+            </Link>
+          );
+        })}
         <button
           onClick={() => setMoreOpen(true)}
-          className={`flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-[10px] font-semibold ${
+          className={`flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-[10px] font-semibold transition-colors duration-150 ${
             moreOpen || isActive(pathname, "/plans") || isActive(pathname, "/settings") ? "text-brand" : "text-faint"
           }`}
         >

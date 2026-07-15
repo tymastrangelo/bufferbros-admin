@@ -3,6 +3,7 @@
 // New-appointment sheet: phone bookings, walk-ups, and calendar taps all land here.
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { Wheel } from "@/components/brand";
 import { createAppointment } from "@/lib/actions/appointments";
 import { computeQuote, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
@@ -222,7 +223,13 @@ export function AppointmentSheet({
 
         <ErrorNote>{error}</ErrorNote>
         <button className="btn btn-primary h-11" onClick={submit} disabled={pending}>
-          {pending ? "Booking…" : `Book — ${money(price)}`}
+          {pending ? (
+            <>
+              <Wheel size={18} /> Booking…
+            </>
+          ) : (
+            `Book — ${money(price)}`
+          )}
         </button>
       </div>
     </Sheet>
