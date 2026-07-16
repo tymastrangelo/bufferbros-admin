@@ -68,6 +68,8 @@ export function Shell({
   const owner = role === "owner";
   const nav = owner ? NAV : NAV_WASHER;
   const actions = owner ? NEW_ACTIONS : NEW_ACTIONS_WASHER;
+  // Mobile tab bar: Money earns a tab over Plans (Plans lives in the More sheet).
+  const tabs = owner ? NAV.filter((n) => ["Today", "Calendar", "Customers", "Money"].includes(n.label)) : nav;
 
   // Global shortcuts: ⌘K search, N new appointment
   useEffect(() => {
@@ -150,7 +152,7 @@ export function Shell({
           owner ? "grid-cols-5" : "grid-cols-4"
         }`}
       >
-        {nav.slice(0, 4).map(({ href, label, icon: Icon }) => {
+        {tabs.map(({ href, label, icon: Icon }) => {
           const active = isActive(pathname, href) && !moreOpen;
           return (
             <Link
