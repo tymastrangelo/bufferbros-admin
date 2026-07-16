@@ -81,10 +81,12 @@ export default async function MoneyOverview() {
         <Stat label="Outstanding owed" value={money(owed)} tone={owed > 0 ? "bad" : undefined} link="/money/balances" />
         <Stat label="Prepaid credit held" value={money(credit)} link="/money/balances" />
         <Stat label="Company capital" value={money(capital)} link="/money/capital" />
+        {/* spans the row's leftover cells so the grid never shows empty gray */}
         <Stat
           label={`Split — Gabe ${washerPct}% / CEO ${ceoPct}% / Co ${coPct}%`}
           value={`${money((collectedThis * washerPct) / 100)} / ${money((collectedThis * ceoPct) / 100)} / ${money((collectedThis * coPct) / 100)}`}
           sub="of collected this month · edit in Settings"
+          className="col-span-2 md:col-span-3"
         />
       </div>
 
@@ -122,12 +124,14 @@ function Stat({
   sub,
   tone,
   link,
+  className = "",
 }: {
   label: string;
   value: string;
   sub?: string;
   tone?: "bad";
   link?: string;
+  className?: string;
 }) {
   const inner = (
     <>
@@ -137,10 +141,10 @@ function Stat({
     </>
   );
   return link ? (
-    <Link href={link} className="bg-card px-3.5 py-3 hover:bg-[#f8fafd] transition-colors duration-150">
+    <Link href={link} className={`bg-card px-3.5 py-3 hover:bg-[#f8fafd] transition-colors duration-150 ${className}`}>
       {inner}
     </Link>
   ) : (
-    <div className="bg-card px-3.5 py-3">{inner}</div>
+    <div className={`bg-card px-3.5 py-3 ${className}`}>{inner}</div>
   );
 }
