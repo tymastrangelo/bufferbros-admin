@@ -176,7 +176,15 @@ export function Shell({
         </button>
       </nav>
 
-      {/* Mobile floating New button (thumb zone, above tab bar) */}
+      {/* Mobile floating Search + New buttons (thumb zone, above tab bar) */}
+      <button
+        onClick={() => setSearchOpen(true)}
+        aria-label="Search"
+        className="md:hidden fixed z-30 rounded-full bg-card border border-line text-ink-2 shadow-lg flex items-center justify-center active:scale-95 transition-transform duration-150"
+        style={{ bottom: "calc(env(safe-area-inset-bottom) + 136px)", right: 20, width: 44, height: 44 }}
+      >
+        <IconSearch width={18} height={18} />
+      </button>
       <button
         onClick={() => setNewOpen(true)}
         aria-label="New"
