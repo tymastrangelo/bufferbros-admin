@@ -83,6 +83,7 @@ export interface ExpenseFields {
   category: string;
   amount: number;
   memo?: string | null;
+  recurringId?: string | null;
 }
 
 export async function saveExpense(fields: ExpenseFields, id?: string | null): Promise<ActionResult> {
@@ -93,6 +94,8 @@ export async function saveExpense(fields: ExpenseFields, id?: string | null): Pr
     category: fields.category,
     amount: Math.abs(fields.amount),
     memo: fields.memo?.trim() || null,
+    // undefined = leave the recurring link alone on edits
+    ...(fields.recurringId !== undefined && { recurring_id: fields.recurringId }),
   };
   const { error } = id ? await db.from("expenses").update(row).eq("id", id) : await db.from("expenses").insert(row);
   if (error) return { ok: false, error: error.message };
@@ -103,6 +106,93 @@ export async function saveExpense(fields: ExpenseFields, id?: string | null): Pr
 export async function deleteExpense(id: string): Promise<ActionResult> {
   const db = await createClient();
   const { error } = await db.from("expenses").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  refresh();
+  return { ok: true };
+}
+
+export interface CapitalFields {
+  occurredOn: string;
+  amount: number; // entered positive
+  memo?: string | null;
+}
+
+export async function addCapital(fields: CapitalFields): Promise<ActionResult> {
+  if (!fields.amount || fields.amount <= 0) return { ok: false, error: "Enter an amount greater than zero." };
+  const db = await createClient();
+  const { error } = await db.from("company_ledger").insert({
+    occurred_on: fields.occurredOn,
+    kind: "capital",
+    amount: Math.abs(fields.amount),
+    memo: fields.memo?.trim() || null,
+  });
+  if (error) return { ok: false, error: error.message };
+  refresh();
+  return { ok: true };
+}
+
+// Capital and payout rows only — revenue/expense mirrors are edited via their source rows.
+export async function updateCompanyEntry(
+  id: string,
+  fields: { kind: "capital" | "payout"; occurredOn: string; amount: number; memo?: string | null }
+): Promise<ActionResult> {
+  if (!fields.amount || fields.amount <= 0) return { ok: false, error: "Enter an amount greater than zero." };
+  const db = await createClient();
+  const { error } = await db
+    .from("company_ledger")
+    .update({
+      occurred_on: fields.occurredOn,
+      amount: fields.kind === "capital" ? Math.abs(fields.amount) : -Math.abs(fields.amount),
+      memo: fields.memo?.trim() || null,
+    })
+    .eq("id", id)
+    .in("kind", ["capital", "payout"]);
+  if (error) return { ok: false, error: error.message };
+  refresh();
+  return { ok: true };
+}
+
+export async function deleteCompanyEntry(id: string): Promise<ActionResult> {
+  const db = await createClient();
+  const { error } = await db.from("company_ledger").delete().eq("id", id).in("kind", ["capital", "payout"]);
+  if (error) return { ok: false, error: error.message };
+  refresh();
+  return { ok: true };
+}
+
+export interface RecurringFields {
+  name: string;
+  category: string;
+  expectedAmount: number;
+  cadence: "monthly" | "yearly";
+  dueDay: number;
+  dueMonth?: number | null;
+  active?: boolean;
+}
+
+export async function saveRecurring(fields: RecurringFields, id?: string | null): Promise<ActionResult> {
+  if (!fields.name.trim()) return { ok: false, error: "Give it a name." };
+  const db = await createClient();
+  const row = {
+    name: fields.name.trim(),
+    category: fields.category,
+    expected_amount: Math.abs(fields.expectedAmount || 0),
+    cadence: fields.cadence,
+    due_day: fields.dueDay,
+    due_month: fields.cadence === "yearly" ? fields.dueMonth ?? 1 : null,
+    active: fields.active ?? true,
+  };
+  const { error } = id
+    ? await db.from("recurring_expenses").update(row).eq("id", id)
+    : await db.from("recurring_expenses").insert(row);
+  if (error) return { ok: false, error: error.message };
+  refresh();
+  return { ok: true };
+}
+
+export async function deleteRecurring(id: string): Promise<ActionResult> {
+  const db = await createClient();
+  const { error } = await db.from("recurring_expenses").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   refresh();
   return { ok: true };

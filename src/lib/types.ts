@@ -144,6 +144,34 @@ export interface Expense {
   category: string;
   amount: number;
   memo: string | null;
+  recurring_id: string | null;
+  created_at: string;
+}
+
+export type CompanyLedgerKind = "revenue" | "payout" | "capital" | "expense";
+export type PayoutParty = "gabe" | "ceo";
+
+export interface CompanyLedgerEntry {
+  id: string;
+  occurred_on: string;
+  kind: CompanyLedgerKind;
+  party: PayoutParty | null;
+  amount: number; // revenue/capital > 0, payout/expense < 0
+  memo: string | null;
+  ledger_entry_id: string | null;
+  expense_id: string | null;
+  created_at: string;
+}
+
+export interface RecurringExpense {
+  id: string;
+  name: string;
+  category: string;
+  expected_amount: number;
+  cadence: "monthly" | "yearly";
+  due_day: number;
+  due_month: number | null;
+  active: boolean;
   created_at: string;
 }
 
