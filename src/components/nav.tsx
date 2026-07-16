@@ -31,6 +31,13 @@ const NAV = [
   { href: "/settings", label: "Settings", icon: IconSettings },
 ];
 
+// Washers see jobs and their pay — none of the business machinery.
+const NAV_WASHER = [
+  { href: "/", label: "Today", icon: IconToday },
+  { href: "/calendar", label: "Calendar", icon: IconCalendar },
+  { href: "/my-pay", label: "My Pay", icon: IconDollar },
+];
+
 const NEW_ACTIONS = [
   { href: "/calendar?new=1", label: "New appointment", icon: IconCalendar },
   { href: "/customers?new=1", label: "New customer", icon: IconUsers },
@@ -38,21 +45,35 @@ const NEW_ACTIONS = [
   { href: "/calendar?block=1", label: "Block time", icon: IconBlock },
 ];
 
+const NEW_ACTIONS_WASHER = NEW_ACTIONS.filter((a) => a.label === "New appointment" || a.label === "Block time");
+
 function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
 }
 
-export function Shell({ children, userEmail }: { children: React.ReactNode; userEmail: string }) {
+export function Shell({
+  children,
+  userEmail,
+  role,
+}: {
+  children: React.ReactNode;
+  userEmail: string;
+  role: "owner" | "washer";
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [searchOpen, setSearchOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const owner = role === "owner";
+  const nav = owner ? NAV : NAV_WASHER;
+  const actions = owner ? NEW_ACTIONS : NEW_ACTIONS_WASHER;
 
-  // Global shortcuts: ⌘K search, N new appointment
+  // Global shortcuts: ⌘K search (owner), N new appointment
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        if (!owner) return;
         e.preventDefault();
         setSearchOpen((v) => !v);
         return;
@@ -66,7 +87,7 @@ export function Shell({ children, userEmail }: { children: React.ReactNode; user
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [router]);
+  }, [router, owner]);
 
   // Close transient menus on navigation (state adjustment during render)
   const [prevPath, setPrevPath] = useState(pathname);
@@ -90,12 +111,14 @@ export function Shell({ children, userEmail }: { children: React.ReactNode; user
           <button className="btn btn-primary btn-sm grow" onClick={() => setNewOpen(true)}>
             <IconPlus width={14} height={14} /> New
           </button>
-          <button className="btn btn-sm" onClick={() => setSearchOpen(true)} aria-label="Search (⌘K)" title="Search (⌘K)">
-            <IconSearch width={14} height={14} />
-          </button>
+          {owner && (
+            <button className="btn btn-sm" onClick={() => setSearchOpen(true)} aria-label="Search (⌘K)" title="Search (⌘K)">
+              <IconSearch width={14} height={14} />
+            </button>
+          )}
         </div>
         <nav className="px-3 py-2 flex flex-col gap-0.5">
-          {NAV.map(({ href, label, icon: Icon }) => {
+          {nav.map(({ href, label, icon: Icon }) => {
             const active = isActive(pathname, href);
             return (
               <Link
@@ -125,8 +148,12 @@ export function Shell({ children, userEmail }: { children: React.ReactNode; user
       <main className="pb-24 md:pb-8">{children}</main>
 
       {/* Mobile bottom tab bar */}
-      <nav className="tabbar md:hidden fixed bottom-0 inset-x-0 z-30 bg-card border-t border-line grid grid-cols-5">
-        {NAV.slice(0, 4).map(({ href, label, icon: Icon }) => {
+      <nav
+        className={`tabbar md:hidden fixed bottom-0 inset-x-0 z-30 bg-card border-t border-line grid ${
+          owner ? "grid-cols-5" : "grid-cols-4"
+        }`}
+      >
+        {nav.slice(0, 4).map(({ href, label, icon: Icon }) => {
           const active = isActive(pathname, href) && !moreOpen;
           return (
             <Link
@@ -165,20 +192,21 @@ export function Shell({ children, userEmail }: { children: React.ReactNode; user
       {/* More sheet (mobile) */}
       <Sheet open={moreOpen} onClose={() => setMoreOpen(false)} title="More">
         <div className="flex flex-col gap-1 -mx-1">
-          {[
-            { href: "/plans", label: "Plans", icon: IconRepeat },
-            { href: "/settings", label: "Settings", icon: IconSettings },
-            { href: "/customers/import", label: "Import contacts", icon: IconUpload },
-          ].map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className="flex items-center gap-3 rounded-md px-3 py-3 text-[15px] font-medium hover:bg-[#f1f4f9]"
-            >
-              <Icon width={18} height={18} className="text-ink-2" />
-              {label}
-            </Link>
-          ))}
+          {owner &&
+            [
+              { href: "/plans", label: "Plans", icon: IconRepeat },
+              { href: "/settings", label: "Settings", icon: IconSettings },
+              { href: "/customers/import", label: "Import contacts", icon: IconUpload },
+            ].map(({ href, label, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                className="flex items-center gap-3 rounded-md px-3 py-3 text-[15px] font-medium hover:bg-[#f1f4f9]"
+              >
+                <Icon width={18} height={18} className="text-ink-2" />
+                {label}
+              </Link>
+            ))}
           <div className="border-t border-line mt-2 pt-2 px-3 pb-1">
             <p className="text-xs text-faint mb-2">{userEmail}</p>
             <SignOutButton className="btn btn-sm w-full" />
@@ -189,7 +217,7 @@ export function Shell({ children, userEmail }: { children: React.ReactNode; user
       {/* New action sheet */}
       <Sheet open={newOpen} onClose={() => setNewOpen(false)} title="New">
         <div className="flex flex-col gap-1 -mx-1">
-          {NEW_ACTIONS.map(({ href, label, icon: Icon }) => (
+          {actions.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}
@@ -202,7 +230,7 @@ export function Shell({ children, userEmail }: { children: React.ReactNode; user
         </div>
       </Sheet>
 
-      <CommandK open={searchOpen} onClose={() => setSearchOpen(false)} />
+      {owner && <CommandK open={searchOpen} onClose={() => setSearchOpen(false)} />}
     </div>
   );
 }

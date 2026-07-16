@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { requireOwner } from "@/lib/auth";
 import { getCatalog } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { todayYmd } from "@/lib/time";
@@ -11,6 +12,7 @@ export const metadata: Metadata = { title: "Plan" };
 export const dynamic = "force-dynamic";
 
 export default async function PlanPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireOwner();
   const { id } = await params;
   const db = await createClient();
 

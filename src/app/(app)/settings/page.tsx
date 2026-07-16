@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireOwner } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getSettingsMap } from "@/lib/queries";
 import { todayYmd } from "@/lib/time";
@@ -9,6 +10,7 @@ export const metadata: Metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
+  await requireOwner();
   const db = await createClient();
   const [servicesQ, pricingQ, planPricingQ, hoursQ, blocksQ, settings, userQ] = await Promise.all([
     db.from("services").select("*").order("sort"),

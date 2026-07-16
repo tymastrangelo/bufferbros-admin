@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireOwner } from "@/lib/auth";
 import { getCatalog } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { todayYmd } from "@/lib/time";
@@ -14,6 +15,7 @@ export default async function PlansPage({
 }: {
   searchParams: Promise<{ new?: string; customer?: string }>;
 }) {
+  await requireOwner();
   const params = await searchParams;
   const db = await createClient();
   const today = todayYmd();

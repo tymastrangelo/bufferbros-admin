@@ -8,5 +8,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-  return <Shell userEmail={user.email ?? ""}>{children}</Shell>;
+  const role = user.app_metadata?.role === "owner" ? ("owner" as const) : ("washer" as const);
+  return (
+    <Shell userEmail={user.email ?? ""} role={role}>
+      {children}
+    </Shell>
+  );
 }
