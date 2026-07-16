@@ -338,17 +338,34 @@ function HoursSection({ hours, settings }: { hours: WeeklyHours[]; settings: Rec
 function SplitSection({ settings }: { settings: Record<string, string> }) {
   const { state, run } = useSave();
   const [washer, setWasher] = useState(settings.split_washer_pct ?? "60");
+  const [ceo, setCeo] = useState(settings.split_ceo_pct ?? "10");
+  const total = Number(washer || 0) + Number(ceo || 0);
   return (
-    <Section title="Payout split" note="The split is heading for a change — adjust anytime.">
-      <label className="block max-w-[180px]">
-        <span className="label block mb-1">Washer share (Gabe) %</span>
-        <input type="number" min={0} max={100} className="input num" value={washer} onChange={(e) => setWasher(e.target.value)} />
-      </label>
-      <p className="text-[13px] text-ink-2 mt-2">
-        Business share (Tyler) is the remaining {100 - Number(washer || 0)}%. The split shows on the Money overview.
+    <Section title="Payout split" note="Splits apply to money as it's collected — changing them only affects new payments.">
+      <div className="flex gap-3">
+        <label className="block max-w-[160px]">
+          <span className="label block mb-1">Washer (Gabe) %</span>
+          <input type="number" min={0} max={100} className="input num" value={washer} onChange={(e) => setWasher(e.target.value)} />
+        </label>
+        <label className="block max-w-[160px]">
+          <span className="label block mb-1">CEO (Tyler) %</span>
+          <input type="number" min={0} max={100} className="input num" value={ceo} onChange={(e) => setCeo(e.target.value)} />
+        </label>
+      </div>
+      <p className={`text-[13px] mt-2 ${total > 100 ? "text-bad" : "text-ink-2"}`}>
+        {total > 100 ? "Splits can't exceed 100%." : `Company capital keeps the remaining ${100 - total}%.`}
       </p>
       <div className="mt-3">
-        <SaveButton state={state} onClick={() => run(() => saveSettings({ split_washer_pct: washer }))} />
+        <SaveButton
+          state={state}
+          onClick={() =>
+            run(async () =>
+              total > 100
+                ? { ok: false as const, error: "Splits can't exceed 100%." }
+                : saveSettings({ split_washer_pct: washer, split_ceo_pct: ceo })
+            )
+          }
+        />
       </div>
     </Section>
   );
