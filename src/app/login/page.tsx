@@ -15,8 +15,7 @@ export default function LoginPage() {
           <LoginForm />
         </Suspense>
         <p className="mt-8 text-xs text-pit-text/70 text-center leading-relaxed">
-          Marco Island &amp; Naples, FL · Owners only —<br />
-          accounts are created by hand, there is no signup.
+          Marco Island &amp; Naples, FL · Owners only<br />
         </p>
       </main>
     </div>
