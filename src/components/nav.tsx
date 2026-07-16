@@ -69,11 +69,10 @@ export function Shell({
   const nav = owner ? NAV : NAV_WASHER;
   const actions = owner ? NEW_ACTIONS : NEW_ACTIONS_WASHER;
 
-  // Global shortcuts: ⌘K search (owner), N new appointment
+  // Global shortcuts: ⌘K search, N new appointment
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        if (!owner) return;
         e.preventDefault();
         setSearchOpen((v) => !v);
         return;
@@ -87,7 +86,7 @@ export function Shell({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [router, owner]);
+  }, [router]);
 
   // Close transient menus on navigation (state adjustment during render)
   const [prevPath, setPrevPath] = useState(pathname);
@@ -111,11 +110,9 @@ export function Shell({
           <button className="btn btn-primary btn-sm grow" onClick={() => setNewOpen(true)}>
             <IconPlus width={14} height={14} /> New
           </button>
-          {owner && (
-            <button className="btn btn-sm" onClick={() => setSearchOpen(true)} aria-label="Search (⌘K)" title="Search (⌘K)">
-              <IconSearch width={14} height={14} />
-            </button>
-          )}
+          <button className="btn btn-sm" onClick={() => setSearchOpen(true)} aria-label="Search (⌘K)" title="Search (⌘K)">
+            <IconSearch width={14} height={14} />
+          </button>
         </div>
         <nav className="px-3 py-2 flex flex-col gap-0.5">
           {nav.map(({ href, label, icon: Icon }) => {
@@ -230,7 +227,7 @@ export function Shell({
         </div>
       </Sheet>
 
-      {owner && <CommandK open={searchOpen} onClose={() => setSearchOpen(false)} />}
+      <CommandK open={searchOpen} onClose={() => setSearchOpen(false)} pages={nav} />
     </div>
   );
 }
@@ -250,7 +247,7 @@ function SignOutButton({ className }: { className?: string }) {
   );
 }
 
-function CommandK({ open, onClose }: { open: boolean; onClose: () => void }) {
+function CommandK({ open, onClose, pages: navPages }: { open: boolean; onClose: () => void; pages: typeof NAV }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<Customer[]>([]);
   const [sel, setSel] = useState(0);
@@ -289,7 +286,7 @@ function CommandK({ open, onClose }: { open: boolean; onClose: () => void }) {
   }, [q, supabase]);
 
   const shownResults = useMemo(() => (q.trim() ? results : []), [q, results]);
-  const pages = NAV.filter((n) => n.label.toLowerCase().includes(q.trim().toLowerCase()) && q.trim());
+  const pages = navPages.filter((n) => n.label.toLowerCase().includes(q.trim().toLowerCase()) && q.trim());
   const total = shownResults.length + pages.length;
 
   const go = useCallback(

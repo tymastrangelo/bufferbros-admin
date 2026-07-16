@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { getRole } from "@/lib/auth";
 import { getCatalog } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { addDays, fmtDateLong, todayYmd, weekdayOf } from "@/lib/time";
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function TodayPage() {
   const db = await createClient();
+  const owner = (await getRole()) === "owner";
   const today = todayYmd();
   const weekStart = addDays(today, -weekdayOf(today)); // Sunday
   const monthStart = `${today.slice(0, 7)}-01`;
@@ -65,14 +67,19 @@ export default async function TodayPage() {
       dateLabel={fmtDateLong(today)}
       jobs={(jobsQ.data ?? []) as JobWithCustomer[]}
       catalog={catalog}
-      stats={{
-        weekCollected: sum(weekPayQ.data),
-        monthCollected: sum(monthPayQ.data),
-        jobsCompleted: doneQ.count ?? 0,
-        totalOwed: owed.reduce((s, b) => s + Math.abs(b.balance), 0),
-        activePlans: plans.length,
-      }}
-      attention={attention}
+      // Washers get the schedule only — company money and admin queues stay off their wire.
+      stats={
+        owner
+          ? {
+              weekCollected: sum(weekPayQ.data),
+              monthCollected: sum(monthPayQ.data),
+              jobsCompleted: doneQ.count ?? 0,
+              totalOwed: owed.reduce((s, b) => s + Math.abs(b.balance), 0),
+              activePlans: plans.length,
+            }
+          : null
+      }
+      attention={owner ? attention : null}
     />
   );
 }

@@ -33,8 +33,8 @@ export function TodayClient({
   dateLabel: string;
   jobs: JobWithCustomer[];
   catalog: Catalog;
-  stats: Stats;
-  attention: AttentionData;
+  stats: Stats | null; // null = washer view: schedule only
+  attention: AttentionData | null;
 }) {
   const [selected, setSelected] = useState<JobWithCustomer | null>(null);
   // "Now" marker — null on the server (hydration-safe), ticks every minute on the client.
@@ -48,7 +48,7 @@ export function TodayClient({
   );
 
   const active = jobs.filter((j) => j.status === "scheduled" || j.status === "completed" || j.status === "no_show");
-  const attentionCount = attention.unlinked.length + attention.owed.length + attention.plansWithoutVisit.length;
+  const attentionCount = attention ? attention.unlinked.length + attention.owed.length + attention.plansWithoutVisit.length : 0;
 
   return (
     <div className="px-4 md:px-8 py-5 md:py-7 max-w-5xl">
@@ -62,14 +62,16 @@ export function TodayClient({
         </Link>
       </header>
 
-      {/* Stat row */}
-      <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-px bg-line border border-line rounded-[10px] overflow-hidden">
-        <Stat label="Collected this week" value={money(stats.weekCollected)} />
-        <Stat label="Collected this month" value={money(stats.monthCollected)} />
-        <Stat label="Jobs done this month" value={String(stats.jobsCompleted)} />
-        <Stat label="Owed to you" value={money(stats.totalOwed)} tone={stats.totalOwed > 0 ? "bad" : undefined} />
-        <Stat label="Active plans" value={String(stats.activePlans)} className="col-span-2 md:col-span-1" />
-      </div>
+      {/* Stat row (owners only) */}
+      {stats && (
+        <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-px bg-line border border-line rounded-[10px] overflow-hidden">
+          <Stat label="Collected this week" value={money(stats.weekCollected)} />
+          <Stat label="Collected this month" value={money(stats.monthCollected)} />
+          <Stat label="Jobs done this month" value={String(stats.jobsCompleted)} />
+          <Stat label="Owed to you" value={money(stats.totalOwed)} tone={stats.totalOwed > 0 ? "bad" : undefined} />
+          <Stat label="Active plans" value={String(stats.activePlans)} className="col-span-2 md:col-span-1" />
+        </div>
+      )}
 
       {/* Timeline */}
       <section className="mt-6">
@@ -104,8 +106,8 @@ export function TodayClient({
         )}
       </section>
 
-      {/* Needs attention */}
-      {attentionCount > 0 && (
+      {/* Needs attention (owners only) */}
+      {attention && attentionCount > 0 && (
         <section className="mt-8">
           <h2 className="label mb-2">Needs attention</h2>
           <div className="card divide-y divide-line">

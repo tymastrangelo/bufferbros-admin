@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { requireOwner } from "@/lib/auth";
 import { getCatalog } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { todayYmd } from "@/lib/time";
@@ -11,8 +10,9 @@ import { CustomerProfile } from "./profile-client";
 export const metadata: Metadata = { title: "Customer" };
 export const dynamic = "force-dynamic";
 
+// Washers can open customer profiles too — search is their entry point (the list,
+// import, and the rest of the admin surface stay owner-only).
 export default async function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireOwner();
   const { id } = await params;
   const db = await createClient();
 
