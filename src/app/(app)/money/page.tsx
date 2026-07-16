@@ -16,13 +16,14 @@ export default async function MoneyOverview() {
   const lastYm = addMonths(thisYm, -1);
   const chartStartYm = addMonths(thisYm, -11);
 
-  const [ledgerQ, balancesQ, expensesQ, settings] = await Promise.all([
+  const [ledgerQ, balancesQ, expensesQ, capitalQ, settings] = await Promise.all([
     db
       .from("ledger_entries")
       .select("kind,amount,occurred_on,plan_id")
       .gte("occurred_on", `${chartStartYm}-01`),
     db.from("customer_balances").select("balance").neq("balance", 0),
     db.from("expenses").select("amount,occurred_on").gte("occurred_on", `${lastYm}-01`),
+    db.from("company_ledger").select("amount"),
     getSettingsMap(),
   ]);
 
@@ -61,7 +62,10 @@ export default async function MoneyOverview() {
   });
   const hasChartData = bars.some((b) => b.plans + b.oneTime > 0);
 
+  const capital = ((capitalQ.data ?? []) as { amount: number }[]).reduce((s, r) => s + Number(r.amount), 0);
   const washerPct = Number(settings.split_washer_pct ?? 60);
+  const ceoPct = Number(settings.split_ceo_pct ?? 10);
+  const coPct = 100 - washerPct - ceoPct;
 
   return (
     <div className="mt-4 flex flex-col gap-5">
@@ -76,9 +80,10 @@ export default async function MoneyOverview() {
         <Stat label="Net this month" value={money(collectedThis - expensesThisMonth)} sub={`after ${money(expensesThisMonth)} expenses`} />
         <Stat label="Outstanding owed" value={money(owed)} tone={owed > 0 ? "bad" : undefined} link="/money/balances" />
         <Stat label="Prepaid credit held" value={money(credit)} link="/money/balances" />
+        <Stat label="Company capital" value={money(capital)} link="/money/capital" />
         <Stat
-          label={`Split — Gabe ${washerPct}% / Tyler ${100 - washerPct}%`}
-          value={`${money((collectedThis * washerPct) / 100)} / ${money((collectedThis * (100 - washerPct)) / 100)}`}
+          label={`Split — Gabe ${washerPct}% / CEO ${ceoPct}% / Co ${coPct}%`}
+          value={`${money((collectedThis * washerPct) / 100)} / ${money((collectedThis * ceoPct) / 100)} / ${money((collectedThis * coPct) / 100)}`}
           sub="of collected this month · edit in Settings"
         />
       </div>
