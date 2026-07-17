@@ -5,6 +5,7 @@ import { after } from "next/server";
 import { getRole } from "@/lib/auth";
 import { notify } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
+import { todayYmd } from "@/lib/time";
 import type { EntryKind, PaymentMethod } from "@/lib/types";
 import type { ActionResult } from "./appointments";
 
@@ -23,7 +24,11 @@ export interface LedgerFields {
   memo?: string | null;
   appointmentId?: string | null;
   planId?: string | null;
+  collectedBy?: "owner" | "washer"; // who received the client's cash (money-in kinds)
 }
+
+// collected_by only means something for money-in kinds; charges/discounts stay 'owner'.
+const isCashIn = (k: EntryKind) => k === "payment" || k === "credit";
 
 function signed(kind: EntryKind, amount: number): number {
   const abs = Math.abs(amount);
@@ -33,6 +38,8 @@ function signed(kind: EntryKind, amount: number): number {
 export async function addLedgerEntry(fields: LedgerFields): Promise<ActionResult> {
   if (!fields.amount || fields.amount <= 0) return { ok: false, error: "Enter an amount greater than zero." };
   const db = await createClient();
+  const role = await getRole();
+  const collectedBy = isCashIn(fields.kind) ? fields.collectedBy ?? role : "owner";
   const { data, error } = await db
     .from("ledger_entries")
     .insert({
@@ -44,11 +51,12 @@ export async function addLedgerEntry(fields: LedgerFields): Promise<ActionResult
       memo: fields.memo?.trim() || null,
       appointment_id: fields.appointmentId || null,
       plan_id: fields.planId || null,
+      collected_by: collectedBy,
     })
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
-  if (fields.kind === "payment" && (await getRole()) === "washer") {
+  if (fields.kind === "payment" && role === "washer") {
     const { data: cust } = await db.from("customers").select("name").eq("id", fields.customerId).single();
     const push = `${cust?.name ?? "Customer"} · $${Math.abs(fields.amount)} ${fields.method ?? ""}`.trimEnd();
     after(() => notify("owner", "Payment recorded", push, "/money/payments"));
@@ -59,7 +67,7 @@ export async function addLedgerEntry(fields: LedgerFields): Promise<ActionResult
 
 export async function updateLedgerEntry(
   id: string,
-  fields: Pick<LedgerFields, "kind" | "amount" | "method" | "occurredOn" | "memo">
+  fields: Pick<LedgerFields, "kind" | "amount" | "method" | "occurredOn" | "memo" | "collectedBy">
 ): Promise<ActionResult> {
   if (!fields.amount || fields.amount <= 0) return { ok: false, error: "Enter an amount greater than zero." };
   const db = await createClient();
@@ -71,11 +79,26 @@ export async function updateLedgerEntry(
       method: fields.kind === "payment" || fields.kind === "refund" ? fields.method ?? null : null,
       occurred_on: fields.occurredOn,
       memo: fields.memo?.trim() || null,
+      ...(isCashIn(fields.kind) && fields.collectedBy ? { collected_by: fields.collectedBy } : {}),
     })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
   refresh();
   return { ok: true, id };
+}
+
+// Owner-only: mark a payment squared-up with Gabe (or undo). ledger_entries RLS is still
+// open to all authenticated users, so the role guard lives here, not the DB.
+export async function setPaymentSettled(ledgerEntryId: string, settled: boolean): Promise<ActionResult> {
+  if ((await getRole()) !== "owner") return { ok: false, error: "Only the owner can settle payouts." };
+  const db = await createClient();
+  const { error } = await db
+    .from("ledger_entries")
+    .update({ settled_on: settled ? todayYmd() : null })
+    .eq("id", ledgerEntryId);
+  if (error) return { ok: false, error: error.message };
+  refresh();
+  return { ok: true, id: ledgerEntryId };
 }
 
 export async function deleteLedgerEntry(id: string): Promise<ActionResult> {

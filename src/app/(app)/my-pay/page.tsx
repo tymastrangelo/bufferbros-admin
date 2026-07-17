@@ -29,13 +29,14 @@ export default async function MyPayPage() {
     .map((e) => {
       const keep = -e.amount; // payouts are stored negative
       const collected = e.ledger_entry_id ? revenueByEntry.get(e.ledger_entry_id) ?? null : null;
-      return { ...e, keep, collected, send: collected != null ? collected - keep : null };
+      return { ...e, keep, collected, send: collected != null ? collected - keep : null, settled: !!e.settled_on };
     });
 
   const monthStart = `${todayYmd().slice(0, 7)}-01`;
   const thisMonth = rows.filter((r) => r.occurred_on >= monthStart);
   const keepTotal = thisMonth.reduce((s, r) => s + r.keep, 0);
   const sendTotal = thisMonth.reduce((s, r) => s + (r.send ?? 0), 0);
+  const unsettledCount = rows.filter((r) => !r.settled).length;
 
   return (
     <div className="px-4 md:px-8 py-5 md:py-7 max-w-3xl">
@@ -50,11 +51,16 @@ export default async function MyPayPage() {
           <p className="mt-1 text-2xl font-bold num text-ink-2">{money(sendTotal)}</p>
         </div>
       </div>
-      <div className="mt-4 card overflow-x-auto">
+      {unsettledCount > 0 && (
+        <p className="mt-3 text-[13px] text-ink-2">
+          {unsettledCount} payment{unsettledCount === 1 ? "" : "s"} not squared up with Tyler yet.
+        </p>
+      )}
+      <div className="mt-2 card overflow-x-auto">
         {rows.length === 0 ? (
           <EmptyState title="No pay recorded yet." hint="Your cut lands here automatically as payments come in." />
         ) : (
-          <table className="tbl tbl-stack min-w-[440px]">
+          <table className="tbl tbl-stack min-w-[520px]">
             <thead>
               <tr>
                 <th>Date</th>
@@ -62,6 +68,7 @@ export default async function MyPayPage() {
                 <th className="text-right">Collected</th>
                 <th className="text-right">You keep</th>
                 <th className="text-right">To Tyler</th>
+                <th className="text-right">Status</th>
               </tr>
             </thead>
             <tbody>
@@ -81,6 +88,13 @@ export default async function MyPayPage() {
                   </td>
                   <td data-label="To Tyler" className="num text-right text-ink-2">
                     {r.send != null ? money(r.send) : "—"}
+                  </td>
+                  <td data-label="Status" className="text-right whitespace-nowrap">
+                    {r.settled ? (
+                      <span className="text-ok text-[13px] font-medium">✓ Paid</span>
+                    ) : (
+                      <span className="text-faint text-[13px]">Pending</span>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -41,19 +41,21 @@ export function LedgerEntrySheet({
   const [method, setMethod] = useState<PaymentMethod>(entry?.method ?? "zelle");
   const [date, setDate] = useState(entry?.occurred_on ?? todayYmd());
   const [memo, setMemo] = useState(entry?.memo ?? "");
+  const [collectedBy, setCollectedBy] = useState<"owner" | "washer">(entry?.collected_by ?? "owner");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   if (!open) return null;
   const targetCustomer = customerId ?? entry?.customer_id ?? picked?.id;
   const needsMethod = kind === "payment" || kind === "refund";
+  const isCashIn = kind === "payment" || kind === "credit";
 
   async function submit() {
     if (!targetCustomer) return setError("Pick a customer.");
     setError(null);
     setPending(true);
     const res = entry
-      ? await updateLedgerEntry(entry.id, { kind, amount: Number(amount), method, occurredOn: date, memo })
+      ? await updateLedgerEntry(entry.id, { kind, amount: Number(amount), method, occurredOn: date, memo, collectedBy })
       : await addLedgerEntry({
           customerId: targetCustomer,
           kind,
@@ -61,6 +63,7 @@ export function LedgerEntrySheet({
           method,
           occurredOn: date,
           memo,
+          collectedBy,
         });
     setPending(false);
     if (!res.ok) return setError(res.error);
@@ -132,6 +135,25 @@ export function LedgerEntrySheet({
                   }`}
                 >
                   {m}
+                </button>
+              ))}
+            </div>
+          </Field>
+        )}
+
+        {isCashIn && (
+          <Field label="Received by" hint="Who got the client's money — sets who owes who on the split.">
+            <div className="grid grid-cols-2 gap-1.5">
+              {(["owner", "washer"] as const).map((who) => (
+                <button
+                  key={who}
+                  type="button"
+                  onClick={() => setCollectedBy(who)}
+                  className={`h-9 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
+                    collectedBy === who ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
+                  }`}
+                >
+                  {who === "owner" ? "Me" : "Gabe"}
                 </button>
               ))}
             </div>

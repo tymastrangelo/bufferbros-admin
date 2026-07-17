@@ -137,6 +137,8 @@ export interface LedgerEntry {
   method: PaymentMethod | null;
   occurred_on: string;
   memo: string | null;
+  collected_by: "owner" | "washer";
+  settled_on: string | null;
 }
 
 export interface Expense {
@@ -161,6 +163,8 @@ export interface CompanyLedgerEntry {
   memo: string | null;
   ledger_entry_id: string | null;
   expense_id: string | null;
+  collected_by: "owner" | "washer" | null;
+  settled_on: string | null;
   created_at: string;
 }
 
