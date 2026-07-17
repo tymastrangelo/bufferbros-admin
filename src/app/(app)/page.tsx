@@ -17,12 +17,13 @@ export default async function TodayPage() {
   const weekStart = addDays(today, -weekdayOf(today)); // Sunday
   const monthStart = `${today.slice(0, 7)}-01`;
 
-  const [jobsQ, weekPayQ, monthPayQ, doneQ, balancesQ, plansQ, unlinkedQ, planApptsQ, catalog] = await Promise.all([
+  const [jobsQ, weekPayQ, monthPayQ, doneQ, balancesQ, plansQ, unlinkedQ, planApptsQ, pendingQ, catalog] = await Promise.all([
     db
       .from("appointments")
       .select("*, customers(id,name,phone,email)")
       .eq("date", today)
       .neq("status", "cancelled")
+      .neq("status", "pending") // web bookings awaiting approval live in the owner's attention list
       .order("start_min"),
     db.from("ledger_entries").select("kind,amount").gte("occurred_on", weekStart).in("kind", ["payment", "credit", "refund"]),
     db.from("ledger_entries").select("kind,amount").gte("occurred_on", monthStart).in("kind", ["payment", "credit", "refund"]),
@@ -41,6 +42,12 @@ export default async function TodayPage() {
       .order("date")
       .limit(8),
     db.from("appointments").select("plan_id").eq("status", "scheduled").gte("date", today).not("plan_id", "is", null),
+    db
+      .from("appointments")
+      .select("*, customers(id,name,phone,email)")
+      .eq("status", "pending")
+      .order("date")
+      .order("start_min"),
     getCatalog(),
   ]);
 
@@ -57,6 +64,7 @@ export default async function TodayPage() {
   }));
 
   const attention: AttentionData = {
+    pending: (pendingQ.data ?? []) as JobWithCustomer[],
     unlinked: (unlinkedQ.data ?? []) as JobWithCustomer[],
     owed: owed.slice(0, 6),
     plansWithoutVisit: plansWithoutVisit.slice(0, 6),

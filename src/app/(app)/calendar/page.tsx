@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { getRole } from "@/lib/auth";
 import { getCatalog } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { addDays, monthGridStart, todayYmd, weekdayOf, ymOf } from "@/lib/time";
@@ -32,14 +33,17 @@ export default async function CalendarPage({
   }
 
   const db = await createClient();
+  const owner = (await getRole()) === "owner";
+  const apptsQuery = db
+    .from("appointments")
+    .select("*, customers(id,name,phone,email)")
+    .gte("date", rangeStart)
+    .lt("date", rangeEnd)
+    .neq("status", "cancelled")
+    .order("start_min");
   const [apptsQ, blocksQ, hoursQ, catalog] = await Promise.all([
-    db
-      .from("appointments")
-      .select("*, customers(id,name,phone,email)")
-      .gte("date", rangeStart)
-      .lt("date", rangeEnd)
-      .neq("status", "cancelled")
-      .order("start_min"),
+    // Pending web bookings stay off the washer's calendar until the owner approves.
+    owner ? apptsQuery : apptsQuery.neq("status", "pending"),
     db.from("blocks").select("*").gte("date", rangeStart).lt("date", rangeEnd).order("start_min"),
     db.from("weekly_hours").select("*").order("weekday"),
     getCatalog(),

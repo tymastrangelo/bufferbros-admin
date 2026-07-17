@@ -5,6 +5,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
+  approveAppointment,
   cancelAppointment,
   completeAppointment,
   createCustomerFromAppointment,
@@ -26,7 +27,7 @@ import { ErrorNote, Field, Sheet, StatusChip } from "./ui";
 
 export type JobWithCustomer = Appointment & { customers: Pick<Customer, "id" | "name" | "phone" | "email"> | null };
 
-type Panel = "none" | "complete" | "reschedule" | "edit" | "cancel" | "link";
+type Panel = "none" | "approve" | "complete" | "reschedule" | "edit" | "cancel" | "link";
 
 export function JobSheet({
   job,
@@ -139,6 +140,21 @@ export function JobSheet({
         <ErrorNote>{error}</ErrorNote>
 
         {/* Primary actions */}
+        {job.status === "pending" && panel === "none" && (
+          <div className="flex flex-col gap-2">
+            <button className="btn btn-primary h-11" onClick={() => setPanel("approve")}>
+              Review &amp; approve…
+            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button className="btn" onClick={() => setPanel("edit")}>
+                Edit details
+              </button>
+              <button className="btn btn-danger" onClick={() => setPanel("cancel")}>
+                Decline…
+              </button>
+            </div>
+          </div>
+        )}
         {job.status === "scheduled" && panel === "none" && (
           <div className="flex flex-col gap-2">
             <button className="btn btn-primary h-11" onClick={() => setPanel("complete")}>
@@ -174,19 +190,38 @@ export function JobSheet({
           </button>
         )}
         {job.status === "completed" && panel === "none" && (
-          <p className="text-sm text-ink-2">
-            Completed {job.completed_at ? `· charged ${money(Number(job.price))}` : ""}. Adjust money on the
-            customer&apos;s ledger if needed.
-          </p>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-ink-2">
+              Completed {job.completed_at ? `· charged ${money(Number(job.price))}` : ""}. Adjust money on the
+              customer&apos;s ledger if needed.
+            </p>
+            {job.completion_note && (
+              <p className="text-sm bg-surface border border-line rounded-md px-3 py-2">
+                <span className="label block mb-0.5">Completion note</span>
+                {job.completion_note}
+              </p>
+            )}
+          </div>
         )}
 
+        {panel === "approve" && (
+          <ApprovePanel
+            job={job}
+            hasEmail={!!email}
+            pending={pending}
+            onCancel={() => setPanel("none")}
+            onSubmit={(next, notify) =>
+              run(() => approveAppointment(job.id, next, notify)).then((ok) => ok && onClose())
+            }
+          />
+        )}
         {panel === "complete" && (
           <CompletePanel
             job={job}
             pending={pending}
             onCancel={() => setPanel("none")}
-            onSubmit={(finalPrice, payment) =>
-              run(() => completeAppointment(job.id, finalPrice, payment)).then((ok) => ok && onClose())
+            onSubmit={(finalPrice, payment, note) =>
+              run(() => completeAppointment(job.id, finalPrice, payment, note)).then((ok) => ok && onClose())
             }
           />
         )}
@@ -213,6 +248,7 @@ export function JobSheet({
         {panel === "cancel" && (
           <CancelPanel
             hasEmail={!!email}
+            decline={job.status === "pending"}
             pending={pending}
             onBack={() => setPanel("none")}
             onSubmit={(notify) => run(() => cancelAppointment(job.id, notify)).then((ok) => ok && onClose())}
@@ -243,13 +279,18 @@ function CompletePanel({
   job: JobWithCustomer;
   pending: boolean;
   onCancel: () => void;
-  onSubmit: (finalPrice: number, payment: { amount: number; method: PaymentMethod; memo?: string } | null) => void;
+  onSubmit: (
+    finalPrice: number,
+    payment: { amount: number; method: PaymentMethod; memo?: string } | null,
+    note: string
+  ) => void;
 }) {
   const [finalPrice, setFinalPrice] = useState(String(job.price));
   const [collect, setCollect] = useState(!!job.customer_id && !job.plan_id);
   const [amount, setAmount] = useState(String(job.price));
   const [method, setMethod] = useState<PaymentMethod>("zelle");
   const [memo, setMemo] = useState("");
+  const [note, setNote] = useState("");
 
   return (
     <div className="card p-4 flex flex-col gap-3 bg-surface">
@@ -307,6 +348,15 @@ function CompletePanel({
           Not linked to a customer — completing won&apos;t touch any ledger. Link first to track the money.
         </p>
       )}
+      <Field label="Anything to note? (optional)">
+        <textarea
+          className="textarea"
+          rows={2}
+          placeholder="Condition, extras done, anything worth flagging…"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </Field>
       <div className="grid grid-cols-2 gap-2">
         <button className="btn" onClick={onCancel}>
           Back
@@ -317,7 +367,8 @@ function CompletePanel({
           onClick={() =>
             onSubmit(
               Number(finalPrice),
-              collect && job.customer_id ? { amount: Number(amount), method, memo } : null
+              collect && job.customer_id ? { amount: Number(amount), method, memo } : null,
+              note.trim()
             )
           }
         >
@@ -330,6 +381,69 @@ function CompletePanel({
           ) : (
             "Complete"
           )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ApprovePanel({
+  job,
+  hasEmail,
+  pending,
+  onCancel,
+  onSubmit,
+}: {
+  job: JobWithCustomer;
+  hasEmail: boolean;
+  pending: boolean;
+  onCancel: () => void;
+  onSubmit: (next: { date: string; startMin: number; durationMin: number; price: number }, notify: boolean) => void;
+}) {
+  const [date, setDate] = useState(job.date);
+  const [startMin, setStartMin] = useState<number | null>(job.start_min);
+  const [duration, setDuration] = useState(job.duration_min);
+  const [price, setPrice] = useState(String(job.price));
+  const [notify, setNotify] = useState(hasEmail);
+
+  return (
+    <div className="card p-4 flex flex-col gap-3 bg-surface">
+      <p className="label">
+        Approve — requested {fmtDateShort(job.date)} at {minToLabel(job.start_min)}
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Date">
+          <input type="date" className="input num" value={date} onChange={(e) => { setDate(e.target.value); setStartMin(null); }} />
+        </Field>
+        <Field label="Duration (min)">
+          <input type="number" className="input num" step={15} min={15} value={duration} onChange={(e) => setDuration(Number(e.target.value))} />
+        </Field>
+      </div>
+      <Field label="Time">
+        <SlotPicker date={date} durationMin={duration} value={startMin} onChange={(m) => setStartMin(m)} excludeAppointmentId={job.id} />
+      </Field>
+      <Field label="Price">
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-faint">$</span>
+          <input type="number" className="input num pl-7" value={price} min={0} onChange={(e) => setPrice(e.target.value)} />
+        </div>
+      </Field>
+      {hasEmail && (
+        <label className="flex items-center gap-2.5 text-sm">
+          <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
+          Email the customer their confirmation
+        </label>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <button className="btn" onClick={onCancel}>
+          Back
+        </button>
+        <button
+          className="btn btn-primary"
+          disabled={pending || startMin == null}
+          onClick={() => startMin != null && onSubmit({ date, startMin, durationMin: duration, price: Number(price) }, notify)}
+        >
+          {pending ? "Confirming…" : "Approve & confirm"}
         </button>
       </div>
     </div>
@@ -488,11 +602,13 @@ function EditPanel({
 
 function CancelPanel({
   hasEmail,
+  decline = false,
   pending,
   onBack,
   onSubmit,
 }: {
   hasEmail: boolean;
+  decline?: boolean;
   pending: boolean;
   onBack: () => void;
   onSubmit: (notify: boolean) => void;
@@ -500,7 +616,7 @@ function CancelPanel({
   const [notify, setNotify] = useState(hasEmail);
   return (
     <div className="card p-4 flex flex-col gap-3 bg-surface">
-      <p className="text-sm">Cancel this appointment?</p>
+      <p className="text-sm">{decline ? "Decline this booking request?" : "Cancel this appointment?"}</p>
       {hasEmail && (
         <label className="flex items-center gap-2.5 text-sm">
           <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
@@ -512,7 +628,7 @@ function CancelPanel({
           Keep it
         </button>
         <button className="btn btn-danger" disabled={pending} onClick={() => onSubmit(notify)}>
-          {pending ? "Cancelling…" : "Cancel appointment"}
+          {pending ? (decline ? "Declining…" : "Cancelling…") : decline ? "Decline booking" : "Cancel appointment"}
         </button>
       </div>
     </div>

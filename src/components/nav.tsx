@@ -346,7 +346,7 @@ function CommandK({ open, onClose, pages: navPages }: { open: boolean; onClose: 
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search customers, pages…"
-            className="w-full h-12 text-[15px] outline-none placeholder:text-faint bg-transparent"
+            className="w-full h-12 text-[16px] md:text-[15px] outline-none placeholder:text-faint bg-transparent"
           />
           <kbd className="hidden md:block text-[10px] text-faint border border-line rounded px-1.5 py-0.5">esc</kbd>
         </div>

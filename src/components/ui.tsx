@@ -92,6 +92,7 @@ export function ErrorNote({ children }: { children: ReactNode }) {
 }
 
 const STATUS_STYLES: Record<string, string> = {
+  pending: "bg-warn-wash text-warn",
   scheduled: "bg-brand-wash text-brand-deep",
   completed: "bg-ok-wash text-ok",
   cancelled: "bg-[#f1f4f9] text-faint line-through",

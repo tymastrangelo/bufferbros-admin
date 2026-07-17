@@ -1,6 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { getRole } from "@/lib/auth";
+import { notify } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
 import type { EntryKind, PaymentMethod } from "@/lib/types";
 import type { ActionResult } from "./appointments";
@@ -45,6 +48,11 @@ export async function addLedgerEntry(fields: LedgerFields): Promise<ActionResult
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
+  if (fields.kind === "payment" && (await getRole()) === "washer") {
+    const { data: cust } = await db.from("customers").select("name").eq("id", fields.customerId).single();
+    const push = `${cust?.name ?? "Customer"} · $${Math.abs(fields.amount)} ${fields.method ?? ""}`.trimEnd();
+    after(() => notify("owner", "Payment recorded", push, "/money/payments"));
+  }
   refresh();
   return { ok: true, id: data.id };
 }

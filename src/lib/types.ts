@@ -5,7 +5,7 @@
 // for a 12-table schema, zero build-time dependency on a live project.
 
 export type SizeId = "sedan" | "midsize" | "large";
-export type AppointmentStatus = "scheduled" | "completed" | "cancelled" | "no_show";
+export type AppointmentStatus = "pending" | "scheduled" | "completed" | "cancelled" | "no_show";
 export type AppointmentSource = "web" | "manual" | "recurring";
 export type PlanStatus = "active" | "paused" | "ended";
 export type PlanCadence = "weekly" | "biweekly" | "monthly" | "custom";
@@ -123,6 +123,7 @@ export interface Appointment {
   contact_email: string | null;
   notes: string | null;
   completed_at: string | null;
+  completion_note: string | null;
 }
 
 export interface LedgerEntry {

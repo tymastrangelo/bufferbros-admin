@@ -10,6 +10,7 @@ import { fmtPhone, mapsHref, money, telHref } from "@/lib/format";
 import { fmtDateShort, minToLabel, nowMinutes } from "@/lib/time";
 
 export interface AttentionData {
+  pending: JobWithCustomer[];
   unlinked: JobWithCustomer[];
   owed: { customer_id: string; name: string; balance: number }[];
   plansWithoutVisit: { id: string; customerName: string; cadence: string }[];
@@ -48,7 +49,9 @@ export function TodayClient({
   );
 
   const active = jobs.filter((j) => j.status === "scheduled" || j.status === "completed" || j.status === "no_show");
-  const attentionCount = attention ? attention.unlinked.length + attention.owed.length + attention.plansWithoutVisit.length : 0;
+  const attentionCount = attention
+    ? attention.pending.length + attention.unlinked.length + attention.owed.length + attention.plansWithoutVisit.length
+    : 0;
 
   return (
     <div className="px-4 md:px-8 py-5 md:py-7 max-w-5xl">
@@ -111,6 +114,24 @@ export function TodayClient({
         <section className="mt-8">
           <h2 className="label mb-2">Needs attention</h2>
           <div className="card divide-y divide-line">
+            {attention.pending.map((a) => (
+              <button
+                key={a.id}
+                onClick={() => setSelected(a)}
+                className="w-full text-left px-4 py-3 flex items-center justify-between gap-3 hover:bg-[#f8fafd]"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">
+                    {a.contact_name ?? a.customers?.name ?? "Unknown"}{" "}
+                    <span className="text-faint font-normal">· web booking · {money(Number(a.price))}</span>
+                  </p>
+                  <p className="text-xs text-faint num">
+                    {fmtDateShort(a.date)} at {minToLabel(a.start_min)} · {a.service_name}
+                  </p>
+                </div>
+                <span className="chip bg-warn-wash text-warn shrink-0">approve</span>
+              </button>
+            ))}
             {attention.unlinked.map((a) => (
               <button
                 key={a.id}
