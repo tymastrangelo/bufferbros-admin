@@ -75,14 +75,14 @@ export function ExpensesClient({
             <input type="number" inputMode="decimal" min={0} className="input num pl-7" placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Amount" />
           </div>
           <input className="input" placeholder="What was it? (memo)" value={memo} onChange={(e) => setMemo(e.target.value)} aria-label="Memo" />
-          <select className="select" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
+          <select className="select col-span-2 md:col-span-1" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
             {EXPENSE_CATEGORIES.map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>
             ))}
           </select>
-          <input type="date" className="input num" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Date" />
+          <input type="date" className="input num col-span-2 md:col-span-1" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Date" />
           <button className="btn btn-primary col-span-2 md:col-span-1" disabled={pending || !amount} onClick={quickAdd}>
             {pending ? "Adding…" : "Add"}
           </button>

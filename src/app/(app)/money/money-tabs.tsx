@@ -15,7 +15,7 @@ const TABS = [
 export function MoneyTabs() {
   const pathname = usePathname();
   return (
-    <div className="mt-3 flex border-b border-line overflow-x-auto" role="tablist">
+    <div className="mt-3 flex border-b border-line overflow-x-auto touch-pan-x" role="tablist">
       {TABS.map((t) => {
         const active = pathname === t.href;
         return (
