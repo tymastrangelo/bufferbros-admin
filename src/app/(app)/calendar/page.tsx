@@ -55,6 +55,7 @@ export default async function CalendarPage({
       anchor={anchor}
       today={todayYmd()}
       jobs={(apptsQ.data ?? []) as JobWithCustomer[]}
+      owner={owner}
       blocks={(blocksQ.data ?? []) as Block[]}
       hours={(hoursQ.data ?? []) as WeeklyHours[]}
       catalog={catalog}

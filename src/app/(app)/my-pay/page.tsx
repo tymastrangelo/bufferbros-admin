@@ -28,8 +28,11 @@ export default async function MyPayPage() {
     .filter((e) => e.kind === "payout" && e.party === "gabe")
     .map((e) => {
       const keep = -e.amount; // payouts are stored negative
+      // Gabe only owes Tyler on cash he physically collected. On Tyler-collected jobs he
+      // just gets his cut — the client's total is none of his business (RLS also hides it).
       const collected = e.ledger_entry_id ? revenueByEntry.get(e.ledger_entry_id) ?? null : null;
-      return { ...e, keep, collected, send: collected != null ? collected - keep : null, settled: !!e.settled_on };
+      const send = e.collected_by === "washer" && collected != null ? collected - keep : null;
+      return { ...e, keep, send, settled: !!e.settled_on };
     });
 
   const monthStart = `${todayYmd().slice(0, 7)}-01`;
@@ -65,7 +68,6 @@ export default async function MyPayPage() {
               <tr>
                 <th>Date</th>
                 <th>Job</th>
-                <th className="text-right">Collected</th>
                 <th className="text-right">You keep</th>
                 <th className="text-right">To Tyler</th>
                 <th className="text-right">Status</th>
@@ -79,9 +81,6 @@ export default async function MyPayPage() {
                   </td>
                   <td data-label="Job" className="max-w-[200px] truncate">
                     {r.memo ?? "—"}
-                  </td>
-                  <td data-label="Collected" className="num text-right text-ink-2">
-                    {r.collected != null ? money(r.collected) : "—"}
                   </td>
                   <td data-label="You keep" className={`num text-right font-medium ${r.keep < 0 ? "text-bad" : ""}`}>
                     {money(r.keep)}

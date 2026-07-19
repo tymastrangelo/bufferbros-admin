@@ -27,6 +27,7 @@ export function CalendarClient({
   catalog,
   openNew,
   openBlock,
+  owner,
 }: {
   view: CalView;
   anchor: string;
@@ -37,6 +38,7 @@ export function CalendarClient({
   catalog: Catalog;
   openNew: boolean;
   openBlock: boolean;
+  owner: boolean;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<JobWithCustomer | null>(null);
@@ -153,6 +155,7 @@ export function CalendarClient({
             onBlock={setBlockDetail}
             onEmpty={(date, min) => setNewSheet({ date, startMin: min })}
             onDayHeader={view === "week" ? (d) => nav("day", d) : undefined}
+            owner={owner}
           />
         )}
       </div>
@@ -307,6 +310,7 @@ function TimeGrid({
   onBlock,
   onEmpty,
   onDayHeader,
+  owner,
 }: {
   dates: string[];
   today: string;
@@ -317,6 +321,7 @@ function TimeGrid({
   onBlock: (b: Block) => void;
   onEmpty: (date: string, startMin: number) => void;
   onDayHeader?: (d: string) => void;
+  owner: boolean;
 }) {
   // Window: business hours padded, expanded to fit anything scheduled outside them.
   let start = 7 * 60;
@@ -442,7 +447,8 @@ function TimeGrid({
                     style={{ top: y(j.start_min) + 1, height: Math.max((j.duration_min / 60) * HOUR_PX - 2, 22), left: 2, right: 2 }}
                   >
                     <span className="text-[11px] font-semibold truncate block leading-tight">
-                      {(j.customers?.name ?? j.contact_name ?? "?").split(" ")[0]} · {money(Number(j.price))}
+                      {(j.customers?.name ?? j.contact_name ?? "?").split(" ")[0]}
+                      {owner ? ` · ${money(Number(j.price))}` : ""}
                     </span>
                     <span className={`text-[10px] num block leading-tight ${j.status === "scheduled" && !j.plan_id ? "text-white/80" : "text-ink-2"}`}>
                       {minToLabel(j.start_min)} · {j.duration_min}m
