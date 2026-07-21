@@ -1,9 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
+import { notify } from "@/lib/notify";
 
 // Refreshes the Supabase session cookie and guards every route except /login.
 // Deep links survive login via ?next=.
-export async function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest, event: NextFetchEvent) {
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -26,6 +27,14 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
+
+  // Every server action (create/edit/delete anything) arrives as a POST with a
+  // `next-action` header, so this one guard sees all washer activity — including
+  // actions added later. Owner's own activity stays silent.
+  if (user && user.app_metadata?.role !== "owner" && request.method === "POST" && request.headers.has("next-action")) {
+    event.waitUntil(notify("owner", "Gabe made a change", `From ${path}`, path));
+  }
+
   const onLogin = path === "/login";
   // The recovery-email landing must be reachable without a session — it's what creates one.
   if (path === "/auth/callback") return response;
