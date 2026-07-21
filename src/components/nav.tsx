@@ -16,6 +16,7 @@ import {
   IconRepeat,
   IconSearch,
   IconSettings,
+  IconSparkle,
   IconToday,
   IconUpload,
   IconUsers,
@@ -27,6 +28,7 @@ const NAV = [
   { href: "/calendar", label: "Calendar", icon: IconCalendar },
   { href: "/customers", label: "Customers", icon: IconUsers },
   { href: "/plans", label: "Plans", icon: IconRepeat },
+  { href: "/quote", label: "Quote", icon: IconSparkle },
   { href: "/money", label: "Money", icon: IconDollar },
   { href: "/settings", label: "Settings", icon: IconSettings },
 ];
@@ -35,6 +37,7 @@ const NAV = [
 const NAV_WASHER = [
   { href: "/", label: "Today", icon: IconToday },
   { href: "/calendar", label: "Calendar", icon: IconCalendar },
+  { href: "/quote", label: "Quote", icon: IconSparkle },
   { href: "/my-pay", label: "My Pay", icon: IconDollar },
 ];
 
@@ -66,6 +69,19 @@ export function Shell({
   const [newOpen, setNewOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const owner = role === "owner";
+
+  // Mobile keyboards only open for focus() inside the tap gesture, and CommandK's
+  // input doesn't exist yet at that point. Focus a throwaway input now; the real
+  // one steals focus when it mounts, so the keyboard stays up.
+  const openSearchWithKeyboard = () => {
+    const tmp = document.createElement("input");
+    tmp.style.cssText = "position:fixed;top:0;left:0;opacity:0;height:0;font-size:16px";
+    document.body.appendChild(tmp);
+    tmp.focus({ preventScroll: true });
+    setTimeout(() => tmp.remove(), 400);
+    setSearchOpen(true);
+  };
+
   const nav = owner ? NAV : NAV_WASHER;
   const actions = owner ? NEW_ACTIONS : NEW_ACTIONS_WASHER;
   // Mobile tab bar: Money earns a tab over Plans (Plans lives in the More sheet).
@@ -147,11 +163,7 @@ export function Shell({
       <main className="pb-24 md:pb-8">{children}</main>
 
       {/* Mobile bottom tab bar */}
-      <nav
-        className={`tabbar md:hidden fixed bottom-0 inset-x-0 z-30 bg-card border-t border-line grid ${
-          owner ? "grid-cols-5" : "grid-cols-4"
-        }`}
-      >
+      <nav className="tabbar md:hidden fixed bottom-0 inset-x-0 z-30 bg-card border-t border-line grid grid-cols-5">
         {tabs.map(({ href, label, icon: Icon }) => {
           const active = isActive(pathname, href) && !moreOpen;
           return (
@@ -180,7 +192,7 @@ export function Shell({
 
       {/* Mobile floating Search + New buttons (thumb zone, above tab bar) */}
       <button
-        onClick={() => setSearchOpen(true)}
+        onClick={openSearchWithKeyboard}
         aria-label="Search"
         className="md:hidden fixed z-30 rounded-full bg-card border border-line text-ink-2 shadow-lg flex items-center justify-center active:scale-95 transition-transform duration-150"
         style={{ bottom: "calc(env(safe-area-inset-bottom) + 136px)", right: 20, width: 44, height: 44 }}
@@ -202,6 +214,7 @@ export function Shell({
           {owner &&
             [
               { href: "/plans", label: "Plans", icon: IconRepeat },
+              { href: "/quote", label: "Quote builder", icon: IconSparkle },
               { href: "/settings", label: "Settings", icon: IconSettings },
               { href: "/customers/import", label: "Import contacts", icon: IconUpload },
             ].map(({ href, label, icon: Icon }) => (

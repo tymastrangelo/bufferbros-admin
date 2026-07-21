@@ -140,3 +140,9 @@ export const IconDownload = (p: SVGProps<SVGSVGElement>) => (
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
   </I>
 );
+export const IconSparkle = (p: SVGProps<SVGSVGElement>) => (
+  <I {...p}>
+    <path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2L12 3z" />
+    <path d="M19 3.5v3M17.5 5h3" />
+  </I>
+);
