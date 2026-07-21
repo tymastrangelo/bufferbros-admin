@@ -15,7 +15,7 @@ import {
   updateAppointment,
 } from "@/lib/actions/appointments";
 import { Wheel } from "@/components/brand";
-import { computeQuote, type Catalog } from "@/lib/catalog";
+import { addonQuote, computeQuote, type Catalog } from "@/lib/catalog";
 import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { fmtDateShort, minToLabel, whenLabel } from "@/lib/time";
@@ -557,7 +557,7 @@ function EditPanel({
                 }}
               />
               <span className="grow">{a.name}</span>
-              <span className="text-xs text-faint num">{money(a.price)}</span>
+              <span className="text-xs text-faint num">{money(addonQuote(a, sizeId).price)}</span>
             </label>
           ))}
         </div>
@@ -585,7 +585,9 @@ function EditPanel({
             onSubmit({
               size_id: sizeId,
               size_label: sizeLabel(sizeId),
-              addons: catalog.addons.filter((a) => addonIds.includes(a.id)).map(({ id, name, price }) => ({ id, name, price })),
+              addons: catalog.addons
+                .filter((a) => addonIds.includes(a.id))
+                .map((a) => ({ id: a.id, name: a.name, price: addonQuote(a, sizeId).price })),
               price: Number(price),
               duration_min: computeQuote(catalog, sizeId, addonIds).minutes,
               address: address || null,

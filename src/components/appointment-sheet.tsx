@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Wheel } from "@/components/brand";
 import { createAppointment } from "@/lib/actions/appointments";
-import { computeQuote, type Catalog } from "@/lib/catalog";
+import { addonQuote, computeQuote, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { todayYmd } from "@/lib/time";
 import { SIZES, sizeLabel, type SizeId } from "@/lib/types";
@@ -80,7 +80,9 @@ export function AppointmentSheet({
       price,
       sizeId,
       sizeLabel: sizeLabel(sizeId),
-      addons: catalog.addons.filter((a) => addonIds.includes(a.id)).map(({ id, name, price }) => ({ id, name, price })),
+      addons: catalog.addons
+        .filter((a) => addonIds.includes(a.id))
+        .map((a) => ({ id: a.id, name: a.name, price: addonQuote(a, sizeId).price })),
       name: customer?.name ?? name,
       phone: customer ? null : phone,
       email: customer ? null : email,
@@ -161,7 +163,7 @@ export function AppointmentSheet({
                 />
                 <span className="grow">{a.name}</span>
                 <span className="text-xs text-faint num">
-                  {money(a.price)} · {a.minutes}m
+                  {money(addonQuote(a, sizeId).price)} · {addonQuote(a, sizeId).minutes}m
                 </span>
               </label>
             ))}

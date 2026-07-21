@@ -22,8 +22,13 @@ export async function getCatalog(): Promise<Catalog> {
   const addons = ((services ?? []) as { id: string; kind: string; name: string }[])
     .filter((s) => s.kind === "addon")
     .map((s) => {
-      const p = ((pricing ?? []) as ServicePricing[]).find((r) => r.service_id === s.id);
-      return { id: s.id, name: s.name, price: Number(p?.price ?? 0), minutes: p?.minutes ?? 0 };
+      const rows = ((pricing ?? []) as ServicePricing[]).filter((r) => r.service_id === s.id);
+      const flat = rows.find((r) => r.size_id === "*") ?? rows[0];
+      const sized = rows.filter((r) => r.size_id !== "*");
+      const bySize = sized.length
+        ? Object.fromEntries(sized.map((r) => [r.size_id, { price: Number(r.price), minutes: r.minutes }]))
+        : undefined;
+      return { id: s.id, name: s.name, price: Number(flat?.price ?? 0), minutes: flat?.minutes ?? 0, bySize };
     });
 
   return {

@@ -42,6 +42,45 @@ export async function saveServicePricing(
   return { ok: true };
 }
 
+export interface AddonInput {
+  id: string;
+  name: string;
+  note: string | null;
+  pricing: { size_id: string; price: number; minutes: number }[]; // one '*' row, or one row per size
+}
+
+export async function saveAddons(addons: AddonInput[]): Promise<ActionResult> {
+  if (addons.some((a) => !a.name.trim())) return { ok: false, error: "Every add-on needs a name." };
+  const ids = addons.map((a) => a.id);
+  if (new Set(ids).size !== ids.length) return { ok: false, error: "Two add-ons ended up with the same id — rename one." };
+
+  const db = await createClient();
+  const { error } = await db.from("services").upsert(
+    addons.map((a, i) => ({ id: a.id, kind: "addon", name: a.name.trim(), note: a.note?.trim() || null, active: true, sort: i + 1 }))
+  );
+  if (error) return { ok: false, error: error.message };
+
+  // ponytail: delete-then-insert replaces each add-on's pricing wholesale (handles the
+  // '*' ↔ per-size switch). Not transactional; fine for a single-admin settings page.
+  const del = await db.from("service_pricing").delete().in("service_id", ids);
+  if (del.error) return { ok: false, error: del.error.message };
+  const ins = await db
+    .from("service_pricing")
+    .insert(addons.flatMap((a) => a.pricing.map((p) => ({ service_id: a.id, ...p }))));
+  if (ins.error) return { ok: false, error: ins.error.message };
+  refresh();
+  return { ok: true };
+}
+
+export async function deleteAddon(id: string): Promise<ActionResult> {
+  const db = await createClient();
+  // kind guard keeps 'standard' (the detail) undeletable; pricing rows cascade.
+  const { error } = await db.from("services").delete().eq("id", id).eq("kind", "addon");
+  if (error) return { ok: false, error: error.message };
+  refresh();
+  return { ok: true };
+}
+
 export async function savePlanPricing(
   rows: { cadence: string; size_id: string; price: number }[]
 ): Promise<ActionResult> {
