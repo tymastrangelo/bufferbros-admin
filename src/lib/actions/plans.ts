@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { syncAppointmentToGcal } from "@/lib/gcal";
 import { generateOccurrences, type GenerateResult } from "@/lib/occurrences";
 import { createClient } from "@/lib/supabase/server";
 import { diffDays, todayYmd } from "@/lib/time";
@@ -84,6 +86,8 @@ export async function updatePlan(
       .select("id");
     if (applyErr) return { ok: false, error: `Plan saved, but updating visits failed: ${applyErr.message}` };
     updatedVisits = data?.length ?? 0;
+    const ids = (data ?? []).map((a) => a.id);
+    after(() => Promise.all(ids.map(syncAppointmentToGcal)));
   }
   refresh();
   return { ok: true, id, updatedVisits };
@@ -98,14 +102,17 @@ export async function setPlanStatus(id: string, status: PlanStatus): Promise<Act
   if (status !== "active") {
     // ponytail: cancels ALL future scheduled recurring visits for the plan — we can't
     // tell hand-tweaked ones apart; owners can re-book the rare exception.
-    const { error: cancelErr } = await db
+    const { data: cancelled, error: cancelErr } = await db
       .from("appointments")
       .update({ status: "cancelled" })
       .eq("plan_id", id)
       .eq("source", "recurring")
       .eq("status", "scheduled")
-      .gt("date", todayYmd());
+      .gt("date", todayYmd())
+      .select("id");
     if (cancelErr) return { ok: false, error: cancelErr.message };
+    const ids = (cancelled ?? []).map((a) => a.id);
+    after(() => Promise.all(ids.map(syncAppointmentToGcal)));
   }
   refresh();
   return { ok: true, id };

@@ -34,8 +34,8 @@ export function AppointmentSheet({
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
-  const [address, setAddress] = useState("");
-  const [sizeId, setSizeId] = useState<SizeId>("sedan");
+  const [address, setAddress] = useState(defaultCustomer?.addresses?.[0]?.address ?? "");
+  const [sizeId, setSizeId] = useState<SizeId>(defaultCustomer?.vehicles?.[0]?.size_id ?? "sedan");
   const [addonIds, setAddonIds] = useState<string[]>([]);
   const [date, setDate] = useState(defaultDate ?? todayYmd());
   const [startMin, setStartMin] = useState<number | null>(defaultStartMin ?? null);

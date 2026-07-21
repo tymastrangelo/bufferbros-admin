@@ -124,6 +124,7 @@ export interface Appointment {
   notes: string | null;
   completed_at: string | null;
   completion_note: string | null;
+  gcal_event_id: string | null;
 }
 
 export interface LedgerEntry {

@@ -3,8 +3,9 @@
 // reported for manual placement, never silently moved (spec §5.5).
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { confirmedEmail, sendEmail } from "@/lib/email";
+import { syncAppointmentToGcal } from "@/lib/gcal";
 import { addDays, todayYmd, weekdayOf, whenLabel } from "@/lib/time";
-import type { Plan } from "@/lib/types";
+import type { Appointment, Plan } from "@/lib/types";
 
 export interface OccurrenceConflict {
   planId: string;
@@ -87,7 +88,7 @@ export async function generateOccurrences(
             reason: "No preferred time set on the plan",
           });
         } else {
-          const { error: bookErr } = await db.rpc("book_appointment", {
+          const { data: booked, error: bookErr } = await db.rpc("book_appointment", {
             p_date: cursor,
             p_start_min: plan.preferred_min,
             p_duration_min: plan.duration_min,
@@ -114,6 +115,7 @@ export async function generateOccurrences(
             });
           } else {
             result.created++;
+            await syncAppointmentToGcal((booked as Appointment).id);
             if (plan.email_confirmations && plan.customers?.email) {
               const { subject, html } = confirmedEmail({
                 name: plan.customers.name,

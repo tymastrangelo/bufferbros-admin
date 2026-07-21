@@ -5,6 +5,7 @@ import { after } from "next/server";
 import { getRole } from "@/lib/auth";
 import { cancelledEmail, confirmedEmail, sendEmail, updatedEmail, type JobEmailInfo } from "@/lib/email";
 import { normalizeEmail, normalizePhone } from "@/lib/format";
+import { syncAppointmentToGcal } from "@/lib/gcal";
 import { notify as sendPush } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
 import { whenLabel } from "@/lib/time";
@@ -80,6 +81,7 @@ export async function createAppointment(input: NewAppointment): Promise<ActionRe
   const other = await counterpart();
   const push = `${contact.name} · ${whenLabel(appt.date, appt.start_min)} · ${appt.service_name} · $${appt.price}`;
   after(() => sendPush(other, "New job scheduled", push, "/calendar"));
+  after(() => syncAppointmentToGcal(appt.id));
   refresh();
   return { ok: true, id: appt.id };
 }
@@ -142,6 +144,7 @@ export async function rescheduleAppointment(
     const push = `${contact.name} · was ${whenLabel(before.date, before.start_min)}, now ${whenLabel(next.date, next.startMin)}`;
     after(() => sendPush(other, "Job rescheduled", push, "/calendar"));
   }
+  after(() => syncAppointmentToGcal(id));
   refresh();
   return { ok: true, id };
 }
@@ -165,6 +168,7 @@ export async function cancelAppointment(id: string, notify: boolean): Promise<Ac
     const push = `${contact.name} · ${whenLabel(appt.date, appt.start_min)}`;
     after(() => sendPush(other, "Job cancelled", push, "/calendar"));
   }
+  after(() => syncAppointmentToGcal(id));
   refresh();
   return { ok: true, id };
 }
@@ -176,6 +180,7 @@ export async function setAppointmentStatus(id: string, status: "scheduled" | "no
     .update({ status, completed_at: null })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
+  after(() => syncAppointmentToGcal(id));
   refresh();
   return { ok: true, id };
 }
@@ -231,6 +236,7 @@ export async function completeAppointment(
       if (payErr) return { ok: false, error: payErr.message };
     }
   }
+  after(() => syncAppointmentToGcal(id));
   refresh();
   return { ok: true, id };
 }
@@ -261,6 +267,7 @@ export async function approveAppointment(
   }
   const push = `${contact.name} · ${whenLabel(appt.date, appt.start_min)} · ${appt.service_name} · $${appt.price}`;
   after(() => sendPush("washer", "New job on the schedule", push, "/calendar"));
+  after(() => syncAppointmentToGcal(id));
   refresh();
   return { ok: true, id };
 }
@@ -288,6 +295,7 @@ export async function updateAppointment(
   const db = await createClient();
   const { error } = await db.from("appointments").update(fields).eq("id", id);
   if (error) return { ok: false, error: error.message };
+  after(() => syncAppointmentToGcal(id));
   refresh();
   return { ok: true, id };
 }
@@ -297,6 +305,7 @@ export async function linkAppointmentToCustomer(id: string, customerId: string):
   const db = await createClient();
   const { error } = await db.from("appointments").update({ customer_id: customerId }).eq("id", id);
   if (error) return { ok: false, error: error.message };
+  after(() => syncAppointmentToGcal(id));
   refresh();
   return { ok: true, id };
 }
