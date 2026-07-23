@@ -120,7 +120,7 @@ export function AppointmentSheet({
               <CustomerPicker value={customer} onChange={pickCustomer} autoFocus />
               {!customer && (
                 <button type="button" className="mt-1.5 text-[13px] text-brand-deep underline underline-offset-2" onClick={() => setOneOff(true)}>
-                  One-off customer — just type the details
+                  New customer — just type the details
                 </button>
               )}
             </>
@@ -131,6 +131,10 @@ export function AppointmentSheet({
                 <input className="input num" type="tel" placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
                 <input className="input" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
               </div>
+              <p className="text-[12px] text-faint -mt-0.5">
+                Saved to your client list automatically (matched by phone/email if they already exist). Add an email if
+                they&apos;ll pay by Stripe link.
+              </p>
               <button type="button" className="self-start text-[13px] text-brand-deep underline underline-offset-2" onClick={() => setOneOff(false)}>
                 Search existing customers instead
               </button>

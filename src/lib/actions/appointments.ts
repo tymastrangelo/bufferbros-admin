@@ -10,7 +10,7 @@ import { notify as sendPush } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
 import { diffDays, fmtDateShort, todayYmd, whenLabel } from "@/lib/time";
 import type { Addon, Appointment, PaymentMethod } from "@/lib/types";
-import { sendPaymentRequest } from "./stripe";
+import { cancelPaymentRequest, sendPaymentRequest } from "./stripe";
 
 export type ActionResult = { ok: true; id?: string } | { ok: false; error: string };
 
@@ -73,6 +73,47 @@ export async function createAppointment(input: NewAppointment): Promise<ActionRe
     const depositPct = Number(settings.ceramic_deposit_pct) || 50;
     depositNote = ` · collect ${Math.round((input.price * depositPct) / 100)} deposit`;
   }
+
+  // Quick-add: a typed one-off name becomes a real customer (or links to an existing
+  // one by phone/email), so the ledger, Stripe links, and payment status all work.
+  // Web bookings still arrive unlinked on purpose — the owner matches those by hand.
+  let customerId = input.customerId || null;
+  let vehicleId = input.vehicleId || null;
+  if (!customerId && input.name?.trim()) {
+    const phone = normalizePhone(input.phone);
+    const email = normalizeEmail(input.email);
+    const matches = [phone && `phone.eq.${phone}`, email && `email.eq.${email}`].filter(Boolean) as string[];
+    const { data: existing } = matches.length
+      ? await db.from("customers").select("id").or(matches.join(",")).limit(1).maybeSingle()
+      : { data: null };
+    if (existing) {
+      customerId = existing.id;
+    } else {
+      const { data: created } = await db
+        .from("customers")
+        .insert({
+          name: input.name.trim(),
+          phone,
+          email,
+          addresses: input.address?.trim() ? [{ label: "Home", address: input.address.trim() }] : [],
+          source: "manual",
+        })
+        .select("id")
+        .single();
+      if (created) {
+        customerId = created.id;
+        if (input.sizeId) {
+          const { data: v } = await db
+            .from("vehicles")
+            .insert({ customer_id: customerId, size_id: input.sizeId })
+            .select("id")
+            .single();
+          vehicleId = v?.id ?? null;
+        }
+      }
+      // insert failure: fall through and book as a plain one-off — never lose the booking
+    }
+  }
   const { data, error } = await db.rpc("book_appointment", {
     p_date: input.date,
     p_start_min: input.startMin,
@@ -88,8 +129,8 @@ export async function createAppointment(input: NewAppointment): Promise<ActionRe
     p_price: input.price,
     p_notes: input.notes || null,
     p_source: "manual",
-    p_customer_id: input.customerId || null,
-    p_vehicle_id: input.vehicleId || null,
+    p_customer_id: customerId,
+    p_vehicle_id: vehicleId,
     p_plan_id: input.planId || null,
     p_mode: input.force ? "force" : "overlap",
   });
@@ -211,6 +252,14 @@ export async function setAppointmentStatus(id: string, status: "scheduled" | "no
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
   if (appt.status === "completed") {
+    // Un-completing takes the job's charge back off the books, so a reopened or
+    // cancelled detail no longer counts toward what the customer owes. Re-completing
+    // books a fresh charge. Payments stay — that's money actually received.
+    const { error: chargeErr } = await db.from("ledger_entries").delete().eq("appointment_id", id).eq("kind", "charge");
+    if (chargeErr) return { ok: false, error: `Job reopened, but removing its charge failed: ${chargeErr.message}` };
+    // Kill any live Stripe link for this job — the charge it was collecting is gone.
+    const { data: openLinks } = await db.from("payment_requests").select("id").eq("appointment_id", id).eq("status", "pending");
+    for (const r of openLinks ?? []) await cancelPaymentRequest(r.id);
     const contact = await resolveContact(appt);
     after(() => sendPush("washer", "Job reopened", `${contact.name} · ${whenLabel(appt.date, appt.start_min)} is back on the schedule`, "/calendar"));
   }
