@@ -21,7 +21,7 @@ export default async function TodayPage() {
   const [jobsQ, weekPayQ, monthPayQ, doneQ, balancesQ, plansQ, unlinkedQ, planApptsQ, pendingQ, catalog, payoutQ, settings] = await Promise.all([
     db
       .from("appointments")
-      .select("*, customers(id,name,phone,email)")
+      .select("*, customers(id,name,phone,email,stripe_payments)")
       .eq("date", today)
       .neq("status", "cancelled")
       .neq("status", "pending") // web bookings awaiting approval live in the owner's attention list
@@ -37,7 +37,7 @@ export default async function TodayPage() {
     db.from("plans").select("*, customers(name)").eq("status", "active"),
     db
       .from("appointments")
-      .select("*, customers(id,name,phone,email)")
+      .select("*, customers(id,name,phone,email,stripe_payments)")
       .is("customer_id", null)
       .eq("status", "scheduled")
       .order("date")
@@ -45,7 +45,7 @@ export default async function TodayPage() {
     db.from("appointments").select("plan_id").eq("status", "scheduled").gte("date", today).not("plan_id", "is", null),
     db
       .from("appointments")
-      .select("*, customers(id,name,phone,email)")
+      .select("*, customers(id,name,phone,email,stripe_payments)")
       .eq("status", "pending")
       .order("date")
       .order("start_min"),

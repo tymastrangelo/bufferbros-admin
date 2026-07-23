@@ -28,7 +28,9 @@ import { CustomerPicker, type PickedCustomer } from "./customer-picker";
 import { SlotPicker } from "./slot-picker";
 import { ErrorNote, Field, Sheet, StatusChip } from "./ui";
 
-export type JobWithCustomer = Appointment & { customers: Pick<Customer, "id" | "name" | "phone" | "email"> | null };
+export type JobWithCustomer = Appointment & {
+  customers: Pick<Customer, "id" | "name" | "phone" | "email" | "stripe_payments"> | null;
+};
 
 type Panel = "none" | "approve" | "complete" | "reschedule" | "edit" | "cancel" | "link" | "times";
 
@@ -217,6 +219,7 @@ export function JobSheet({
               Completed {job.completed_at ? `· charged ${money(Number(job.price))}` : ""}. Adjust money on the
               customer&apos;s ledger if needed.
             </p>
+            {job.customer_id && <PaymentStatus job={job} />}
             {job.completed_at && (
               <p className="text-[13px] bg-surface border border-line rounded-md px-3 py-2 num">
                 {job.started_at ? (
@@ -271,8 +274,8 @@ export function JobSheet({
             job={job}
             pending={pending}
             onCancel={() => setPanel("none")}
-            onSubmit={(finalPrice, payment, note) =>
-              run(() => completeAppointment(job.id, finalPrice, payment, note)).then((ok) => ok && onClose())
+            onSubmit={(finalPrice, payment, note, stripeLink) =>
+              run(() => completeAppointment(job.id, finalPrice, payment, note, stripeLink)).then((ok) => ok && onClose())
             }
           />
         )}
@@ -329,6 +332,8 @@ export function JobSheet({
   );
 }
 
+type PayMode = "now" | "stripe" | "balance";
+
 function CompletePanel({
   job,
   pending,
@@ -341,15 +346,28 @@ function CompletePanel({
   onSubmit: (
     finalPrice: number,
     payment: { amount: number; method: PaymentMethod; memo?: string } | null,
-    note: string
+    note: string,
+    stripeLink: boolean
   ) => void;
 }) {
+  const email = job.customers?.email ?? null;
+  const canStripe = !!job.customer_id && !!email;
   const [finalPrice, setFinalPrice] = useState(String(job.price));
-  const [collect, setCollect] = useState(!!job.customer_id && !job.plan_id);
+  const [payMode, setPayMode] = useState<PayMode>(() => {
+    if (!job.customer_id) return "balance";
+    if (canStripe && job.customers?.stripe_payments) return "stripe"; // their usual way
+    return job.plan_id ? "balance" : "now";
+  });
   const [amount, setAmount] = useState(String(job.price));
   const [method, setMethod] = useState<PaymentMethod>("zelle");
   const [memo, setMemo] = useState("");
   const [note, setNote] = useState("");
+
+  const MODES: { id: PayMode; label: string; disabled?: boolean }[] = [
+    { id: "now", label: "Collected now" },
+    { id: "stripe", label: "Email Stripe link", disabled: !canStripe },
+    { id: "balance", label: "On balance" },
+  ];
 
   return (
     <div className="card p-4 flex flex-col gap-3 bg-surface">
@@ -364,23 +382,31 @@ function CompletePanel({
             min={0}
             onChange={(e) => {
               setFinalPrice(e.target.value);
-              if (collect) setAmount(e.target.value);
+              if (payMode === "now") setAmount(e.target.value);
             }}
           />
         </div>
       </Field>
       {job.customer_id ? (
         <>
-          <label className="flex items-center gap-2.5 text-sm">
-            <input type="checkbox" checked={collect} onChange={(e) => setCollect(e.target.checked)} />
-            Record a payment now
-          </label>
-          {!collect && (
-            <p className="text-[13px] text-ink-2 -mt-1">
-              The charge goes on the ledger; the balance shows what they owe.
-            </p>
-          )}
-          {collect && (
+          <Field label="How are they paying?">
+            <div className="grid grid-cols-3 gap-1.5">
+              {MODES.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  disabled={m.disabled}
+                  onClick={() => setPayMode(m.id)}
+                  className={`min-h-9 rounded-md border px-1 py-1.5 text-[12px] font-medium leading-tight transition-colors duration-150 ${
+                    payMode === m.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
+                  } ${m.disabled ? "opacity-40 pointer-events-none" : ""}`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </Field>
+          {payMode === "now" && (
             <div className="grid grid-cols-2 gap-2">
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-faint">$</span>
@@ -399,7 +425,21 @@ function CompletePanel({
                 value={memo}
                 onChange={(e) => setMemo(e.target.value)}
               />
+              <p className="col-span-2 text-[12px] text-faint -mt-1">
+                Money already in hand — cash, Zelle, or a card you ran yourself.
+              </p>
             </div>
+          )}
+          {payMode === "stripe" && (
+            <p className="text-[13px] text-ink-2 -mt-1">
+              Emails <span className="font-medium num">{email}</span> a secure payment link for the final price. The
+              ledger updates itself when they pay, and Tyler gets a push.
+            </p>
+          )}
+          {payMode === "balance" && (
+            <p className="text-[13px] text-ink-2 -mt-1">
+              The charge goes on the ledger; the balance shows what they owe. No email goes out.
+            </p>
           )}
         </>
       ) : (
@@ -426,8 +466,9 @@ function CompletePanel({
           onClick={() =>
             onSubmit(
               Number(finalPrice),
-              collect && job.customer_id ? { amount: Number(amount), method, memo } : null,
-              note.trim()
+              payMode === "now" && job.customer_id ? { amount: Number(amount), method, memo } : null,
+              note.trim(),
+              payMode === "stripe"
             )
           }
         >
@@ -435,14 +476,65 @@ function CompletePanel({
             <>
               <Wheel size={16} /> Saving…
             </>
-          ) : collect ? (
+          ) : payMode === "now" && job.customer_id ? (
             `Complete + ${money(Number(amount || 0))}`
+          ) : payMode === "stripe" ? (
+            "Complete + email link"
           ) : (
             "Complete"
           )}
         </button>
       </div>
     </div>
+  );
+}
+
+/** Live paid/unpaid state for a completed job: real payments + the latest Stripe link. */
+function PaymentStatus({ job }: { job: JobWithCustomer }) {
+  const [state, setState] = useState<{ paid: number; method: string | null; link: string | null } | null>(null);
+
+  useEffect(() => {
+    let stale = false;
+    (async () => {
+      const db = createClient();
+      const [payQ, reqQ] = await Promise.all([
+        db.from("ledger_entries").select("amount,method").eq("appointment_id", job.id).eq("kind", "payment"),
+        db
+          .from("payment_requests")
+          .select("status")
+          .eq("appointment_id", job.id)
+          .order("created_at", { ascending: false })
+          .limit(1),
+      ]);
+      if (stale) return;
+      const paid = (payQ.data ?? []).reduce((s, r) => s + Number(r.amount), 0);
+      setState({ paid, method: payQ.data?.[0]?.method ?? null, link: reqQ.data?.[0]?.status ?? null });
+    })();
+    return () => {
+      stale = true;
+    };
+  }, [job.id]);
+
+  if (!state) return null;
+  if (state.paid > 0) {
+    return (
+      <p className="text-[13px] font-medium text-ok bg-ok-wash border border-[#bbe7c9] rounded-md px-3 py-2">
+        ✓ Paid <span className="num">{money(state.paid)}</span>
+        {state.link === "paid" ? " via Stripe" : state.method ? ` via ${state.method}` : ""}
+      </p>
+    );
+  }
+  if (state.link === "pending") {
+    return (
+      <p className="text-[13px] font-medium text-warn bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2">
+        Stripe link sent — not paid yet
+      </p>
+    );
+  }
+  return (
+    <p className="text-[13px] text-ink-2 bg-surface border border-line rounded-md px-3 py-2">
+      Not paid yet — the charge is on their balance.
+    </p>
   );
 }
 

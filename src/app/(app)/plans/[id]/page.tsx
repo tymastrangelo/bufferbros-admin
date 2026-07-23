@@ -23,7 +23,7 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
   const [apptsQ, ledgerQ, catalog, doneQ, vehicleQ] = await Promise.all([
     db
       .from("appointments")
-      .select("*, customers(id,name,phone,email)")
+      .select("*, customers(id,name,phone,email,stripe_payments)")
       .eq("plan_id", id)
       .order("date", { ascending: false })
       .order("start_min"),

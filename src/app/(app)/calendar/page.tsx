@@ -36,7 +36,7 @@ export default async function CalendarPage({
   const owner = (await getRole()) === "owner";
   const apptsQuery = db
     .from("appointments")
-    .select("*, customers(id,name,phone,email)")
+    .select("*, customers(id,name,phone,email,stripe_payments)")
     .gte("date", rangeStart)
     .lt("date", rangeEnd)
     .neq("status", "cancelled")

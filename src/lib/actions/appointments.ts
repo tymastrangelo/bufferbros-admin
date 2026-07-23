@@ -260,7 +260,9 @@ export async function completeAppointment(
   id: string,
   finalPrice: number,
   payment?: { amount: number; method: PaymentMethod; memo?: string } | null,
-  note?: string | null
+  note?: string | null,
+  /** Email a Stripe checkout link for the final price instead of collecting now. */
+  stripeLink = false
 ): Promise<ActionResult> {
   const db = await createClient();
   const appt = await getAppt(id);
@@ -308,25 +310,21 @@ export async function completeAppointment(
         memo: payment.memo || null,
       });
       if (payErr) return { ok: false, error: payErr.message };
-    } else {
-      // Nothing collected on site: Stripe-enabled customers get a payment link by email.
-      const { data: cust } = await db
-        .from("customers")
-        .select("name,email,stripe_payments")
-        .eq("id", appt.customer_id)
-        .single();
-      if (cust?.stripe_payments && cust.email) {
-        const link = await sendPaymentRequest({
-          customerId: appt.customer_id,
-          amount: finalPrice,
-          kind: "job",
-          appointmentId: id,
-          planId: appt.plan_id,
-          what: `${appt.service_name} — ${fmtDateShort(appt.date)}`,
-        });
-        if (!link.ok) {
-          after(() => sendPush("owner", "Stripe link not sent", `${cust.name}: ${link.error}`, `/customers/${appt.customer_id}`));
-        }
+    } else if (stripeLink) {
+      const link = await sendPaymentRequest({
+        customerId: appt.customer_id,
+        amount: finalPrice,
+        kind: "job",
+        appointmentId: id,
+        planId: appt.plan_id,
+        what: `${appt.service_name} — ${fmtDateShort(appt.date)}`,
+      });
+      if (!link.ok) {
+        // Job is completed and charged either way — the link just needs a retry
+        // from the customer's profile. Tell the owner instead of failing the action.
+        after(() => sendPush("owner", "Stripe link not sent", link.error ?? "Unknown error", `/customers/${appt.customer_id}`));
+        refresh();
+        return { ok: true, id };
       }
     }
   }

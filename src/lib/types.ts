@@ -29,7 +29,7 @@ export interface Customer {
   tags: string[];
   source: string | null;
   archived: boolean;
-  /** On: completing a job with no payment collected auto-emails a Stripe link. */
+  /** On: the complete-job flow defaults to emailing a Stripe payment link. */
   stripe_payments: boolean;
 }
 

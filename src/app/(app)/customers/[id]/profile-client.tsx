@@ -538,7 +538,7 @@ function EditCustomerSheet({ open, onClose, customer }: { open: boolean; onClose
           <span>
             Pays through Stripe
             <span className="block text-[12px] text-faint">
-              Completing a job with no payment collected auto-emails them a payment link.
+              Completing their jobs defaults to “Email Stripe link” instead of collecting on site.
             </span>
           </span>
         </label>
