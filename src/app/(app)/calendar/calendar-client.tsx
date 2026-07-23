@@ -41,7 +41,10 @@ export function CalendarClient({
   owner: boolean;
 }) {
   const router = useRouter();
+  // Store the tapped job, but always render the fresh copy from server props —
+  // after an action refreshes the route, the open sheet updates in place.
   const [selected, setSelected] = useState<JobWithCustomer | null>(null);
+  const selectedJob = selected ? (jobs.find((j) => j.id === selected.id) ?? selected) : null;
   const [newSheet, setNewSheet] = useState<{ date: string; startMin?: number } | null>(
     openNew ? { date: anchor } : null
   );
@@ -160,7 +163,7 @@ export function CalendarClient({
         )}
       </div>
 
-      {selected && <JobSheet job={selected} onClose={() => setSelected(null)} catalog={catalog} />}
+      {selectedJob && <JobSheet job={selectedJob} onClose={() => setSelected(null)} catalog={catalog} />}
       {newSheet && (
         <AppointmentSheet
           open

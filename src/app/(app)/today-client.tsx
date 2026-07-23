@@ -38,7 +38,13 @@ export function TodayClient({
   stats: Stats | null; // null = washer view: schedule only
   attention: AttentionData | null;
 }) {
+  // Store the tapped job, render the fresh copy from server props so an open
+  // sheet updates in place after any action refreshes the route.
   const [selected, setSelected] = useState<JobWithCustomer | null>(null);
+  const selectedJob = selected
+    ? ([...jobs, ...(attention?.pending ?? []), ...(attention?.unlinked ?? [])].find((j) => j.id === selected.id) ??
+      selected)
+    : null;
   // "Now" marker — null on the server (hydration-safe), ticks every minute on the client.
   const now = useSyncExternalStore(
     (onTick) => {
@@ -181,7 +187,7 @@ export function TodayClient({
         </section>
       )}
 
-      {selected && <JobSheet job={selected} onClose={() => setSelected(null)} catalog={catalog} />}
+      {selectedJob && <JobSheet job={selectedJob} onClose={() => setSelected(null)} catalog={catalog} />}
     </div>
   );
 }

@@ -40,7 +40,10 @@ export function CustomerProfile({
   const [tab, setTab] = useState<Tab>("overview");
   const [editOpen, setEditOpen] = useState(false);
   const [vehicleEdit, setVehicleEdit] = useState<Vehicle | "new" | null>(null);
+  // Store the tapped job, render the fresh copy from server props so an open
+  // sheet updates in place after any action refreshes the route.
   const [job, setJob] = useState<JobWithCustomer | null>(null);
+  const openJob = job ? (appointments.find((a) => a.id === job.id) ?? job) : null;
   const [newAppt, setNewAppt] = useState(false);
   const [stripeSheet, setStripeSheet] = useState(false);
   const [ledgerSheet, setLedgerSheet] = useState<{ entry?: LedgerEntry; kind?: EntryKind } | null>(null);
@@ -251,7 +254,7 @@ export function CustomerProfile({
           onClose={() => setVehicleEdit(null)}
         />
       )}
-      {job && <JobSheet job={job} onClose={() => setJob(null)} catalog={catalog} />}
+      {openJob && <JobSheet job={openJob} onClose={() => setJob(null)} catalog={catalog} />}
       {newAppt && <AppointmentSheet open onClose={() => setNewAppt(false)} catalog={catalog} defaultCustomer={picked} />}
       {ledgerSheet && (
         <LedgerEntrySheet

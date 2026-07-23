@@ -36,7 +36,10 @@ export function PlanDetail({
   vehicleSize: SizeId;
 }) {
   const router = useRouter();
+  // Store the tapped job, render the fresh copy from server props so an open
+  // sheet updates in place after any action refreshes the route.
   const [job, setJob] = useState<JobWithCustomer | null>(null);
+  const openJob = job ? (appointments.find((a) => a.id === job.id) ?? job) : null;
   const [editOpen, setEditOpen] = useState(false);
   const [prepayOpen, setPrepayOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -194,7 +197,7 @@ export function PlanDetail({
         onShowAll={() => setShowAll({ title: `Full history — ${history.length}`, jobs: history })}
       />
 
-      {job && <JobSheet job={job} onClose={() => setJob(null)} catalog={catalog} />}
+      {openJob && <JobSheet job={openJob} onClose={() => setJob(null)} catalog={catalog} />}
       {prepayOpen && (
         <PrepaySheet
           plan={plan}
@@ -231,7 +234,7 @@ export function PlanDetail({
       {showAll && (
         <Sheet open onClose={() => setShowAll(null)} title={showAll.title}>
           <div className="divide-y divide-line -mx-1">
-            {showAll.jobs.map((j) => (
+            {showAll.jobs.map((s) => appointments.find((a) => a.id === s.id) ?? s).map((j) => (
               <VisitRow
                 key={j.id}
                 j={j}
