@@ -27,34 +27,41 @@ async function stripeFetch(method: "GET" | "POST", path: string, params?: Record
   return json;
 }
 
-/** Hosted checkout link for a one-off payment request. Amount in dollars. */
-export async function createCheckoutSession(input: {
+/**
+ * Emailed pay-by-link for a one-off payment request. A Payment Link, not a Checkout
+ * Session — sessions die after 24h, and customers open emails days later. The link's
+ * metadata (request_id) is copied onto the checkout session Stripe spawns from it,
+ * so the webhook flow is identical. Limited to one completed payment.
+ */
+export async function createPaymentLink(input: {
   requestId: string;
   productName: string;
   amount: number;
-  customerEmail: string;
   memo?: string | null;
 }): Promise<{ id: string; url: string }> {
-  const session = await stripeFetch("POST", "/v1/checkout/sessions", {
-    mode: "payment",
-    "line_items[0][quantity]": "1",
-    "line_items[0][price_data][currency]": "usd",
-    "line_items[0][price_data][unit_amount]": String(Math.round(input.amount * 100)),
-    "line_items[0][price_data][product_data][name]": input.productName,
-    ...(input.memo ? { "line_items[0][price_data][product_data][description]": input.memo } : {}),
-    customer_email: input.customerEmail,
-    "metadata[request_id]": input.requestId,
-    client_reference_id: input.requestId,
-    success_url: "https://bufferbros.org/thank-you.html?paid=1",
-    cancel_url: "https://bufferbros.org",
-    integration_identifier: "bufferbros-crm-kqzmwvxr",
+  const price = await stripeFetch("POST", "/v1/prices", {
+    currency: "usd",
+    unit_amount: String(Math.round(input.amount * 100)),
+    "product_data[name]": input.productName,
   });
-  return { id: session.id, url: session.url };
+  const link = await stripeFetch("POST", "/v1/payment_links", {
+    "line_items[0][price]": price.id,
+    "line_items[0][quantity]": "1",
+    "metadata[request_id]": input.requestId,
+    "restrictions[completed_sessions][limit]": "1",
+    "after_completion[type]": "redirect",
+    "after_completion[redirect][url]": "https://bufferbros.org/thank-you.html?paid=1",
+  });
+  return { id: link.id, url: link.url };
 }
 
-/** Void an unpaid checkout link. Best-effort — already-expired sessions just error. */
-export async function expireCheckoutSession(sessionId: string): Promise<void> {
-  await stripeFetch("POST", `/v1/checkout/sessions/${sessionId}/expire`);
+/** Kill an unpaid link. Handles both new payment links and legacy checkout sessions. */
+export async function deactivatePaymentLink(id: string): Promise<void> {
+  if (id.startsWith("plink_")) {
+    await stripeFetch("POST", `/v1/payment_links/${id}`, { active: "false" });
+  } else {
+    await stripeFetch("POST", `/v1/checkout/sessions/${id}/expire`);
+  }
 }
 
 /** What Stripe kept, in dollars, for a completed session (0 if not resolvable yet). */

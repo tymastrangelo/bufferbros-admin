@@ -17,18 +17,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "bad signature" }, { status: 400 });
   }
 
-  const event = JSON.parse(payload) as { type: string; data: { object: { id: string; payment_status?: string; metadata?: { request_id?: string } } } };
+  const event = JSON.parse(payload) as {
+    type: string;
+    data: { object: { id: string; amount?: number; reason?: string; payment_status?: string; metadata?: { request_id?: string } } };
+  };
+
+  // A disputed charge is rare and urgent — money is being clawed back.
+  if (event.type === "charge.dispute.created") {
+    const d = event.data.object;
+    await notify(
+      "owner",
+      "⚠️ Stripe payment disputed",
+      `$${((d.amount ?? 0) / 100).toFixed(2)} charge disputed (${d.reason ?? "unknown reason"}). Respond in the Stripe dashboard before the deadline.`,
+      "/money/payments"
+    );
+    return NextResponse.json({ ok: true });
+  }
+
   const session = event.data.object;
   const requestId = session.metadata?.request_id;
   if (!requestId) return NextResponse.json({ ok: true, skipped: "no request_id" });
 
   const db = createServiceClient();
 
-  if (event.type === "checkout.session.expired") {
-    await db.from("payment_requests").update({ status: "expired" }).eq("id", requestId).eq("status", "pending");
-    return NextResponse.json({ ok: true });
-  }
-
+  // Note: checkout.session.expired is ignored on purpose — payment links spawn a
+  // short-lived session per visit, and those expiring says nothing about the link.
   if (event.type !== "checkout.session.completed" || session.payment_status !== "paid") {
     return NextResponse.json({ ok: true, skipped: event.type });
   }
@@ -94,7 +107,9 @@ export async function POST(request: Request) {
   await notify(
     "owner",
     "Stripe payment received",
-    `${customer?.name ?? "Customer"} paid $${Number(req.amount)}${fee ? ` · Stripe kept $${fee.toFixed(2)}` : ""}`,
+    `${customer?.name ?? "Customer"} paid $${Number(req.amount)}` +
+      (req.kind === "prepay" ? ` · ${req.visits} visits prepaid` : "") +
+      (fee ? ` · Stripe kept $${fee.toFixed(2)}` : ""),
     `/customers/${req.customer_id}`
   );
 

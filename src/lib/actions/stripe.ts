@@ -7,7 +7,7 @@ import { after } from "next/server";
 import { getRole } from "@/lib/auth";
 import { paymentRequestEmail, sendEmail } from "@/lib/email";
 import { notify } from "@/lib/notify";
-import { createCheckoutSession, expireCheckoutSession, stripeConfigured } from "@/lib/stripe";
+import { createPaymentLink, deactivatePaymentLink, stripeConfigured } from "@/lib/stripe";
 import { createClient } from "@/lib/supabase/server";
 import type { PaymentRequestKind } from "@/lib/types";
 import type { ActionResult } from "./appointments";
@@ -51,13 +51,12 @@ export async function sendPaymentRequest(fields: PaymentRequestFields): Promise<
     .single();
   if (insErr) return { ok: false, error: insErr.message };
 
-  let session: { id: string; url: string };
+  let link: { id: string; url: string };
   try {
-    session = await createCheckoutSession({
+    link = await createPaymentLink({
       requestId: request.id,
       productName: fields.what,
       amount: fields.amount,
-      customerEmail: customer.email,
       memo: fields.memo,
     });
   } catch (e) {
@@ -67,7 +66,7 @@ export async function sendPaymentRequest(fields: PaymentRequestFields): Promise<
 
   const { error: updErr } = await db
     .from("payment_requests")
-    .update({ stripe_session_id: session.id, url: session.url })
+    .update({ stripe_session_id: link.id, url: link.url })
     .eq("id", request.id);
   if (updErr) return { ok: false, error: updErr.message };
 
@@ -75,7 +74,7 @@ export async function sendPaymentRequest(fields: PaymentRequestFields): Promise<
     name: customer.name,
     amount: fields.amount,
     what: fields.what,
-    url: session.url,
+    url: `${link.url}?prefilled_email=${encodeURIComponent(customer.email)}`,
   });
   const to = customer.email;
   after(() => sendEmail(to, subject, html));
@@ -83,7 +82,7 @@ export async function sendPaymentRequest(fields: PaymentRequestFields): Promise<
     after(() => notify("owner", "Payment link sent", `${customer.name} · $${fields.amount} · ${fields.what}`, `/customers/${fields.customerId}`));
   }
   refresh();
-  return { ok: true, id: request.id, url: session.url };
+  return { ok: true, id: request.id, url: link.url };
 }
 
 export async function cancelPaymentRequest(id: string): Promise<ActionResult> {
@@ -93,9 +92,9 @@ export async function cancelPaymentRequest(id: string): Promise<ActionResult> {
   if (request.status !== "pending") return { ok: false, error: "Only pending requests can be canceled." };
   if (request.stripe_session_id) {
     try {
-      await expireCheckoutSession(request.stripe_session_id);
+      await deactivatePaymentLink(request.stripe_session_id);
     } catch {
-      // already expired/completed on Stripe's side — the webhook will reconcile if paid
+      // already dead/completed on Stripe's side — the webhook will reconcile if paid
     }
   }
   const { error } = await db.from("payment_requests").update({ status: "canceled" }).eq("id", id).eq("status", "pending");
