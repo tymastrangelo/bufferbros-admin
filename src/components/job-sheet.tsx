@@ -5,6 +5,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
+  adjustJobTimes,
   approveAppointment,
   cancelAppointment,
   completeAppointment,
@@ -12,8 +13,10 @@ import {
   linkAppointmentToCustomer,
   rescheduleAppointment,
   setAppointmentStatus,
+  startAppointment,
   updateAppointment,
 } from "@/lib/actions/appointments";
+import { useOwner } from "@/lib/use-owner";
 import { Wheel } from "@/components/brand";
 import { addonQuote, computeQuote, type Catalog } from "@/lib/catalog";
 import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
@@ -27,7 +30,16 @@ import { ErrorNote, Field, Sheet, StatusChip } from "./ui";
 
 export type JobWithCustomer = Appointment & { customers: Pick<Customer, "id" | "name" | "phone" | "email"> | null };
 
-type Panel = "none" | "approve" | "complete" | "reschedule" | "edit" | "cancel" | "link";
+type Panel = "none" | "approve" | "complete" | "reschedule" | "edit" | "cancel" | "link" | "times";
+
+const fmtDur = (mins: number) => {
+  const h = Math.floor(mins / 60);
+  const m = Math.round(mins % 60);
+  return h ? `${h}h${m ? ` ${m}m` : ""}` : `${m}m`;
+};
+
+const fmtClock = (iso: string) =>
+  new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
 
 export function JobSheet({
   job,
@@ -39,6 +51,7 @@ export function JobSheet({
   catalog: Catalog;
 }) {
   const router = useRouter();
+  const owner = useOwner();
   const [panel, setPanel] = useState<Panel>("none");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -157,6 +170,15 @@ export function JobSheet({
         )}
         {job.status === "scheduled" && panel === "none" && (
           <div className="flex flex-col gap-2">
+            {!job.started_at ? (
+              <button className="btn h-11" disabled={pending} onClick={() => run(() => startAppointment(job.id))}>
+                ▶ Start job — starts the clock
+              </button>
+            ) : (
+              <p className="text-[13px] font-medium text-ok bg-ok-wash border border-[#bbe7c9] rounded-md px-3 py-2">
+                On the clock since <span className="num">{fmtClock(job.started_at)}</span>
+              </p>
+            )}
             <button className="btn btn-primary h-11" onClick={() => setPanel("complete")}>
               Complete job
             </button>
@@ -195,11 +217,40 @@ export function JobSheet({
               Completed {job.completed_at ? `· charged ${money(Number(job.price))}` : ""}. Adjust money on the
               customer&apos;s ledger if needed.
             </p>
+            {job.completed_at && (
+              <p className="text-[13px] bg-surface border border-line rounded-md px-3 py-2 num">
+                {job.started_at ? (
+                  <>
+                    Took{" "}
+                    <span className="font-semibold">
+                      {fmtDur((new Date(job.completed_at).getTime() - new Date(job.started_at).getTime()) / 60000)}
+                    </span>{" "}
+                    · {fmtClock(job.started_at)} → {fmtClock(job.completed_at)}
+                  </>
+                ) : (
+                  <>Finished {fmtClock(job.completed_at)} · no start time recorded</>
+                )}
+              </p>
+            )}
             {job.completion_note && (
               <p className="text-sm bg-surface border border-line rounded-md px-3 py-2">
                 <span className="label block mb-0.5">Completion note</span>
                 {job.completion_note}
               </p>
+            )}
+            {owner && (
+              <div className="grid grid-cols-2 gap-2">
+                <button className="btn btn-sm" onClick={() => setPanel("times")}>
+                  Adjust times
+                </button>
+                <button
+                  className="btn btn-sm"
+                  disabled={pending}
+                  onClick={() => run(() => setAppointmentStatus(job.id, "scheduled"))}
+                >
+                  Mark incomplete
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -252,6 +303,14 @@ export function JobSheet({
             pending={pending}
             onBack={() => setPanel("none")}
             onSubmit={(notify) => run(() => cancelAppointment(job.id, notify)).then((ok) => ok && onClose())}
+          />
+        )}
+        {panel === "times" && (
+          <TimesPanel
+            job={job}
+            pending={pending}
+            onCancel={() => setPanel("none")}
+            onSubmit={(times) => run(() => adjustJobTimes(job.id, times)).then((ok) => ok && setPanel("none"))}
           />
         )}
         {panel === "link" && (
@@ -381,6 +440,60 @@ function CompletePanel({
           ) : (
             "Complete"
           )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ponytail: datetime-local in the browser's timezone — Tyler and the business are both
+// Eastern; skip the Intl round-trip a multi-timezone shop would need.
+const toLocalInput = (iso: string | null) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+/** Owner-only: correct the recorded start/finish times on a completed job. */
+function TimesPanel({
+  job,
+  pending,
+  onCancel,
+  onSubmit,
+}: {
+  job: JobWithCustomer;
+  pending: boolean;
+  onCancel: () => void;
+  onSubmit: (times: { startedAt: string | null; completedAt: string }) => void;
+}) {
+  const [started, setStarted] = useState(toLocalInput(job.started_at));
+  const [completed, setCompleted] = useState(toLocalInput(job.completed_at));
+
+  return (
+    <div className="card p-4 flex flex-col gap-3 bg-surface">
+      <p className="label">Adjust job times</p>
+      <Field label="Started (blank = not recorded)">
+        <input type="datetime-local" className="input num" value={started} onChange={(e) => setStarted(e.target.value)} />
+      </Field>
+      <Field label="Completed">
+        <input type="datetime-local" className="input num" value={completed} onChange={(e) => setCompleted(e.target.value)} />
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <button className="btn" onClick={onCancel}>
+          Back
+        </button>
+        <button
+          className="btn btn-primary"
+          disabled={pending || !completed}
+          onClick={() =>
+            onSubmit({
+              startedAt: started ? new Date(started).toISOString() : null,
+              completedAt: new Date(completed).toISOString(),
+            })
+          }
+        >
+          {pending ? "Saving…" : "Save times"}
         </button>
       </div>
     </div>
@@ -522,6 +635,8 @@ function EditPanel({
   const [price, setPrice] = useState(String(job.price));
   const [address, setAddress] = useState(job.address ?? "");
   const [notes, setNotes] = useState(job.notes ?? "");
+  // Recompute against the right base service (a ceramic job re-quotes as ceramic).
+  const service = catalog.ceramic && job.service_name === catalog.ceramic.name ? ("ceramic" as const) : ("standard" as const);
 
   return (
     <div className="card p-4 flex flex-col gap-3 bg-surface">
@@ -533,7 +648,7 @@ function EditPanel({
           onChange={(e) => {
             const next = e.target.value as SizeId;
             setSizeId(next);
-            setPrice(String(computeQuote(catalog, next, addonIds).price));
+            setPrice(String(computeQuote(catalog, next, addonIds, service).price));
           }}
         >
           {SIZES.map((s) => (
@@ -553,7 +668,7 @@ function EditPanel({
                 onChange={(e) => {
                   const next = e.target.checked ? [...addonIds, a.id] : addonIds.filter((i) => i !== a.id);
                   setAddonIds(next);
-                  setPrice(String(computeQuote(catalog, sizeId, next).price));
+                  setPrice(String(computeQuote(catalog, sizeId, next, service).price));
                 }}
               />
               <span className="grow">{a.name}</span>
@@ -589,7 +704,7 @@ function EditPanel({
                 .filter((a) => addonIds.includes(a.id))
                 .map((a) => ({ id: a.id, name: a.name, price: addonQuote(a, sizeId).price })),
               price: Number(price),
-              duration_min: computeQuote(catalog, sizeId, addonIds).minutes,
+              duration_min: computeQuote(catalog, sizeId, addonIds, service).minutes,
               address: address || null,
               notes: notes || null,
             })

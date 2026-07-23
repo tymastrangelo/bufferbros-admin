@@ -20,7 +20,8 @@ interface Stats {
   weekCollected: number;
   monthCollected: number;
   jobsCompleted: number;
-  totalOwed: number;
+  /** Tyler <-> Gabe settlement net: positive = Gabe owes Tyler, negative = Tyler owes Gabe. */
+  payoutNet: number;
   activePlans: number;
 }
 
@@ -71,7 +72,12 @@ export function TodayClient({
           <Stat label="Collected this week" value={money(stats.weekCollected)} />
           <Stat label="Collected this month" value={money(stats.monthCollected)} />
           <Stat label="Jobs done this month" value={String(stats.jobsCompleted)} />
-          <Stat label="Owed to you" value={money(stats.totalOwed)} tone={stats.totalOwed > 0 ? "bad" : undefined} />
+          <Stat
+            label={stats.payoutNet > 0 ? "Gabe owes you" : stats.payoutNet < 0 ? "You owe Gabe" : "Payouts"}
+            value={stats.payoutNet === 0 ? "Even" : money(Math.abs(stats.payoutNet))}
+            tone={stats.payoutNet < 0 ? "bad" : undefined}
+            href="/money/payouts"
+          />
           <Stat label="Active plans" value={String(stats.activePlans)} className="col-span-2 md:col-span-1" />
         </div>
       )}
@@ -180,12 +186,31 @@ export function TodayClient({
   );
 }
 
-function Stat({ label, value, tone, className = "" }: { label: string; value: string; tone?: "bad"; className?: string }) {
-  return (
-    <div className={`bg-card px-3.5 py-3 ${className}`}>
+function Stat({
+  label,
+  value,
+  tone,
+  href,
+  className = "",
+}: {
+  label: string;
+  value: string;
+  tone?: "bad";
+  href?: string;
+  className?: string;
+}) {
+  const body = (
+    <>
       <p className="label">{label}</p>
       <p className={`mt-1 text-lg font-semibold num leading-none ${tone === "bad" ? "text-bad" : ""}`}>{value}</p>
-    </div>
+    </>
+  );
+  return href ? (
+    <Link href={href} className={`bg-card px-3.5 py-3 hover:bg-[#f8fafd] ${className}`}>
+      {body}
+    </Link>
+  ) : (
+    <div className={`bg-card px-3.5 py-3 ${className}`}>{body}</div>
   );
 }
 

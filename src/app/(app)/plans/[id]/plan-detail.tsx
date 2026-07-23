@@ -7,11 +7,11 @@ import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { PlanFormSheet } from "@/components/plan-form";
 import { ScheduleSheet } from "@/components/schedule-sheet";
 import { Balance, ErrorNote, Sheet, StatusChip } from "@/components/ui";
-import { setPlanStatus } from "@/lib/actions/plans";
-import type { Catalog } from "@/lib/catalog";
+import { recordPlanPrepay, setPlanStatus } from "@/lib/actions/plans";
+import { initialDetailPrice, visitsPerQuarter, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { fmtDateShort, minToLabel, WEEKDAYS } from "@/lib/time";
-import type { Customer, LedgerEntry, Plan } from "@/lib/types";
+import { PAYMENT_METHODS, type Customer, type LedgerEntry, type PaymentMethod, type Plan, type SizeId } from "@/lib/types";
 import type { OccurrenceConflict } from "@/lib/occurrences";
 
 const LIST_CAP = 6; // rows shown inline before "Show all" takes over
@@ -22,16 +22,22 @@ export function PlanDetail({
   ledger,
   catalog,
   today,
+  hasInitialDetail,
+  vehicleSize,
 }: {
   plan: Plan & { customers: Customer };
   appointments: JobWithCustomer[];
   ledger: LedgerEntry[];
   catalog: Catalog;
   today: string;
+  /** does this customer have any completed job on record yet? */
+  hasInitialDetail: boolean;
+  vehicleSize: SizeId;
 }) {
   const router = useRouter();
   const [job, setJob] = useState<JobWithCustomer | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [prepayOpen, setPrepayOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [showAll, setShowAll] = useState<{ title: string; jobs: JobWithCustomer[] } | null>(null);
   const [pending, setPending] = useState(false);
@@ -86,6 +92,11 @@ export function PlanDetail({
           <button className="btn btn-sm" onClick={() => setEditOpen(true)}>
             Edit
           </button>
+          {plan.status === "active" && plan.per_visit_price > 0 && (
+            <button className="btn btn-sm" onClick={() => setPrepayOpen(true)}>
+              Record prepay…
+            </button>
+          )}
           {plan.status === "active" && (
             <button className="btn btn-primary btn-sm" onClick={() => setScheduleOpen(true)}>
               Schedule visits…
@@ -93,6 +104,17 @@ export function PlanDetail({
           )}
         </div>
       </header>
+
+      {!hasInitialDetail && plan.status === "active" && (
+        <div className="mt-3 rounded-md border border-[#fde68a] bg-warn-wash px-4 py-3 text-sm">
+          <p className="font-medium text-warn">No completed detail on record yet.</p>
+          <p className="text-warn mt-0.5">
+            New maintenance clients start with a full Standard Detail at {catalog.rules.planInitialDiscountPct}% off (
+            <span className="num">{money(initialDetailPrice(catalog, vehicleSize))}</span> for their size) to get the car to
+            maintenance shape — book it as a one-time job before the plan visits start.
+          </p>
+        </div>
+      )}
 
       {/* Economics */}
       <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-px bg-line border border-line rounded-[10px] overflow-hidden">
@@ -172,6 +194,18 @@ export function PlanDetail({
       />
 
       {job && <JobSheet job={job} onClose={() => setJob(null)} catalog={catalog} />}
+      {prepayOpen && (
+        <PrepaySheet
+          plan={plan}
+          catalog={catalog}
+          today={today}
+          onClose={() => setPrepayOpen(false)}
+          onDone={() => {
+            setPrepayOpen(false);
+            router.refresh();
+          }}
+        />
+      )}
       {editOpen && (
         <PlanFormSheet
           open
@@ -210,6 +244,101 @@ export function PlanDetail({
         </Sheet>
       )}
     </div>
+  );
+}
+
+/**
+ * Upfront block payment: quarterly-or-bigger blocks earn the prepay discount. Books a
+ * payment + discount on the ledger so the balance covers the visits at full price.
+ */
+function PrepaySheet({
+  plan,
+  catalog,
+  today,
+  onClose,
+  onDone,
+}: {
+  plan: Plan & { customers: Customer };
+  catalog: Catalog;
+  today: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const minVisits = visitsPerQuarter(plan.cadence, plan.interval_days);
+  const [visits, setVisits] = useState(String(minVisits));
+  const [method, setMethod] = useState<PaymentMethod>("zelle");
+  const [memo, setMemo] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const n = Math.max(0, Math.floor(Number(visits) || 0));
+  const qualifies = n >= minVisits;
+  const full = plan.per_visit_price * n;
+  const discount = qualifies ? Math.round(full * (catalog.rules.prepayDiscountPct / 100)) : 0;
+  const due = full - discount;
+
+  async function submit() {
+    setError(null);
+    setPending(true);
+    const res = await recordPlanPrepay(plan.id, { visits: n, method, occurredOn: today, memo: memo.trim() || null });
+    setPending(false);
+    if (!res.ok) return setError(res.error);
+    onDone();
+  }
+
+  return (
+    <Sheet open onClose={onClose} title={`Prepay — ${plan.customers.name}`}>
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-ink-2">
+          {money(plan.per_visit_price)}/visit · {catalog.rules.prepayDiscountPct}% off when they prepay a quarter or more (
+          {minVisits}+ visits on this cadence).
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="label block mb-1">Visits prepaid</span>
+            <input type="number" min={1} className="input num" value={visits} onChange={(e) => setVisits(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="label block mb-1">Paid via</span>
+            <select className="select" value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
+              {PAYMENT_METHODS.map((m) => (
+                <option key={m} value={m}>
+                  {m[0].toUpperCase() + m.slice(1)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {n > 0 && !qualifies && (
+          <p className="text-[13px] text-warn bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2">
+            Fewer than {minVisits} visits — no discount, but the credit still goes on their balance.
+          </p>
+        )}
+        <input className="input" placeholder="Memo (optional)" value={memo} onChange={(e) => setMemo(e.target.value)} />
+        <div className="card p-3.5 text-sm flex flex-col gap-1">
+          <div className="flex justify-between">
+            <span className="text-ink-2">
+              {n} visit{n === 1 ? "" : "s"} × {money(plan.per_visit_price)}
+            </span>
+            <span className="num">{money(full)}</span>
+          </div>
+          {discount > 0 && (
+            <div className="flex justify-between text-ok">
+              <span>Prepay discount ({catalog.rules.prepayDiscountPct}%)</span>
+              <span className="num">−{money(discount)}</span>
+            </div>
+          )}
+          <div className="flex justify-between font-semibold border-t border-line pt-1 mt-0.5">
+            <span>They pay today</span>
+            <span className="num">{money(due)}</span>
+          </div>
+        </div>
+        <ErrorNote>{error}</ErrorNote>
+        <button className="btn btn-primary h-11" disabled={pending || n < 1} onClick={submit}>
+          {pending ? "Recording…" : `Record ${money(due)} prepay`}
+        </button>
+      </div>
+    </Sheet>
   );
 }
 

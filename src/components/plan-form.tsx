@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Wheel } from "@/components/brand";
 import { createPlan, updatePlan, type PlanFields } from "@/lib/actions/plans";
-import { planPrice, type Catalog } from "@/lib/catalog";
+import { initialDetailPrice, planPrice, type Catalog } from "@/lib/catalog";
+import { money } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { labelToMin, minToLabel, todayYmd, WEEKDAYS } from "@/lib/time";
 import type { Plan, PlanCadence, SizeId, Vehicle } from "@/lib/types";
@@ -187,6 +188,14 @@ export function PlanFormSheet({
               ))}
             </select>
           </Field>
+        )}
+
+        {!plan && (
+          <p className="text-[13px] bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2.5">
+            New plan clients get an initial full Standard Detail at {catalog.rules.planInitialDiscountPct}% off (
+            <span className="num font-medium">{money(initialDetailPrice(catalog, sizeOf(vehicleId)))}</span> for this size) to
+            bring the car to maintenance shape — book it as a one-time job before the plan starts.
+          </p>
         )}
 
         <Field label="Cadence">

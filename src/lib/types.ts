@@ -122,6 +122,7 @@ export interface Appointment {
   contact_phone: string | null;
   contact_email: string | null;
   notes: string | null;
+  started_at: string | null;
   completed_at: string | null;
   completion_note: string | null;
   gcal_event_id: string | null;

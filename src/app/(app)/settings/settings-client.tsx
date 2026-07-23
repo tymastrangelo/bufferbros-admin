@@ -95,8 +95,9 @@ export function SettingsClient({
     <div className="px-4 md:px-8 py-5 md:py-7 max-w-3xl flex flex-col gap-4">
       <h1 className="text-xl md:text-2xl font-bold">Settings</h1>
       <PricingSection pricing={pricing} />
+      <CeramicSection pricing={pricing} settings={settings} />
       <AddonsSection services={services} pricing={pricing} />
-      <PlanPricingSection planPricing={planPricing} />
+      <PlanPricingSection planPricing={planPricing} settings={settings} />
       <HoursSection hours={hours} settings={settings} />
       <SplitSection settings={settings} />
       <BlocksSection blocks={blocks} />
@@ -161,6 +162,88 @@ function PricingSection({ pricing }: { pricing: ServicePricing[] }) {
       </div>
       <div className="mt-3">
         <SaveButton state={state} onClick={() => run(() => saveServicePricing([...rows.values()]))} />
+      </div>
+    </Section>
+  );
+}
+
+function CeramicSection({ pricing, settings }: { pricing: ServicePricing[]; settings: Record<string, string> }) {
+  const { state, run } = useSave();
+  const [rows, setRows] = useState(() => {
+    const map = new Map<string, ServicePricing>();
+    for (const p of pricing) if (p.service_id === "ceramic-coating") map.set(p.size_id, p);
+    return map;
+  });
+  const [leadDays, setLeadDays] = useState(settings.ceramic_lead_days ?? "7");
+  const [depositPct, setDepositPct] = useState(settings.ceramic_deposit_pct ?? "50");
+  const get = (size: string) =>
+    rows.get(size) ?? { service_id: "ceramic-coating", size_id: size, price: 0, minutes: 480 };
+  const set = (size: string, field: "price" | "minutes", v: number) =>
+    setRows(new Map(rows).set(size, { ...get(size), [field]: v }));
+
+  return (
+    <Section
+      title="Ceramic Coating"
+      note="Includes a full Standard Detail. Quote builder + booking only — not sold on the website. Client needs a garage and keeps the car in it 24h after."
+    >
+      <div className="overflow-x-auto">
+        <table className={GRID_TABLE}>
+          <thead>
+            <tr>
+              <th>Size</th>
+              <th>Price</th>
+              <th>Minutes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {SIZE_IDS.map((size) => (
+              <tr key={size}>
+                <td className="font-medium">{SIZE_SHORT[size]}</td>
+                <td>
+                  <input
+                    type="number"
+                    className="input num max-w-[90px]! h-8!"
+                    value={get(size).price}
+                    onChange={(e) => set(size, "price", Number(e.target.value))}
+                    aria-label={`ceramic ${size} price`}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    step={15}
+                    className="input num max-w-[90px]! h-8!"
+                    value={get(size).minutes}
+                    onChange={(e) => set(size, "minutes", Number(e.target.value))}
+                    aria-label={`ceramic ${size} minutes`}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-3 max-w-sm">
+        <label className="block">
+          <span className="label block mb-1">Min notice (days)</span>
+          <input type="number" min={0} className="input num" value={leadDays} onChange={(e) => setLeadDays(e.target.value)} />
+        </label>
+        <label className="block">
+          <span className="label block mb-1">Deposit %</span>
+          <input type="number" min={0} max={100} className="input num" value={depositPct} onChange={(e) => setDepositPct(e.target.value)} />
+        </label>
+      </div>
+      <div className="mt-3">
+        <SaveButton
+          state={state}
+          onClick={() =>
+            run(async () => {
+              const a = await saveServicePricing([...rows.values()]);
+              if (!a.ok) return a;
+              return saveSettings({ ceramic_lead_days: leadDays, ceramic_deposit_pct: depositPct });
+            })
+          }
+        />
       </div>
     </Section>
   );
@@ -359,11 +442,16 @@ function AddonsSection({ services, pricing }: { services: Service[]; pricing: Se
   );
 }
 
-function PlanPricingSection({ planPricing }: { planPricing: PlanPricing[] }) {
+function PlanPricingSection({ planPricing, settings }: { planPricing: PlanPricing[]; settings: Record<string, string> }) {
   const { state, run } = useSave();
   const [rows, setRows] = useState(() => new Map(planPricing.map((p) => [`${p.cadence}:${p.size_id}`, p.price])));
+  const [initialPct, setInitialPct] = useState(settings.plan_initial_discount_pct ?? "10");
+  const [prepayPct, setPrepayPct] = useState(settings.prepay_discount_pct ?? "5");
   return (
-    <Section title="Maintenance plan pricing" note="Per-visit price by cadence and size. Auto-suggested when creating a plan.">
+    <Section
+      title="Maintenance plan pricing"
+      note="Backend only — these prices no longer show on the public website (quoted after the initial detail). Auto-suggested when creating a plan."
+    >
       <div className="overflow-x-auto">
         <table className={GRID_TABLE}>
           <thead>
@@ -394,18 +482,34 @@ function PlanPricingSection({ planPricing }: { planPricing: PlanPricing[] }) {
           </tbody>
         </table>
       </div>
+      <div className="mt-3 grid grid-cols-2 gap-3 max-w-sm">
+        <label className="block">
+          <span className="label block mb-1">Initial detail discount %</span>
+          <input type="number" min={0} max={100} className="input num" value={initialPct} onChange={(e) => setInitialPct(e.target.value)} />
+        </label>
+        <label className="block">
+          <span className="label block mb-1">Prepay discount %</span>
+          <input type="number" min={0} max={100} className="input num" value={prepayPct} onChange={(e) => setPrepayPct(e.target.value)} />
+        </label>
+      </div>
+      <p className="text-[13px] text-ink-2 mt-1.5">
+        Initial detail: every new plan client starts with a full Standard Detail at this discount. Prepay: applies when a
+        client pays a quarter (or more) of visits up front.
+      </p>
       <div className="mt-3">
         <SaveButton
           state={state}
           onClick={() =>
-            run(() =>
-              savePlanPricing(
+            run(async () => {
+              const a = await savePlanPricing(
                 [...rows.entries()].map(([k, price]) => {
                   const [cadence, size_id] = k.split(":");
                   return { cadence, size_id, price };
                 })
-              )
-            )
+              );
+              if (!a.ok) return a;
+              return saveSettings({ plan_initial_discount_pct: initialPct, prepay_discount_pct: prepayPct });
+            })
           }
         />
       </div>

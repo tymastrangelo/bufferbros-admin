@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Wheel } from "@/components/brand";
-import { addonQuote, computeQuote, planPrice, type Catalog } from "@/lib/catalog";
+import { addonQuote, computeQuote, initialDetailPrice, planPrice, visitsPerQuarter, type BaseService, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { addDays, fmtDateShort, minToLabel, todayYmd, weekdayOf, WEEKDAYS, WEEKDAYS_SHORT } from "@/lib/time";
@@ -30,9 +30,9 @@ const CADENCES: { id: PlanCadence; label: string; visitsPerMonth: number }[] = [
 const suggestedDiscount = (n: number) => (n >= 3 ? 10 : n === 2 ? 5 : 0);
 const DISCOUNT_CHOICES = [0, 5, 10, 15];
 
-/** Price for one vehicle. One-time: detail + addons. Plan: per-visit plan price + addons. */
-function vehicleQuote(catalog: Catalog, v: QuoteVehicle, mode: Mode, cadence: PlanCadence) {
-  if (mode === "once") return computeQuote(catalog, v.size, v.addons);
+/** Price for one vehicle. One-time: base service + addons. Plan: per-visit plan price + addons. */
+function vehicleQuote(catalog: Catalog, v: QuoteVehicle, mode: Mode, cadence: PlanCadence, service: BaseService) {
+  if (mode === "once") return computeQuote(catalog, v.size, v.addons, service);
   const base = planPrice(catalog, cadence, v.size) ?? catalog.detail[v.size]?.price ?? 0;
   const extras = catalog.addons.filter((a) => v.addons.includes(a.id)).map((a) => addonQuote(a, v.size));
   const detail = catalog.detail[v.size] ?? { minutes: 120 };
@@ -50,13 +50,15 @@ const fmtHours = (min: number) => {
 
 export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boolean }) {
   const [mode, setMode] = useState<Mode>("once");
+  const [service, setService] = useState<BaseService>("standard");
   const [cadence, setCadence] = useState<PlanCadence>("biweekly");
   const [vehicles, setVehicles] = useState<QuoteVehicle[]>([{ key: 1, name: "", size: "sedan", addons: [] }]);
   const [discountOverride, setDiscountOverride] = useState<number | null>(null);
   const [revealed, setRevealed] = useState(false);
   const nextKey = useRef(2);
 
-  const quotes = vehicles.map((v) => vehicleQuote(catalog, v, mode, cadence));
+  const activeService: BaseService = mode === "once" && catalog.ceramic ? service : "standard";
+  const quotes = vehicles.map((v) => vehicleQuote(catalog, v, mode, cadence, activeService));
   const subtotal = quotes.reduce((s, q) => s + q.price, 0);
   const minutes = quotes.reduce((s, q) => s + q.minutes, 0);
   const discountPct = discountOverride ?? suggestedDiscount(vehicles.length);
@@ -80,6 +82,7 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
         catalog={catalog}
         owner={owner}
         mode={mode}
+        service={activeService}
         cadence={cadence}
         vehicles={vehicles}
         quotes={quotes}
@@ -93,6 +96,7 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
           setVehicles([{ key: nextKey.current++, name: "", size: "sedan", addons: [] }]);
           setDiscountOverride(null);
           setMode("once");
+          setService("standard");
           setCadence("biweekly");
           setRevealed(false);
         }}
@@ -141,6 +145,38 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
           ))}
         </div>
       )}
+      {mode === "once" && catalog.ceramic && (
+        <div className="mt-2 grid grid-cols-2 gap-1.5">
+          {(
+            [
+              { id: "standard", label: "The Standard Detail" },
+              { id: "ceramic", label: catalog.ceramic.name },
+            ] as const
+          ).map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setService(s.id)}
+              className={`h-9 rounded-md border px-1 text-[13px] font-medium transition-colors duration-150 ${
+                service === s.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {activeService === "ceramic" && (
+        <div className="mt-2 text-[13px] bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2.5">
+          <p className="font-semibold">Ceramic coating — what the client signs up for</p>
+          <ul className="mt-1 list-disc pl-4 flex flex-col gap-0.5">
+            <li>Full in-and-out Standard Detail is included — the paint has to be spotless first.</li>
+            <li>They need a garage, and the car stays in it for 24 hours after we finish.</li>
+            <li>Book at least {catalog.rules.ceramicLeadDays} days out — it takes most of a day on site.</li>
+            <li>{catalog.rules.ceramicDepositPct}% deposit due up front to lock the date.</li>
+          </ul>
+        </div>
+      )}
 
       {/* Vehicles */}
       <div className="mt-4 flex flex-col gap-3">
@@ -154,7 +190,7 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
                 onChange={(e) => patch(v.key, { name: e.target.value })}
               />
               <span className="text-sm font-bold num whitespace-nowrap">
-                {money(vehicleQuote(catalog, v, mode, cadence).price)}
+                {money(vehicleQuote(catalog, v, mode, cadence, activeService).price)}
                 {mode === "plan" && <span className="font-normal text-faint text-xs"> /visit</span>}
               </span>
               <div className="flex gap-1">
@@ -281,6 +317,7 @@ function QuoteResult({
   catalog,
   owner,
   mode,
+  service,
   cadence,
   vehicles,
   quotes,
@@ -295,6 +332,7 @@ function QuoteResult({
   catalog: Catalog;
   owner: boolean;
   mode: Mode;
+  service: BaseService;
   cadence: PlanCadence;
   vehicles: QuoteVehicle[];
   quotes: { price: number; minutes: number }[];
@@ -314,7 +352,13 @@ function QuoteResult({
   return (
     <div className="px-4 md:px-8 py-5 md:py-7 max-w-2xl">
       <div className="card p-6 text-center overflow-hidden">
-        <p className="label">{mode === "plan" ? `Your quote — ${cadenceLabel.toLowerCase()}` : "Your quote"}</p>
+        <p className="label">
+          {mode === "plan"
+            ? `Your quote — ${cadenceLabel.toLowerCase()}`
+            : service === "ceramic"
+              ? `Your quote — ${catalog.ceramic?.name ?? "Ceramic Coating"}`
+              : "Your quote"}
+        </p>
         <p className="mt-2 text-5xl md:text-6xl font-bold num tracking-tight">{money(shown)}</p>
         <p className="mt-1.5 text-sm text-ink-2">
           {mode === "plan" ? (
@@ -361,8 +405,57 @@ function QuoteResult({
         </p>
       )}
 
+      {mode === "once" && service === "ceramic" && (
+        <div className="mt-3 card p-4 text-[13px]">
+          <p className="font-semibold text-sm">Before they book</p>
+          <ul className="mt-1.5 list-disc pl-4 flex flex-col gap-1 text-ink-2">
+            <li>
+              <span className="font-medium text-ink num">{money(Math.round((total * catalog.rules.ceramicDepositPct) / 100))}</span>{" "}
+              deposit ({catalog.rules.ceramicDepositPct}%) up front locks the date.
+            </li>
+            <li>Garage required — the car stays inside for 24 hours after we finish so the coating cures.</li>
+            <li>Full in-and-out Standard Detail included. Plan on ~{fmtHours(minutes)} on site.</li>
+            <li>Book at least {catalog.rules.ceramicLeadDays} days out.</li>
+          </ul>
+        </div>
+      )}
+      {mode === "plan" && (
+        <>
+          <div className="mt-3 card p-4 text-[13px]">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="font-semibold text-sm">First visit — full Standard Detail ({catalog.rules.planInitialDiscountPct}% off)</p>
+              <p className="font-bold num">{money(vehicles.reduce((s, v) => s + initialDetailPrice(catalog, v.size), 0))}</p>
+            </div>
+            <p className="mt-1 text-ink-2">
+              Every plan starts with an all-in detail to get the car to maintenance shape — {catalog.rules.planInitialDiscountPct}% off
+              the regular price when they commit to the plan.
+            </p>
+          </div>
+          <div className="mt-3 card p-4 text-[13px]">
+            {(() => {
+              const visits = visitsPerQuarter(cadence);
+              const fullBlock = total * visits;
+              const prepaid = Math.round(fullBlock * (1 - catalog.rules.prepayDiscountPct / 100));
+              return (
+                <>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <p className="font-semibold text-sm">Pay the quarter up front — save {catalog.rules.prepayDiscountPct}%</p>
+                    <p className="font-bold num">{money(prepaid)}</p>
+                  </div>
+                  <p className="mt-1 text-ink-2">
+                    {visits} visits paid once instead of {money(fullBlock)} spread out — they keep{" "}
+                    <span className="font-medium text-ok num">{money(fullBlock - prepaid)}</span>. Record it from the plan page
+                    when they take it.
+                  </p>
+                </>
+              );
+            })()}
+          </div>
+        </>
+      )}
+
       {mode === "once" ? (
-        <OneTimeFinder durationMin={minutes} />
+        <OneTimeFinder durationMin={minutes} startOffsetDays={service === "ceramic" ? catalog.rules.ceramicLeadDays : 1} />
       ) : (
         <PlanFinder durationMin={minutes} cadence={cadence} owner={owner} />
       )}
@@ -390,8 +483,8 @@ async function fetchSlots(date: string, durationMin: number): Promise<number[]> 
 }
 
 /** One-time: pick a day in the next two weeks, see the real open times. */
-function OneTimeFinder({ durationMin }: { durationMin: number }) {
-  const dates = Array.from({ length: 14 }, (_, i) => addDays(todayYmd(), i + 1));
+function OneTimeFinder({ durationMin, startOffsetDays = 1 }: { durationMin: number; startOffsetDays?: number }) {
+  const dates = Array.from({ length: 14 }, (_, i) => addDays(todayYmd(), i + startOffsetDays));
   const [date, setDate] = useState(dates[0]);
   const [selMin, setSelMin] = useState<number | null>(null);
   const [cache, setCache] = useState<Record<string, number[]>>({});

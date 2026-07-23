@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getRole } from "@/lib/auth";
-import { getCatalog } from "@/lib/queries";
+import { netOwed, type PayoutRow } from "@/lib/payouts";
+import { getCatalog, getSettingsMap } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { addDays, fmtDateLong, todayYmd, weekdayOf } from "@/lib/time";
 import type { Plan } from "@/lib/types";
@@ -17,7 +18,7 @@ export default async function TodayPage() {
   const weekStart = addDays(today, -weekdayOf(today)); // Sunday
   const monthStart = `${today.slice(0, 7)}-01`;
 
-  const [jobsQ, weekPayQ, monthPayQ, doneQ, balancesQ, plansQ, unlinkedQ, planApptsQ, pendingQ, catalog] = await Promise.all([
+  const [jobsQ, weekPayQ, monthPayQ, doneQ, balancesQ, plansQ, unlinkedQ, planApptsQ, pendingQ, catalog, payoutQ, settings] = await Promise.all([
     db
       .from("appointments")
       .select("*, customers(id,name,phone,email)")
@@ -49,9 +50,20 @@ export default async function TodayPage() {
       .order("date")
       .order("start_min"),
     getCatalog(),
+    db
+      .from("ledger_entries")
+      .select("amount,collected_by,settled_on")
+      .in("kind", ["payment", "credit"])
+      .is("settled_on", null),
+    getSettingsMap(),
   ]);
 
   const sum = (rows: { amount: number }[] | null) => (rows ?? []).reduce((s, r) => s + Number(r.amount), 0);
+  // Net of the Tyler <-> Gabe split across unsettled payments: + = Gabe owes Tyler.
+  const payoutRows: PayoutRow[] = ((payoutQ.data ?? []) as { amount: number; collected_by: "owner" | "washer"; settled_on: string | null }[]).map(
+    (r) => ({ amount: Number(r.amount), collectedBy: r.collected_by, settledOn: r.settled_on })
+  );
+  const payoutNet = Math.round(netOwed(payoutRows, Number(settings.split_washer_pct ?? 60)).net);
   const scheduledPlanIds = new Set((planApptsQ.data ?? []).map((r) => r.plan_id));
   const plans = (plansQ.data ?? []) as (Plan & { customers: { name: string } | null })[];
   const plansWithoutVisit = plans
@@ -82,7 +94,7 @@ export default async function TodayPage() {
               weekCollected: sum(weekPayQ.data),
               monthCollected: sum(monthPayQ.data),
               jobsCompleted: doneQ.count ?? 0,
-              totalOwed: owed.reduce((s, b) => s + Math.abs(b.balance), 0),
+              payoutNet,
               activePlans: plans.length,
             }
           : null

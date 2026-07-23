@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Wheel } from "@/components/brand";
 import { createAppointment } from "@/lib/actions/appointments";
-import { addonQuote, computeQuote, type Catalog } from "@/lib/catalog";
+import { addonQuote, computeQuote, type BaseService, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { todayYmd } from "@/lib/time";
 import { SIZES, sizeLabel, type SizeId } from "@/lib/types";
@@ -36,6 +36,8 @@ export function AppointmentSheet({
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState(defaultCustomer?.addresses?.[0]?.address ?? "");
   const [sizeId, setSizeId] = useState<SizeId>(defaultCustomer?.vehicles?.[0]?.size_id ?? "sedan");
+  const [service, setService] = useState<BaseService>("standard");
+  const [garageOk, setGarageOk] = useState(false);
   const [addonIds, setAddonIds] = useState<string[]>([]);
   const [date, setDate] = useState(defaultDate ?? todayYmd());
   const [startMin, setStartMin] = useState<number | null>(defaultStartMin ?? null);
@@ -47,7 +49,8 @@ export function AppointmentSheet({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  const quote = useMemo(() => computeQuote(catalog, sizeId, addonIds), [catalog, sizeId, addonIds]);
+  const quote = useMemo(() => computeQuote(catalog, sizeId, addonIds, service), [catalog, sizeId, addonIds, service]);
+  const ceramic = service === "ceramic" && catalog.ceramic;
   const price = priceOverride !== "" ? Number(priceOverride) : quote.price;
   const duration = durationOverride !== "" ? Number(durationOverride) : quote.minutes;
   const contactEmail = customer?.email || email;
@@ -72,6 +75,10 @@ export function AppointmentSheet({
       setError("Pick a time.");
       return;
     }
+    if (ceramic && !garageOk) {
+      setError("Ceramic coating needs a garage — confirm with the client before booking.");
+      return;
+    }
     setPending(true);
     const res = await createAppointment({
       date,
@@ -80,6 +87,8 @@ export function AppointmentSheet({
       price,
       sizeId,
       sizeLabel: sizeLabel(sizeId),
+      serviceName: ceramic ? catalog.ceramic!.name : undefined,
+      ceramic: !!ceramic,
       addons: catalog.addons
         .filter((a) => addonIds.includes(a.id))
         .map((a) => ({ id: a.id, name: a.name, price: addonQuote(a, sizeId).price })),
@@ -87,7 +96,7 @@ export function AppointmentSheet({
       phone: customer ? null : phone,
       email: customer ? null : email,
       address,
-      notes,
+      notes: ceramic ? [notes.trim(), "Ceramic: garage confirmed — car stays garaged 24h after coating."].filter(Boolean).join("\n") : notes,
       customerId: customer?.id ?? null,
       vehicleId: customer?.vehicles?.find((v) => v.size_id === sizeId)?.id ?? null,
       force: offGrid,
@@ -149,6 +158,47 @@ export function AppointmentSheet({
             ))}
           </div>
         </Field>
+
+        {catalog.ceramic && (
+          <Field label="Service">
+            <div className="grid grid-cols-2 gap-1.5">
+              {(
+                [
+                  { id: "standard", label: "The Standard Detail" },
+                  { id: "ceramic", label: catalog.ceramic.name },
+                ] as const
+              ).map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setService(s.id)}
+                  className={`h-9 rounded-md border px-1 text-[13px] font-medium transition-colors duration-150 ${
+                    service === s.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            {ceramic && (
+              <div className="mt-2 text-[13px] bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2.5 flex flex-col gap-1.5">
+                <p className="font-semibold">Ceramic coating rules</p>
+                <p>
+                  Includes the full in-and-out detail · books ~{Math.round(quote.minutes / 60)}h on site · at least{" "}
+                  {catalog.rules.ceramicLeadDays} days notice · collect a{" "}
+                  <span className="font-semibold num">
+                    {money(Math.round((price * catalog.rules.ceramicDepositPct) / 100))}
+                  </span>{" "}
+                  ({catalog.rules.ceramicDepositPct}%) deposit up front.
+                </p>
+                <label className="flex items-center gap-2.5 font-medium">
+                  <input type="checkbox" checked={garageOk} onChange={(e) => setGarageOk(e.target.checked)} />
+                  Client has a garage and can keep the car in it 24h after
+                </label>
+              </div>
+            )}
+          </Field>
+        )}
 
         <Field label="Add-ons">
           <div className="flex flex-col gap-1">

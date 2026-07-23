@@ -8,7 +8,7 @@ import { normalizeEmail, normalizePhone } from "@/lib/format";
 import { syncAppointmentToGcal } from "@/lib/gcal";
 import { notify as sendPush } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
-import { whenLabel } from "@/lib/time";
+import { diffDays, todayYmd, whenLabel } from "@/lib/time";
 import type { Addon, Appointment, PaymentMethod } from "@/lib/types";
 
 export type ActionResult = { ok: true; id?: string } | { ok: false; error: string };
@@ -45,10 +45,33 @@ export interface NewAppointment {
   planId?: string | null;
   force?: boolean;
   notify?: boolean;
+  /** Ceramic coating job: enforces the lead-time rule and flags the deposit in the push. */
+  ceramic?: boolean;
 }
+
+const fmtDur = (mins: number) => {
+  const h = Math.floor(mins / 60);
+  const m = Math.round(mins % 60);
+  return h ? `${h}h${m ? ` ${m}m` : ""}` : `${m}m`;
+};
 
 export async function createAppointment(input: NewAppointment): Promise<ActionResult> {
   const db = await createClient();
+
+  let depositNote = "";
+  if (input.ceramic) {
+    const { data: rows } = await db.from("settings").select("*").in("key", ["ceramic_lead_days", "ceramic_deposit_pct"]);
+    const settings = Object.fromEntries(((rows ?? []) as { key: string; value: string }[]).map((r) => [r.key, r.value]));
+    const leadDays = Number(settings.ceramic_lead_days) || 7;
+    if (!input.force && diffDays(todayYmd(), input.date) < leadDays) {
+      return {
+        ok: false,
+        error: `Ceramic coating needs at least ${leadDays} days notice (prep, weather window, deposit). Pick a later date, or use “Book anyway” to override.`,
+      };
+    }
+    const depositPct = Number(settings.ceramic_deposit_pct) || 50;
+    depositNote = ` · collect ${Math.round((input.price * depositPct) / 100)} deposit`;
+  }
   const { data, error } = await db.rpc("book_appointment", {
     p_date: input.date,
     p_start_min: input.startMin,
@@ -79,7 +102,7 @@ export async function createAppointment(input: NewAppointment): Promise<ActionRe
     after(() => sendEmail(to, subject, html)); // don't make the owner wait on Resend
   }
   const other = await counterpart();
-  const push = `${contact.name} · ${whenLabel(appt.date, appt.start_min)} · ${appt.service_name} · $${appt.price}`;
+  const push = `${contact.name} · ${whenLabel(appt.date, appt.start_min)} · ${appt.service_name} · $${appt.price}${depositNote}`;
   after(() => sendPush(other, "New job scheduled", push, "/calendar"));
   after(() => syncAppointmentToGcal(appt.id));
   refresh();
@@ -175,12 +198,59 @@ export async function cancelAppointment(id: string, notify: boolean): Promise<Ac
 
 export async function setAppointmentStatus(id: string, status: "scheduled" | "no_show"): Promise<ActionResult> {
   const db = await createClient();
+  const appt = await getAppt(id);
+  if (!appt) return { ok: false, error: "Appointment not found." };
+  // Reopening a completed job is owner-only (the DB trigger backstops this too).
+  if (appt.status === "completed" && (await getRole()) !== "owner") {
+    return { ok: false, error: "Only Tyler can reopen a completed job." };
+  }
   const { error } = await db
     .from("appointments")
     .update({ status, completed_at: null })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
+  if (appt.status === "completed") {
+    const contact = await resolveContact(appt);
+    after(() => sendPush("washer", "Job reopened", `${contact.name} · ${whenLabel(appt.date, appt.start_min)} is back on the schedule`, "/calendar"));
+  }
   after(() => syncAppointmentToGcal(id));
+  refresh();
+  return { ok: true, id };
+}
+
+/** Washer or owner taps "Start job" — starts the clock for the detail-duration stat. */
+export async function startAppointment(id: string): Promise<ActionResult> {
+  const db = await createClient();
+  const appt = await getAppt(id);
+  if (!appt) return { ok: false, error: "Appointment not found." };
+  if (appt.status !== "scheduled") return { ok: false, error: "Only scheduled jobs can be started." };
+  if (appt.started_at) return { ok: false, error: "Already started." };
+  const { error } = await db.from("appointments").update({ started_at: new Date().toISOString() }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  if ((await getRole()) === "washer") {
+    const contact = await resolveContact(appt);
+    after(() => sendPush("owner", "Job started", `${contact.name} · ${appt.service_name}`, "/"));
+  }
+  refresh();
+  return { ok: true, id };
+}
+
+/** Owner-only: fix the recorded start/completion timestamps on a completed job. */
+export async function adjustJobTimes(
+  id: string,
+  times: { startedAt: string | null; completedAt: string }
+): Promise<ActionResult> {
+  if ((await getRole()) !== "owner") return { ok: false, error: "Only Tyler can adjust job times." };
+  if (times.startedAt && new Date(times.startedAt) >= new Date(times.completedAt)) {
+    return { ok: false, error: "Start time must be before completion time." };
+  }
+  const db = await createClient();
+  const { error } = await db
+    .from("appointments")
+    .update({ started_at: times.startedAt, completed_at: times.completedAt })
+    .eq("id", id)
+    .eq("status", "completed");
+  if (error) return { ok: false, error: error.message };
   refresh();
   return { ok: true, id };
 }
@@ -195,16 +265,19 @@ export async function completeAppointment(
   const appt = await getAppt(id);
   if (!appt) return { ok: false, error: "Appointment not found." };
 
+  const completedAt = new Date();
   const { error } = await db
     .from("appointments")
-    .update({ status: "completed", completed_at: new Date().toISOString(), price: finalPrice, completion_note: note || null })
+    .update({ status: "completed", completed_at: completedAt.toISOString(), price: finalPrice, completion_note: note || null })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
 
+  const tookMin = appt.started_at ? (completedAt.getTime() - new Date(appt.started_at).getTime()) / 60000 : null;
   if ((await getRole()) === "washer") {
     const contact = await resolveContact(appt);
     const push =
       `${contact.name} · $${finalPrice}` +
+      (tookMin != null && tookMin > 0 ? ` · took ${fmtDur(tookMin)}` : "") +
       (payment && payment.amount > 0 ? ` · collected $${payment.amount} ${payment.method}` : " · no payment") +
       (note ? `\n“${note}”` : "");
     after(() => sendPush("owner", "Job completed", push));

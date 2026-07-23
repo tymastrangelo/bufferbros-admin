@@ -2,11 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
+import { getRole } from "@/lib/auth";
+import { visitsPerQuarter } from "@/lib/catalog";
 import { syncAppointmentToGcal } from "@/lib/gcal";
+import { notify } from "@/lib/notify";
 import { generateOccurrences, type GenerateResult } from "@/lib/occurrences";
 import { createClient } from "@/lib/supabase/server";
 import { diffDays, todayYmd } from "@/lib/time";
-import type { PlanCadence, PlanStatus } from "@/lib/types";
+import type { PaymentMethod, Plan, PlanCadence, PlanStatus } from "@/lib/types";
 import type { ActionResult } from "./appointments";
 
 const refresh = () => revalidatePath("/", "layout");
@@ -116,6 +119,63 @@ export async function setPlanStatus(id: string, status: PlanStatus): Promise<Act
   }
   refresh();
   return { ok: true, id };
+}
+
+/**
+ * Record an upfront block of plan visits paid in one go. Books the cash as a payment
+ * (which mirrors into company capital via the ledger trigger) plus a discount credit,
+ * so the customer's balance covers exactly `visits` future charges at full per-visit price.
+ * The discount only kicks in at a quarterly block or bigger.
+ */
+export async function recordPlanPrepay(
+  planId: string,
+  input: { visits: number; method: PaymentMethod; occurredOn: string; memo?: string | null }
+): Promise<ActionResult & { paid?: number; discount?: number }> {
+  if (!Number.isInteger(input.visits) || input.visits < 1) return { ok: false, error: "Enter how many visits they're prepaying." };
+  const db = await createClient();
+  const { data: planData, error: planErr } = await db.from("plans").select("*, customers(name)").eq("id", planId).single();
+  if (planErr || !planData) return { ok: false, error: "Plan not found." };
+  const plan = planData as Plan & { customers: { name: string } | null };
+  const perVisit = Number(plan.per_visit_price);
+  if (perVisit <= 0) return { ok: false, error: "Set the plan's per-visit price first." };
+
+  const { data: settingRow } = await db.from("settings").select("value").eq("key", "prepay_discount_pct").single();
+  const pct = Number(settingRow?.value) || 5;
+  const minVisits = visitsPerQuarter(plan.cadence, plan.interval_days);
+  const qualifies = input.visits >= minVisits;
+
+  const full = perVisit * input.visits;
+  const discount = qualifies ? Math.round(full * (pct / 100)) : 0;
+  const paid = full - discount;
+
+  const base = {
+    customer_id: plan.customer_id,
+    plan_id: planId,
+    occurred_on: input.occurredOn,
+  };
+  const role = await getRole();
+  const rows = [
+    {
+      ...base,
+      kind: "payment",
+      amount: paid,
+      method: input.method,
+      collected_by: role,
+      memo: input.memo?.trim() || `Prepaid ${input.visits} visits upfront`,
+    },
+    ...(discount > 0
+      ? [{ ...base, kind: "discount", amount: discount, memo: `Prepay discount (${pct}% · ${input.visits} visits)` }]
+      : []),
+  ];
+  const { error } = await db.from("ledger_entries").insert(rows);
+  if (error) return { ok: false, error: error.message };
+
+  if (role === "washer") {
+    const push = `${plan.customers?.name ?? "Customer"} · $${paid} for ${input.visits} visits${discount ? ` (saved $${discount})` : ""}`;
+    after(() => notify("owner", "Plan prepay collected", push, `/plans/${planId}`));
+  }
+  refresh();
+  return { ok: true, id: planId, paid, discount };
 }
 
 /** Materialize visits up to untilYmd (default: 8 weeks out, what the cron uses). */
