@@ -6,19 +6,22 @@ export type CollectedBy = "owner" | "washer";
 
 export interface PayoutRow {
   amount: number; // client payment, positive
+  /** Processor fee (Stripe). Cuts run on the net that actually arrived. */
+  fee?: number;
   collectedBy: CollectedBy;
   settledOn: string | null;
 }
 
 /** What one payment implies for the transfer between the two of them. */
 export function transfer(row: PayoutRow, washerPct: number) {
-  const gabeCut = (row.amount * washerPct) / 100;
+  const net = row.amount - (row.fee ?? 0);
+  const gabeCut = (net * washerPct) / 100;
   if (row.collectedBy === "owner") {
     // Tyler holds the cash, owes Gabe his cut.
     return { direction: "owner_to_washer" as const, amount: gabeCut };
   }
   // Gabe holds the cash, keeps his cut, owes Tyler the remainder.
-  return { direction: "washer_to_owner" as const, amount: row.amount - gabeCut };
+  return { direction: "washer_to_owner" as const, amount: net - gabeCut };
 }
 
 /**

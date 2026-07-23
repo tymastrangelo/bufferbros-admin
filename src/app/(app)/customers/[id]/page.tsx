@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getCatalog } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { todayYmd } from "@/lib/time";
-import type { Customer, LedgerEntry, Plan, Vehicle } from "@/lib/types";
+import type { Customer, LedgerEntry, PaymentRequest, Plan, Vehicle } from "@/lib/types";
 import type { JobWithCustomer } from "@/components/job-sheet";
 import { CustomerProfile } from "./profile-client";
 
@@ -16,7 +16,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const db = await createClient();
 
-  const [customerQ, vehiclesQ, plansQ, apptsQ, ledgerQ, catalog] = await Promise.all([
+  const [customerQ, vehiclesQ, plansQ, apptsQ, ledgerQ, catalog, requestsQ] = await Promise.all([
     db.from("customers").select("*").eq("id", id).single(),
     db.from("vehicles").select("*").eq("customer_id", id),
     db.from("plans").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
@@ -33,6 +33,12 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
       .order("occurred_on", { ascending: false })
       .order("created_at", { ascending: false }),
     getCatalog(),
+    db
+      .from("payment_requests")
+      .select("*")
+      .eq("customer_id", id)
+      .order("created_at", { ascending: false })
+      .limit(20),
   ]);
 
   if (!customerQ.data) notFound();
@@ -46,6 +52,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
       ledger={((ledgerQ.data ?? []) as LedgerEntry[]).map((e) => ({ ...e, amount: Number(e.amount) }))}
       catalog={catalog}
       today={todayYmd()}
+      paymentRequests={((requestsQ.data ?? []) as PaymentRequest[]).map((r) => ({ ...r, amount: Number(r.amount) }))}
     />
   );
 }

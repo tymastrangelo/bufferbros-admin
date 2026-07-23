@@ -29,6 +29,8 @@ export interface Customer {
   tags: string[];
   source: string | null;
   archived: boolean;
+  /** On: completing a job with no payment collected auto-emails a Stripe link. */
+  stripe_payments: boolean;
 }
 
 export interface Vehicle {
@@ -141,6 +143,30 @@ export interface LedgerEntry {
   memo: string | null;
   collected_by: "owner" | "washer";
   settled_on: string | null;
+  /** What the processor kept (Stripe). Splits run on amount - processor_fee. */
+  processor_fee: number;
+}
+
+export type PaymentRequestKind = "job" | "balance" | "prepay";
+export type PaymentRequestStatus = "pending" | "paid" | "canceled" | "expired";
+
+export interface PaymentRequest {
+  id: string;
+  created_at: string;
+  customer_id: string;
+  appointment_id: string | null;
+  plan_id: string | null;
+  kind: PaymentRequestKind;
+  amount: number;
+  visits: number | null;
+  discount: number;
+  memo: string | null;
+  stripe_session_id: string | null;
+  url: string | null;
+  status: PaymentRequestStatus;
+  paid_at: string | null;
+  processor_fee: number | null;
+  ledger_entry_id: string | null;
 }
 
 export interface Expense {

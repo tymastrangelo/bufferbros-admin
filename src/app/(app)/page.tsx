@@ -52,7 +52,7 @@ export default async function TodayPage() {
     getCatalog(),
     db
       .from("ledger_entries")
-      .select("amount,collected_by,settled_on")
+      .select("amount,processor_fee,collected_by,settled_on")
       .in("kind", ["payment", "credit"])
       .is("settled_on", null),
     getSettingsMap(),
@@ -60,8 +60,8 @@ export default async function TodayPage() {
 
   const sum = (rows: { amount: number }[] | null) => (rows ?? []).reduce((s, r) => s + Number(r.amount), 0);
   // Net of the Tyler <-> Gabe split across unsettled payments: + = Gabe owes Tyler.
-  const payoutRows: PayoutRow[] = ((payoutQ.data ?? []) as { amount: number; collected_by: "owner" | "washer"; settled_on: string | null }[]).map(
-    (r) => ({ amount: Number(r.amount), collectedBy: r.collected_by, settledOn: r.settled_on })
+  const payoutRows: PayoutRow[] = ((payoutQ.data ?? []) as { amount: number; processor_fee: number; collected_by: "owner" | "washer"; settled_on: string | null }[]).map(
+    (r) => ({ amount: Number(r.amount), fee: Number(r.processor_fee ?? 0), collectedBy: r.collected_by, settledOn: r.settled_on })
   );
   const payoutNet = Math.round(netOwed(payoutRows, Number(settings.split_washer_pct ?? 60)).net);
   const scheduledPlanIds = new Set((planApptsQ.data ?? []).map((r) => r.plan_id));

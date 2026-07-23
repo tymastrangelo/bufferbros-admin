@@ -57,5 +57,5 @@ export async function proxy(request: NextRequest, event: NextFetchEvent) {
 
 export const config = {
   // Everything except static assets and the cron route (guarded by CRON_SECRET instead).
-  matcher: ["/((?!_next/static|_next/image|favicon\\.ico|icon\\.png|apple-icon\\.png|icons/|brand/|manifest\\.webmanifest|api/cron).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon\\.ico|icon\\.png|apple-icon\\.png|icons/|brand/|manifest\\.webmanifest|api/cron|api/stripe).*)"],
 };

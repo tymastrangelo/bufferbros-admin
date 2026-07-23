@@ -10,10 +10,11 @@ import { LedgerEntrySheet } from "@/components/ledger-entry-sheet";
 import type { PickedCustomer } from "@/components/customer-picker";
 import { Balance, ErrorNote, Field, Sheet, StatusChip } from "@/components/ui";
 import { deleteVehicle, saveVehicle, setCustomerArchived, updateCustomer } from "@/lib/actions/customers";
+import { cancelPaymentRequest, sendPaymentRequest } from "@/lib/actions/stripe";
 import type { Catalog } from "@/lib/catalog";
 import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
 import { fmtDateShort, minToLabel } from "@/lib/time";
-import { SIZES, sizeLabel, type Customer, type EntryKind, type LedgerEntry, type Plan, type SizeId, type Vehicle } from "@/lib/types";
+import { SIZES, sizeLabel, type Customer, type EntryKind, type LedgerEntry, type PaymentRequest, type Plan, type SizeId, type Vehicle } from "@/lib/types";
 
 type Tab = "overview" | "visits" | "ledger";
 
@@ -25,6 +26,7 @@ export function CustomerProfile({
   ledger,
   catalog,
   today,
+  paymentRequests,
 }: {
   customer: Customer;
   vehicles: Vehicle[];
@@ -33,12 +35,14 @@ export function CustomerProfile({
   ledger: LedgerEntry[];
   catalog: Catalog;
   today: string;
+  paymentRequests: PaymentRequest[];
 }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [editOpen, setEditOpen] = useState(false);
   const [vehicleEdit, setVehicleEdit] = useState<Vehicle | "new" | null>(null);
   const [job, setJob] = useState<JobWithCustomer | null>(null);
   const [newAppt, setNewAppt] = useState(false);
+  const [stripeSheet, setStripeSheet] = useState(false);
   const [ledgerSheet, setLedgerSheet] = useState<{ entry?: LedgerEntry; kind?: EntryKind } | null>(null);
 
   const balance = ledger.reduce((s, e) => s + e.amount, 0);
@@ -215,10 +219,14 @@ export function CustomerProfile({
             <button className="btn btn-sm" onClick={() => setLedgerSheet({ kind: "discount" })}>
               Discount
             </button>
+            <button className="btn btn-sm" onClick={() => setStripeSheet(true)}>
+              Email Stripe link
+            </button>
             <span className="ml-auto self-center text-sm">
               Balance: <Balance amount={balance} />
             </span>
           </div>
+          <PaymentRequestList requests={paymentRequests} />
           <div className="card overflow-x-auto">
             {ledger.length === 0 ? (
               <p className="px-4 py-8 text-sm text-faint text-center">
@@ -232,6 +240,9 @@ export function CustomerProfile({
       )}
 
       {/* Sheets */}
+      {stripeSheet && (
+        <StripeRequestSheet customer={customer} balance={balance} onClose={() => setStripeSheet(false)} />
+      )}
       <EditCustomerSheet open={editOpen} onClose={() => setEditOpen(false)} customer={customer} />
       {vehicleEdit && (
         <VehicleSheet
@@ -355,6 +366,113 @@ function LedgerTable({ ledger, onEdit }: { ledger: LedgerEntry[]; onEdit: (e: Le
   );
 }
 
+const REQUEST_STATUS_TONE: Record<PaymentRequest["status"], string> = {
+  pending: "bg-warn-wash text-warn",
+  paid: "bg-ok-wash text-ok",
+  canceled: "bg-[#f1f4f9] text-faint",
+  expired: "bg-[#f1f4f9] text-faint",
+};
+
+function PaymentRequestList({ requests }: { requests: PaymentRequest[] }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState<string | null>(null);
+  const shown = requests.filter((r) => r.status === "pending" || r.status === "paid").slice(0, 6);
+  if (shown.length === 0) return null;
+  return (
+    <div className="card mb-3 divide-y divide-line">
+      <p className="label px-3.5 pt-2.5 pb-1.5">Stripe payment links</p>
+      {shown.map((r) => (
+        <div key={r.id} className="flex items-center gap-2.5 px-3.5 py-2 text-sm">
+          <span className={`chip ${REQUEST_STATUS_TONE[r.status]}`}>{r.status}</span>
+          <span className="num font-semibold">{money(r.amount)}</span>
+          <span className="text-ink-2 truncate grow">
+            {r.memo || (r.kind === "prepay" ? `${r.visits} visits prepaid` : r.kind)} · sent {fmtDateShort(r.created_at.slice(0, 10))}
+          </span>
+          {r.status === "pending" && r.url && (
+            <button className="btn btn-sm" onClick={() => navigator.clipboard.writeText(r.url!)}>
+              Copy link
+            </button>
+          )}
+          {r.status === "pending" && (
+            <button
+              className="btn btn-sm btn-danger"
+              disabled={busy === r.id}
+              onClick={async () => {
+                setBusy(r.id);
+                await cancelPaymentRequest(r.id);
+                setBusy(null);
+                router.refresh();
+              }}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StripeRequestSheet({
+  customer,
+  balance,
+  onClose,
+}: {
+  customer: Customer;
+  balance: number;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [amount, setAmount] = useState(balance < 0 ? String(-balance) : "");
+  const [what, setWhat] = useState("Detailing services");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <Sheet open onClose={onClose} title={`Stripe link — ${customer.name}`}>
+      <div className="flex flex-col gap-4">
+        {!customer.email && (
+          <ErrorNote>No email on file — add one to the customer first.</ErrorNote>
+        )}
+        <p className="text-sm text-ink-2">
+          Emails {customer.email ?? "them"} a secure Stripe checkout link. The payment books itself on the ledger when
+          they pay, and you get a push.
+        </p>
+        <Field label="Amount" hint={balance < 0 ? `They currently owe ${money(-balance)}` : undefined}>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-faint">$</span>
+            <input type="number" min={1} className="input num pl-7" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </div>
+        </Field>
+        <Field label="What it's for" hint="Shows on the email and the Stripe checkout page">
+          <input className="input" value={what} onChange={(e) => setWhat(e.target.value)} />
+        </Field>
+        <ErrorNote>{error}</ErrorNote>
+        <button
+          className="btn btn-primary h-11"
+          disabled={pending || !customer.email || !(Number(amount) > 0)}
+          onClick={async () => {
+            setError(null);
+            setPending(true);
+            const res = await sendPaymentRequest({
+              customerId: customer.id,
+              amount: Number(amount),
+              kind: "balance",
+              what: what.trim() || "Detailing services",
+            });
+            setPending(false);
+            if (!res.ok) return setError(res.error);
+            onClose();
+            router.refresh();
+          }}
+        >
+          {pending ? "Sending…" : `Email link for ${money(Number(amount) || 0)}`}
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
 function EditCustomerSheet({ open, onClose, customer }: { open: boolean; onClose: () => void; customer: Customer }) {
   const router = useRouter();
   const [name, setName] = useState(customer.name);
@@ -363,6 +481,7 @@ function EditCustomerSheet({ open, onClose, customer }: { open: boolean; onClose
   const [addresses, setAddresses] = useState(customer.addresses.length ? customer.addresses : [{ label: "Home", address: "" }]);
   const [tags, setTags] = useState(customer.tags.join(", "));
   const [notes, setNotes] = useState(customer.notes ?? "");
+  const [stripePay, setStripePay] = useState(customer.stripe_payments ?? false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -414,6 +533,15 @@ function EditCustomerSheet({ open, onClose, customer }: { open: boolean; onClose
         <Field label="Notes">
           <textarea className="textarea" value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
+        <label className="flex items-center gap-2.5 text-sm">
+          <input type="checkbox" checked={stripePay} onChange={(e) => setStripePay(e.target.checked)} />
+          <span>
+            Pays through Stripe
+            <span className="block text-[12px] text-faint">
+              Completing a job with no payment collected auto-emails them a payment link.
+            </span>
+          </span>
+        </label>
         <ErrorNote>{error}</ErrorNote>
         <button
           className="btn btn-primary h-11"
@@ -428,6 +556,7 @@ function EditCustomerSheet({ open, onClose, customer }: { open: boolean; onClose
               addresses,
               tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
               notes,
+              stripePayments: stripePay,
             });
             setPending(false);
             if (!res.ok) return setError(res.error);

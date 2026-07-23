@@ -48,7 +48,26 @@ export async function GET(request: Request) {
         `${pendingQ.count} booking${pendingQ.count === 1 ? "" : "s"} still need${pendingQ.count === 1 ? "s" : ""} your approval.`
       );
     }
-    return NextResponse.json({ ok: true, jobs: jobs.length, pending: pendingQ.count ?? 0 });
+
+    // Stripe links that were sent but never paid — nudge the owner so money doesn't rot.
+    const { data: unpaidRows } = await db
+      .from("payment_requests")
+      .select("amount, created_at, customers(name)")
+      .eq("status", "pending")
+      .order("created_at");
+    const unpaid = (unpaidRows ?? []) as unknown as { amount: number; created_at: string; customers: { name: string } | null }[];
+    if (unpaid.length > 0) {
+      const total = unpaid.reduce((s, r) => s + Number(r.amount), 0);
+      const oldestDays = Math.floor((Date.now() - new Date(unpaid[0].created_at).getTime()) / 86400000);
+      const names = unpaid.slice(0, 4).map((r) => `${r.customers?.name ?? "Unknown"} $${Number(r.amount)}`).join(", ");
+      await notify(
+        "owner",
+        `Unpaid Stripe links: $${total}`,
+        `${unpaid.length} link${unpaid.length === 1 ? "" : "s"} outstanding (oldest ${oldestDays}d): ${names}${unpaid.length > 4 ? "…" : ""}`,
+        "/money/payments"
+      );
+    }
+    return NextResponse.json({ ok: true, jobs: jobs.length, pending: pendingQ.count ?? 0, unpaidLinks: unpaid.length });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }

@@ -84,6 +84,25 @@ ${jobDetails(info)}
   };
 }
 
+export function paymentRequestEmail(info: {
+  name: string;
+  amount: number;
+  what: string; // "The Standard Detail on July 20" / "Maintenance plan — 6 visits prepaid"
+  url: string;
+}): { subject: string; html: string } {
+  return {
+    subject: `Buffer Bros — pay $${info.amount} online`,
+    html: shell(
+      `<p>Hi ${esc(info.name)},</p>
+<p>Here's your secure payment link for <strong>${esc(info.what)}</strong>.</p>
+<p style="margin:24px 0">
+  <a href="${info.url}" style="background:#2563eb;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 28px;border-radius:8px;display:inline-block">Pay $${info.amount}</a>
+</p>
+<p style="font-size:13px;color:#6b7280">Card, Apple Pay, and more — handled securely by Stripe. Prefer cash, Zelle, or Venmo? That works too, just ignore this link.</p>`
+    ),
+  };
+}
+
 export function cancelledEmail(info: { name: string; when: string }): { subject: string; html: string } {
   return {
     subject: "Your Buffer Bros appointment was cancelled",

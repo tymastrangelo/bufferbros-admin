@@ -12,6 +12,7 @@ import { fmtDateShort } from "@/lib/time";
 export interface PayoutEntry {
   id: string;
   amount: number;
+  processor_fee: number;
   occurred_on: string;
   collected_by: "owner" | "washer";
   settled_on: string | null;
@@ -32,7 +33,7 @@ export function PayoutsClient({ rows, washerPct }: { rows: PayoutEntry[]; washer
   const router = useRouter();
 
   const { net, count } = useMemo(
-    () => netOwed(rows.map((r) => ({ amount: r.amount, collectedBy: r.collected_by, settledOn: r.settled_on })), washerPct),
+    () => netOwed(rows.map((r) => ({ amount: r.amount, fee: r.processor_fee, collectedBy: r.collected_by, settledOn: r.settled_on })), washerPct),
     [rows, washerPct]
   );
 
@@ -101,7 +102,7 @@ export function PayoutsClient({ rows, washerPct }: { rows: PayoutEntry[]; washer
             </thead>
             <tbody>
               {shown.map((r) => {
-                const t = transfer({ amount: r.amount, collectedBy: r.collected_by, settledOn: r.settled_on }, washerPct);
+                const t = transfer({ amount: r.amount, fee: r.processor_fee, collectedBy: r.collected_by, settledOn: r.settled_on }, washerPct);
                 const transferText =
                   t.direction === "owner_to_washer" ? `Pay Gabe ${money(t.amount)}` : `Gabe owes you ${money(t.amount)}`;
                 return (

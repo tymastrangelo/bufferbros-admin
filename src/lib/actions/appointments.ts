@@ -8,8 +8,9 @@ import { normalizeEmail, normalizePhone } from "@/lib/format";
 import { syncAppointmentToGcal } from "@/lib/gcal";
 import { notify as sendPush } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
-import { diffDays, todayYmd, whenLabel } from "@/lib/time";
+import { diffDays, fmtDateShort, todayYmd, whenLabel } from "@/lib/time";
 import type { Addon, Appointment, PaymentMethod } from "@/lib/types";
+import { sendPaymentRequest } from "./stripe";
 
 export type ActionResult = { ok: true; id?: string } | { ok: false; error: string };
 
@@ -307,6 +308,26 @@ export async function completeAppointment(
         memo: payment.memo || null,
       });
       if (payErr) return { ok: false, error: payErr.message };
+    } else {
+      // Nothing collected on site: Stripe-enabled customers get a payment link by email.
+      const { data: cust } = await db
+        .from("customers")
+        .select("name,email,stripe_payments")
+        .eq("id", appt.customer_id)
+        .single();
+      if (cust?.stripe_payments && cust.email) {
+        const link = await sendPaymentRequest({
+          customerId: appt.customer_id,
+          amount: finalPrice,
+          kind: "job",
+          appointmentId: id,
+          planId: appt.plan_id,
+          what: `${appt.service_name} — ${fmtDateShort(appt.date)}`,
+        });
+        if (!link.ok) {
+          after(() => sendPush("owner", "Stripe link not sent", `${cust.name}: ${link.error}`, `/customers/${appt.customer_id}`));
+        }
+      }
     }
   }
   after(() => syncAppointmentToGcal(id));

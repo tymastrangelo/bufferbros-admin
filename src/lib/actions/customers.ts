@@ -15,6 +15,8 @@ export interface CustomerFields {
   addresses?: { label: string; address: string }[];
   notes?: string | null;
   tags?: string[];
+  /** Auto-email a Stripe payment link when a job completes without payment. */
+  stripePayments?: boolean;
 }
 
 function clean(fields: CustomerFields) {
@@ -25,6 +27,7 @@ function clean(fields: CustomerFields) {
     addresses: (fields.addresses ?? []).filter((a) => a.address.trim()),
     notes: fields.notes?.trim() || null,
     tags: (fields.tags ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean),
+    ...(fields.stripePayments !== undefined && { stripe_payments: fields.stripePayments }),
   };
 }
 

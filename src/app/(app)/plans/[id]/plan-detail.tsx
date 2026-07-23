@@ -8,6 +8,7 @@ import { PlanFormSheet } from "@/components/plan-form";
 import { ScheduleSheet } from "@/components/schedule-sheet";
 import { Balance, ErrorNote, Sheet, StatusChip } from "@/components/ui";
 import { recordPlanPrepay, setPlanStatus } from "@/lib/actions/plans";
+import { sendPaymentRequest } from "@/lib/actions/stripe";
 import { initialDetailPrice, visitsPerQuarter, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { fmtDateShort, minToLabel, WEEKDAYS } from "@/lib/time";
@@ -286,6 +287,24 @@ function PrepaySheet({
     onDone();
   }
 
+  async function submitStripe() {
+    setError(null);
+    setPending(true);
+    const res = await sendPaymentRequest({
+      customerId: plan.customer_id,
+      planId: plan.id,
+      kind: "prepay",
+      amount: due,
+      visits: n,
+      discount,
+      what: `Maintenance plan — ${n} visits prepaid`,
+      memo: memo.trim() || null,
+    });
+    setPending(false);
+    if (!res.ok) return setError(res.error);
+    onDone();
+  }
+
   return (
     <Sheet open onClose={onClose} title={`Prepay — ${plan.customers.name}`}>
       <div className="flex flex-col gap-4">
@@ -335,8 +354,12 @@ function PrepaySheet({
         </div>
         <ErrorNote>{error}</ErrorNote>
         <button className="btn btn-primary h-11" disabled={pending || n < 1} onClick={submit}>
-          {pending ? "Recording…" : `Record ${money(due)} prepay`}
+          {pending ? "Working…" : `Record ${money(due)} prepay`}
         </button>
+        <button className="btn" disabled={pending || n < 1 || !plan.customers.email} onClick={submitStripe}>
+          Email a Stripe link for {money(due)} instead
+        </button>
+        {!plan.customers.email && <p className="text-[12px] text-faint -mt-2">Stripe link needs an email on the customer.</p>}
       </div>
     </Sheet>
   );
