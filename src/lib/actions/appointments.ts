@@ -42,7 +42,8 @@ export interface NewAppointment {
   address?: string | null;
   notes?: string | null;
   customerId?: string | null;
-  vehicleId?: string | null;
+  /** All vehicles this visit covers; the first doubles as the legacy vehicle_id. */
+  vehicleIds?: string[];
   planId?: string | null;
   force?: boolean;
   notify?: boolean;
@@ -78,7 +79,7 @@ export async function createAppointment(input: NewAppointment): Promise<ActionRe
   // one by phone/email), so the ledger, Stripe links, and payment status all work.
   // Web bookings still arrive unlinked on purpose — the owner matches those by hand.
   let customerId = input.customerId || null;
-  let vehicleId = input.vehicleId || null;
+  let vehicleIds = input.vehicleIds ?? [];
   if (!customerId && input.name?.trim()) {
     const phone = normalizePhone(input.phone);
     const email = normalizeEmail(input.email);
@@ -108,7 +109,7 @@ export async function createAppointment(input: NewAppointment): Promise<ActionRe
             .insert({ customer_id: customerId, size_id: input.sizeId })
             .select("id")
             .single();
-          vehicleId = v?.id ?? null;
+          if (v) vehicleIds = [v.id];
         }
       }
       // insert failure: fall through and book as a plain one-off — never lose the booking
@@ -130,13 +131,20 @@ export async function createAppointment(input: NewAppointment): Promise<ActionRe
     p_notes: input.notes || null,
     p_source: "manual",
     p_customer_id: customerId,
-    p_vehicle_id: vehicleId,
+    p_vehicle_id: vehicleIds[0] ?? null,
     p_plan_id: input.planId || null,
     p_mode: input.force ? "force" : "overlap",
   });
   if (error) return { ok: false, error: friendly(error.message) };
 
   const appt = data as Appointment;
+  if (vehicleIds.length) {
+    // Booking exists either way — a failed link just loses the per-car list, not the job.
+    const { error: vehErr } = await db
+      .from("appointment_vehicles")
+      .insert(vehicleIds.map((vehicle_id) => ({ appointment_id: appt.id, vehicle_id })));
+    if (vehErr) console.error("appointment_vehicles insert:", vehErr.message);
+  }
   const contact = await resolveContact(appt);
   if (input.notify && contact.email) {
     const { subject, html } = confirmedEmail(emailInfo(appt, contact.name));
@@ -311,21 +319,26 @@ export async function completeAppointment(
   payment?: { amount: number; method: PaymentMethod; memo?: string } | null,
   note?: string | null,
   /** Email a Stripe checkout link for the final price instead of collecting now. */
-  stripeLink = false
+  stripeLink = false,
+  /** Owner washed this one himself — Gabe gets no cut of its payments. */
+  selfDone = false
 ): Promise<ActionResult> {
   const db = await createClient();
   const appt = await getAppt(id);
   if (!appt) return { ok: false, error: "Appointment not found." };
 
+  const role = await getRole();
+  const self = selfDone && role === "owner"; // washer can't flag jobs as owner-done
   const completedAt = new Date();
+  // self_done lands before the payment insert so the mirror trigger splits it right.
   const { error } = await db
     .from("appointments")
-    .update({ status: "completed", completed_at: completedAt.toISOString(), price: finalPrice, completion_note: note || null })
+    .update({ status: "completed", completed_at: completedAt.toISOString(), price: finalPrice, completion_note: note || null, self_done: self })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
 
   const tookMin = appt.started_at ? (completedAt.getTime() - new Date(appt.started_at).getTime()) / 60000 : null;
-  if ((await getRole()) === "washer") {
+  if (role === "washer") {
     const contact = await resolveContact(appt);
     const push =
       `${contact.name} · $${finalPrice}` +
@@ -357,6 +370,9 @@ export async function completeAppointment(
         method: payment.method,
         occurred_on: appt.date,
         memo: payment.memo || null,
+        collected_by: role, // was silently defaulting to 'owner' even when Gabe collected
+        // Self-done + owner-collected: no Gabe transfer exists, so it's born settled.
+        ...(self ? { settled_on: appt.date } : {}),
       });
       if (payErr) return { ok: false, error: payErr.message };
     } else if (stripeLink) {
@@ -431,11 +447,26 @@ export async function updateAppointment(
       | "contact_phone"
       | "contact_email"
     >
-  >
+  >,
+  /** When set, replaces the visit's vehicle list (and keeps vehicle_id = first). */
+  vehicleIds?: string[]
 ): Promise<ActionResult> {
   const db = await createClient();
-  const { error } = await db.from("appointments").update(fields).eq("id", id);
+  const { error } = await db
+    .from("appointments")
+    .update(vehicleIds ? { ...fields, vehicle_id: vehicleIds[0] ?? null } : fields)
+    .eq("id", id);
   if (error) return { ok: false, error: error.message };
+  if (vehicleIds) {
+    const { error: delErr } = await db.from("appointment_vehicles").delete().eq("appointment_id", id);
+    if (delErr) return { ok: false, error: delErr.message };
+    if (vehicleIds.length) {
+      const { error: insErr } = await db
+        .from("appointment_vehicles")
+        .insert(vehicleIds.map((vehicle_id) => ({ appointment_id: id, vehicle_id })));
+      if (insErr) return { ok: false, error: insErr.message };
+    }
+  }
   after(() => syncAppointmentToGcal(id));
   refresh();
   return { ok: true, id };

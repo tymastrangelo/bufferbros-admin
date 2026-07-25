@@ -31,6 +31,8 @@ export interface Catalog {
     ceramicDepositPct: number;
     planInitialDiscountPct: number;
     prepayDiscountPct: number;
+    /** Off a plan's per-visit price when 2+ cars are cleaned in the same visit. */
+    multiCarDiscountPct: number;
   };
 }
 
@@ -47,6 +49,22 @@ export function computeQuote(
     price: base.price + extras.reduce((s, a) => s + a.price, 0),
     minutes: base.minutes + extras.reduce((s, a) => s + a.minutes, 0),
   };
+}
+
+/** One visit covering several cars: each car quoted at its own size, summed. */
+export function computeMultiQuote(
+  catalog: Catalog,
+  sizeIds: SizeId[],
+  addonIds: string[],
+  service: BaseService = "standard"
+): { price: number; minutes: number } {
+  return sizeIds.reduce(
+    (acc, s) => {
+      const q = computeQuote(catalog, s, addonIds, service);
+      return { price: acc.price + q.price, minutes: acc.minutes + q.minutes };
+    },
+    { price: 0, minutes: 0 }
+  );
 }
 
 export function planPrice(catalog: Catalog, cadence: PlanCadence, sizeId: SizeId): number | null {

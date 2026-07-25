@@ -18,13 +18,14 @@ import {
 } from "@/lib/actions/appointments";
 import { useOwner } from "@/lib/use-owner";
 import { Wheel } from "@/components/brand";
-import { addonQuote, computeQuote, type Catalog } from "@/lib/catalog";
+import { addonQuote, computeMultiQuote, computeQuote, type Catalog } from "@/lib/catalog";
 import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { fmtDateShort, minToLabel, whenLabel } from "@/lib/time";
-import { PAYMENT_METHODS, SIZES, sizeLabel, type Appointment, type Customer, type PaymentMethod, type SizeId } from "@/lib/types";
+import { PAYMENT_METHODS, SIZES, sizeLabel, vehicleLabel, type Appointment, type Customer, type PaymentMethod, type SizeId, type Vehicle } from "@/lib/types";
 import { IconMail, IconMessage, IconPhone, IconPin } from "./icons";
 import { CustomerPicker, type PickedCustomer } from "./customer-picker";
+import { VehiclePicker } from "./vehicle-picker";
 import { SlotPicker } from "./slot-picker";
 import { ErrorNote, Field, Sheet, StatusChip } from "./ui";
 
@@ -93,6 +94,7 @@ export function JobSheet({
         <div>
           <div className="flex items-center gap-2 flex-wrap">
             <StatusChip status={job.status} />
+            {job.self_done && <span className="chip bg-ok-wash text-ok">Tyler&apos;s job — no payout</span>}
             {job.plan_id && <span className="chip bg-brand-wash text-brand-deep">plan</span>}
             {job.source === "web" && <span className="chip bg-[#f1f4f9] text-ink-2">web booking</span>}
             {unlinked && <span className="chip bg-warn-wash text-warn">not linked</span>}
@@ -100,7 +102,7 @@ export function JobSheet({
           <p className="mt-2 text-[15px] font-semibold num">{whenLabel(job.date, job.start_min)}</p>
           <p className="text-sm text-ink-2">
             {job.service_name}
-            {job.size_id ? ` · ${sizeLabel(job.size_id)}` : ""} · {job.duration_min} min ·{" "}
+            {job.size_label ? ` · ${job.size_label}` : job.size_id ? ` · ${sizeLabel(job.size_id)}` : ""} · {job.duration_min} min ·{" "}
             <span className="num font-medium text-ink">{money(Number(job.price))}</span>
           </p>
           {job.addons.length > 0 && (
@@ -272,10 +274,11 @@ export function JobSheet({
         {panel === "complete" && (
           <CompletePanel
             job={job}
+            owner={owner}
             pending={pending}
             onCancel={() => setPanel("none")}
-            onSubmit={(finalPrice, payment, note, stripeLink) =>
-              run(() => completeAppointment(job.id, finalPrice, payment, note, stripeLink)).then((ok) => ok && onClose())
+            onSubmit={(finalPrice, payment, note, stripeLink, selfDone) =>
+              run(() => completeAppointment(job.id, finalPrice, payment, note, stripeLink, selfDone)).then((ok) => ok && onClose())
             }
           />
         )}
@@ -296,7 +299,9 @@ export function JobSheet({
             catalog={catalog}
             pending={pending}
             onCancel={() => setPanel("none")}
-            onSubmit={(fields) => run(() => updateAppointment(job.id, fields)).then((ok) => ok && setPanel("none"))}
+            onSubmit={(fields, vehicleIds) =>
+              run(() => updateAppointment(job.id, fields, vehicleIds)).then((ok) => ok && setPanel("none"))
+            }
           />
         )}
         {panel === "cancel" && (
@@ -336,22 +341,26 @@ type PayMode = "now" | "stripe" | "balance";
 
 function CompletePanel({
   job,
+  owner,
   pending,
   onCancel,
   onSubmit,
 }: {
   job: JobWithCustomer;
+  owner: boolean;
   pending: boolean;
   onCancel: () => void;
   onSubmit: (
     finalPrice: number,
     payment: { amount: number; method: PaymentMethod; memo?: string } | null,
     note: string,
-    stripeLink: boolean
+    stripeLink: boolean,
+    selfDone: boolean
   ) => void;
 }) {
   const email = job.customers?.email ?? null;
   const canStripe = !!job.customer_id && !!email;
+  const [selfDone, setSelfDone] = useState(job.self_done ?? false);
   const [finalPrice, setFinalPrice] = useState(String(job.price));
   const [payMode, setPayMode] = useState<PayMode>(() => {
     if (!job.customer_id) return "balance";
@@ -447,6 +456,12 @@ function CompletePanel({
           Not linked to a customer — completing won&apos;t touch any ledger. Link first to track the money.
         </p>
       )}
+      {owner && (
+        <label className="flex items-center gap-2.5 text-sm font-medium">
+          <input type="checkbox" checked={selfDone} onChange={(e) => setSelfDone(e.target.checked)} />
+          I did this detail myself — no payout to Gabe
+        </label>
+      )}
       <Field label="Anything to note? (optional)">
         <textarea
           className="textarea"
@@ -468,7 +483,8 @@ function CompletePanel({
               Number(finalPrice),
               payMode === "now" && job.customer_id ? { amount: Number(amount), method, memo } : null,
               note.trim(),
-              payMode === "stripe"
+              payMode === "stripe",
+              selfDone
             )
           }
         >
@@ -720,36 +736,87 @@ function EditPanel({
   catalog: Catalog;
   pending: boolean;
   onCancel: () => void;
-  onSubmit: (fields: Parameters<typeof updateAppointment>[1]) => void;
+  onSubmit: (fields: Parameters<typeof updateAppointment>[1], vehicleIds?: string[]) => void;
 }) {
   const [sizeId, setSizeId] = useState<SizeId>((job.size_id as SizeId) || "sedan");
   const [addonIds, setAddonIds] = useState<string[]>(job.addons.map((a) => a.id));
   const [price, setPrice] = useState(String(job.price));
   const [address, setAddress] = useState(job.address ?? "");
   const [notes, setNotes] = useState(job.notes ?? "");
+  // Linked customer: edit which of their cars this visit covers.
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [vehicleIds, setVehicleIds] = useState<string[]>([]);
+  const [vehiclesLoaded, setVehiclesLoaded] = useState(false);
   // Recompute against the right base service (a ceramic job re-quotes as ceramic).
   const service = catalog.ceramic && job.service_name === catalog.ceramic.name ? ("ceramic" as const) : ("standard" as const);
+
+  useEffect(() => {
+    if (!job.customer_id) return;
+    let stale = false;
+    (async () => {
+      const db = createClient();
+      const [vQ, avQ] = await Promise.all([
+        db.from("vehicles").select("*").eq("customer_id", job.customer_id),
+        db.from("appointment_vehicles").select("vehicle_id").eq("appointment_id", job.id),
+      ]);
+      if (stale) return;
+      setVehicles((vQ.data as Vehicle[]) ?? []);
+      setVehicleIds(((avQ.data ?? []) as { vehicle_id: string }[]).map((r) => r.vehicle_id));
+      setVehiclesLoaded(true);
+    })();
+    return () => {
+      stale = true;
+    };
+  }, [job.id, job.customer_id]);
+
+  const selVehicles = vehicles.filter((v) => vehicleIds.includes(v.id));
+  const requote = (ids: string[], addons: string[]) => {
+    const sel = vehicles.filter((v) => ids.includes(v.id));
+    return sel.length
+      ? computeMultiQuote(catalog, sel.map((v) => v.size_id), addons, service)
+      : computeQuote(catalog, sizeId, addons, service);
+  };
+  const addonPrice = (a: Catalog["addons"][number]) =>
+    selVehicles.length
+      ? selVehicles.reduce((s, v) => s + addonQuote(a, v.size_id).price, 0)
+      : addonQuote(a, sizeId).price;
 
   return (
     <div className="card p-4 flex flex-col gap-3 bg-surface">
       <p className="label">Edit details</p>
-      <Field label="Vehicle size">
-        <select
-          className="select"
-          value={sizeId}
-          onChange={(e) => {
-            const next = e.target.value as SizeId;
-            setSizeId(next);
-            setPrice(String(computeQuote(catalog, next, addonIds, service).price));
-          }}
-        >
-          {SIZES.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-      </Field>
+      {job.customer_id && vehiclesLoaded && (
+        <Field label={`Vehicles${selVehicles.length > 1 ? ` — ${selVehicles.length} cars this visit` : ""}`}>
+          <VehiclePicker
+            customerId={job.customer_id}
+            vehicles={vehicles}
+            selected={vehicleIds}
+            onChange={(ids) => {
+              setVehicleIds(ids);
+              setPrice(String(requote(ids, addonIds).price));
+            }}
+            onVehiclesChange={setVehicles}
+          />
+        </Field>
+      )}
+      {selVehicles.length === 0 && (
+        <Field label="Vehicle size">
+          <select
+            className="select"
+            value={sizeId}
+            onChange={(e) => {
+              const next = e.target.value as SizeId;
+              setSizeId(next);
+              setPrice(String(computeQuote(catalog, next, addonIds, service).price));
+            }}
+          >
+            {SIZES.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
       <Field label="Add-ons">
         <div className="flex flex-col gap-1">
           {catalog.addons.map((a) => (
@@ -760,11 +827,11 @@ function EditPanel({
                 onChange={(e) => {
                   const next = e.target.checked ? [...addonIds, a.id] : addonIds.filter((i) => i !== a.id);
                   setAddonIds(next);
-                  setPrice(String(computeQuote(catalog, sizeId, next, service).price));
+                  setPrice(String(requote(vehicleIds, next).price));
                 }}
               />
               <span className="grow">{a.name}</span>
-              <span className="text-xs text-faint num">{money(addonQuote(a, sizeId).price)}</span>
+              <span className="text-xs text-faint num">{money(addonPrice(a))}</span>
             </label>
           ))}
         </div>
@@ -789,17 +856,20 @@ function EditPanel({
           className="btn btn-primary"
           disabled={pending}
           onClick={() =>
-            onSubmit({
-              size_id: sizeId,
-              size_label: sizeLabel(sizeId),
-              addons: catalog.addons
-                .filter((a) => addonIds.includes(a.id))
-                .map((a) => ({ id: a.id, name: a.name, price: addonQuote(a, sizeId).price })),
-              price: Number(price),
-              duration_min: computeQuote(catalog, sizeId, addonIds, service).minutes,
-              address: address || null,
-              notes: notes || null,
-            })
+            onSubmit(
+              {
+                size_id: selVehicles.length > 1 ? null : selVehicles[0]?.size_id ?? sizeId,
+                size_label: selVehicles.length ? selVehicles.map(vehicleLabel).join(" + ") : sizeLabel(sizeId),
+                addons: catalog.addons
+                  .filter((a) => addonIds.includes(a.id))
+                  .map((a) => ({ id: a.id, name: a.name, price: addonPrice(a) })),
+                price: Number(price),
+                duration_min: requote(vehicleIds, addonIds).minutes,
+                address: address || null,
+                notes: notes || null,
+              },
+              vehiclesLoaded ? vehicleIds : undefined
+            )
           }
         >
           {pending ? "Saving…" : "Save changes"}

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { IconPhone, IconPin } from "@/components/icons";
+import { RemindersCard, type ReminderRow } from "@/components/reminders-card";
 import { EmptyState } from "@/components/ui";
 import type { Catalog } from "@/lib/catalog";
 import { fmtPhone, mapsHref, money, telHref } from "@/lib/format";
@@ -31,12 +32,14 @@ export function TodayClient({
   catalog,
   stats,
   attention,
+  reminders,
 }: {
   dateLabel: string;
   jobs: JobWithCustomer[];
   catalog: Catalog;
   stats: Stats | null; // null = washer view: schedule only
   attention: AttentionData | null;
+  reminders: ReminderRow[] | null; // null = washer view
 }) {
   // Store the tapped job, render the fresh copy from server props so an open
   // sheet updates in place after any action refreshes the route.
@@ -186,6 +189,8 @@ export function TodayClient({
           </div>
         </section>
       )}
+
+      {reminders && <RemindersCard reminders={reminders} />}
 
       {selectedJob && <JobSheet job={selectedJob} onClose={() => setSelected(null)} catalog={catalog} />}
     </div>

@@ -16,7 +16,8 @@ const refresh = () => revalidatePath("/", "layout");
 
 export interface PlanFields {
   customerId: string;
-  vehicleId?: string | null;
+  /** All cars a visit covers; the first doubles as the legacy vehicle_id. */
+  vehicleIds?: string[];
   cadence: PlanCadence;
   intervalDays?: number | null;
   perVisitPrice: number;
@@ -34,7 +35,7 @@ export interface PlanFields {
 function toRow(fields: PlanFields) {
   return {
     customer_id: fields.customerId,
-    vehicle_id: fields.vehicleId || null,
+    vehicle_id: fields.vehicleIds?.[0] ?? null,
     cadence: fields.cadence,
     interval_days: fields.cadence === "custom" ? fields.intervalDays ?? null : null,
     per_visit_price: fields.perVisitPrice,
@@ -50,6 +51,15 @@ function toRow(fields: PlanFields) {
   };
 }
 
+/** Replace which cars a plan covers (plan_vehicles rows). */
+async function setPlanVehicles(db: Awaited<ReturnType<typeof createClient>>, planId: string, vehicleIds: string[]) {
+  const { error: delErr } = await db.from("plan_vehicles").delete().eq("plan_id", planId);
+  if (delErr) return delErr;
+  if (!vehicleIds.length) return null;
+  const { error } = await db.from("plan_vehicles").insert(vehicleIds.map((vehicle_id) => ({ plan_id: planId, vehicle_id })));
+  return error;
+}
+
 export async function createPlan(fields: PlanFields): Promise<ActionResult> {
   if (fields.cadence === "custom" && !fields.intervalDays) {
     return { ok: false, error: "Custom cadence needs an every-N-days interval." };
@@ -57,6 +67,8 @@ export async function createPlan(fields: PlanFields): Promise<ActionResult> {
   const db = await createClient();
   const { data, error } = await db.from("plans").insert(toRow(fields)).select("id").single();
   if (error) return { ok: false, error: error.message };
+  const vehErr = await setPlanVehicles(db, data.id, fields.vehicleIds ?? []);
+  if (vehErr) return { ok: false, error: `Plan saved, but linking vehicles failed: ${vehErr.message}` };
   refresh();
   return { ok: true, id: data.id };
 }
@@ -70,6 +82,8 @@ export async function updatePlan(
   const db = await createClient();
   const { error } = await db.from("plans").update(toRow(fields)).eq("id", id);
   if (error) return { ok: false, error: error.message };
+  const vehErr = await setPlanVehicles(db, id, fields.vehicleIds ?? []);
+  if (vehErr) return { ok: false, error: `Plan saved, but linking vehicles failed: ${vehErr.message}` };
 
   let updatedVisits = 0;
   if (applyToScheduled) {

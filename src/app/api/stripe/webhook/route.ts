@@ -64,6 +64,13 @@ export async function POST(request: Request) {
     // fee stays 0; Tyler can correct the ledger row if it matters
   }
 
+  // Self-done job: no Gabe transfer exists on this money, so it's born settled.
+  let selfDone = false;
+  if (req.appointment_id) {
+    const { data: appt } = await db.from("appointments").select("self_done").eq("id", req.appointment_id).single();
+    selfDone = !!appt?.self_done;
+  }
+
   const base = {
     customer_id: req.customer_id,
     appointment_id: req.appointment_id,
@@ -77,6 +84,7 @@ export async function POST(request: Request) {
       kind: "payment",
       amount: Number(req.amount),
       method: "card",
+      ...(selfDone ? { settled_on: todayYmd() } : {}),
       collected_by: "owner", // Stripe money lands in the company account
       processor_fee: fee,
       memo: req.memo || (req.kind === "prepay" ? `Prepaid ${req.visits} visits via Stripe` : "Paid via Stripe"),

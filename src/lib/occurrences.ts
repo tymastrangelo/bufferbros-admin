@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { confirmedEmail, sendEmail } from "@/lib/email";
 import { syncAppointmentToGcal } from "@/lib/gcal";
 import { addDays, todayYmd, weekdayOf, whenLabel } from "@/lib/time";
-import type { Appointment, Plan } from "@/lib/types";
+import { vehicleLabel, type Appointment, type Plan, type Vehicle } from "@/lib/types";
 
 export interface OccurrenceConflict {
   planId: string;
@@ -21,6 +21,7 @@ export interface GenerateResult {
 
 type PlanWithCustomer = Plan & {
   customers: { name: string; email: string | null; phone: string | null } | null;
+  plan_vehicles: { vehicles: Vehicle | null }[];
 };
 
 const DEFAULT_HORIZON_DAYS = 56; // 8 weeks — used by the weekly cron
@@ -46,16 +47,17 @@ export async function generateOccurrences(
   const today = todayYmd();
   const horizon = untilYmd ?? addDays(today, DEFAULT_HORIZON_DAYS);
 
-  let query = db.from("plans").select("*, customers(name,email,phone)").eq("status", "active");
+  let query = db.from("plans").select("*, customers(name,email,phone), plan_vehicles(vehicles(*))").eq("status", "active");
   if (planId) query = query.eq("id", planId);
   const { data: plans, error } = await query;
   if (error) throw new Error(error.message);
 
   const result: GenerateResult = { created: 0, conflicts: [] };
 
-  for (const plan of (plans ?? []) as PlanWithCustomer[]) {
+  for (const plan of (plans ?? []) as unknown as PlanWithCustomer[]) {
     const customerName = plan.customers?.name ?? "Unknown customer";
     const step = stepDays(plan);
+    const planVehicles = plan.plan_vehicles.map((r) => r.vehicles).filter(Boolean) as Vehicle[];
 
     const { data: appts } = await db
       .from("appointments")
@@ -96,6 +98,8 @@ export async function generateOccurrences(
             p_email: plan.customers?.email ?? null,
             p_phone: plan.customers?.phone ?? null,
             p_address: plan.address,
+            p_size_id: planVehicles.length === 1 ? planVehicles[0].size_id : null,
+            p_size_label: planVehicles.length ? planVehicles.map(vehicleLabel).join(" + ") : null,
             p_price: plan.per_visit_price,
             p_notes: null,
             p_source: "recurring",
@@ -115,6 +119,12 @@ export async function generateOccurrences(
             });
           } else {
             result.created++;
+            if (planVehicles.length) {
+              const { error: vehErr } = await db
+                .from("appointment_vehicles")
+                .insert(planVehicles.map((v) => ({ appointment_id: (booked as Appointment).id, vehicle_id: v.id })));
+              if (vehErr) console.error("appointment_vehicles insert:", vehErr.message);
+            }
             await syncAppointmentToGcal((booked as Appointment).id);
             if (plan.email_confirmations && plan.customers?.email) {
               const { subject, html } = confirmedEmail({

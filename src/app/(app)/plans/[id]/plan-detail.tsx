@@ -12,7 +12,7 @@ import { sendPaymentRequest } from "@/lib/actions/stripe";
 import { initialDetailPrice, visitsPerQuarter, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { fmtDateShort, minToLabel, WEEKDAYS } from "@/lib/time";
-import { PAYMENT_METHODS, type Customer, type LedgerEntry, type PaymentMethod, type Plan, type SizeId } from "@/lib/types";
+import { PAYMENT_METHODS, vehicleLabel, type Customer, type LedgerEntry, type PaymentMethod, type Plan, type SizeId, type Vehicle } from "@/lib/types";
 import type { OccurrenceConflict } from "@/lib/occurrences";
 
 const LIST_CAP = 6; // rows shown inline before "Show all" takes over
@@ -25,6 +25,7 @@ export function PlanDetail({
   today,
   hasInitialDetail,
   vehicleSize,
+  vehicles,
 }: {
   plan: Plan & { customers: Customer };
   appointments: JobWithCustomer[];
@@ -34,6 +35,8 @@ export function PlanDetail({
   /** does this customer have any completed job on record yet? */
   hasInitialDetail: boolean;
   vehicleSize: SizeId;
+  /** which cars each visit covers */
+  vehicles: Vehicle[];
 }) {
   const router = useRouter();
   // Store the tapped job, render the fresh copy from server props so an open
@@ -90,6 +93,12 @@ export function PlanDetail({
             {plan.preferred_dow != null && ` · ${WEEKDAYS[plan.preferred_dow]}s`}
             {plan.preferred_min != null && ` at ${minToLabel(plan.preferred_min)}`}
           </p>
+          {vehicles.length > 0 && (
+            <p className="text-sm text-ink-2 mt-0.5">
+              {vehicles.length > 1 ? `${vehicles.length} cars per visit: ` : ""}
+              {vehicles.map(vehicleLabel).join(" · ")}
+            </p>
+          )}
           {plan.billing_note && <p className="text-sm text-warn mt-0.5">{plan.billing_note}</p>}
         </div>
         <div className="flex gap-1.5 shrink-0">

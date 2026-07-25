@@ -11,7 +11,7 @@ export default async function PayoutsPage() {
   const [entriesQ, settings] = await Promise.all([
     db
       .from("ledger_entries")
-      .select("id,amount,processor_fee,occurred_on,collected_by,settled_on,memo,customers(id,name)")
+      .select("id,amount,processor_fee,occurred_on,collected_by,settled_on,memo,customers(id,name),appointments(self_done)")
       .in("kind", ["payment", "credit"])
       .order("occurred_on", { ascending: false })
       .order("created_at", { ascending: false })

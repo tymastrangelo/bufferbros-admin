@@ -447,6 +447,7 @@ function PlanPricingSection({ planPricing, settings }: { planPricing: PlanPricin
   const [rows, setRows] = useState(() => new Map(planPricing.map((p) => [`${p.cadence}:${p.size_id}`, p.price])));
   const [initialPct, setInitialPct] = useState(settings.plan_initial_discount_pct ?? "10");
   const [prepayPct, setPrepayPct] = useState(settings.prepay_discount_pct ?? "5");
+  const [multiCarPct, setMultiCarPct] = useState(settings.multi_car_discount_pct ?? "5");
   return (
     <Section
       title="Maintenance plan pricing"
@@ -491,10 +492,15 @@ function PlanPricingSection({ planPricing, settings }: { planPricing: PlanPricin
           <span className="label block mb-1">Prepay discount %</span>
           <input type="number" min={0} max={100} className="input num" value={prepayPct} onChange={(e) => setPrepayPct(e.target.value)} />
         </label>
+        <label className="block">
+          <span className="label block mb-1">Multi-car discount %</span>
+          <input type="number" min={0} max={100} className="input num" value={multiCarPct} onChange={(e) => setMultiCarPct(e.target.value)} />
+        </label>
       </div>
       <p className="text-[13px] text-ink-2 mt-1.5">
         Initial detail: every new plan client starts with a full Standard Detail at this discount. Prepay: applies when a
-        client pays a quarter (or more) of visits up front.
+        client pays a quarter (or more) of visits up front. Multi-car: off the suggested per-visit price when a plan
+        covers 2+ cars cleaned in the same visit.
       </p>
       <div className="mt-3">
         <SaveButton
@@ -508,7 +514,7 @@ function PlanPricingSection({ planPricing, settings }: { planPricing: PlanPricin
                 })
               );
               if (!a.ok) return a;
-              return saveSettings({ plan_initial_discount_pct: initialPct, prepay_discount_pct: prepayPct });
+              return saveSettings({ plan_initial_discount_pct: initialPct, prepay_discount_pct: prepayPct, multi_car_discount_pct: multiCarPct });
             })
           }
         />

@@ -4,7 +4,7 @@ import { requireOwner } from "@/lib/auth";
 import { getCatalog } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { todayYmd } from "@/lib/time";
-import type { Customer, LedgerEntry, Plan, SizeId } from "@/lib/types";
+import type { Customer, LedgerEntry, Plan, SizeId, Vehicle } from "@/lib/types";
 import type { JobWithCustomer } from "@/components/job-sheet";
 import { PlanDetail } from "./plan-detail";
 
@@ -35,10 +35,11 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
       .select("id", { count: "exact", head: true })
       .eq("customer_id", plan.customer_id)
       .eq("status", "completed"),
-    plan.vehicle_id
-      ? db.from("vehicles").select("size_id").eq("id", plan.vehicle_id).single()
-      : Promise.resolve({ data: null }),
+    db.from("plan_vehicles").select("vehicles(*)").eq("plan_id", id),
   ]);
+  const planVehicles = ((vehicleQ.data ?? []) as unknown as { vehicles: Vehicle | null }[])
+    .map((r) => r.vehicles)
+    .filter(Boolean) as Vehicle[];
 
   return (
     <PlanDetail
@@ -48,7 +49,9 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
       catalog={catalog}
       today={todayYmd()}
       hasInitialDetail={(doneQ.count ?? 0) > 0}
-      vehicleSize={((vehicleQ.data as { size_id?: string } | null)?.size_id as SizeId) ?? "sedan"}
+      vehicleSize={(planVehicles[0]?.size_id as SizeId) ?? "sedan"}
+      vehicles={planVehicles}
     />
+
   );
 }

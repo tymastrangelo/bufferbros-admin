@@ -13,6 +13,18 @@ assert.deepEqual(transfer({ amount: 220, collectedBy: "washer", settledOn: null 
   amount: 88,
 });
 
+// Self-done detail (Tyler washed it himself): Gabe's cut is 0 no matter the split.
+// Tyler collected -> nothing moves either way.
+assert.deepEqual(transfer({ amount: 300, collectedBy: "owner", settledOn: null, selfDone: true }, 60), {
+  direction: "owner_to_washer",
+  amount: 0,
+});
+// Gabe somehow collected the cash for Tyler's job -> he owes the full net back.
+assert.deepEqual(transfer({ amount: 300, collectedBy: "washer", settledOn: null, selfDone: true }, 60), {
+  direction: "washer_to_owner",
+  amount: 300,
+});
+
 // Net of the two: -828 (Tyler owes) + 88 (Gabe owes) = -740 -> Tyler owes Gabe $740.
 const { net, count } = netOwed(
   [

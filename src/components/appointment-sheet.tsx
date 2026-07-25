@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Wheel } from "@/components/brand";
 import { createAppointment } from "@/lib/actions/appointments";
-import { addonQuote, computeQuote, type BaseService, type Catalog } from "@/lib/catalog";
+import { addonQuote, computeMultiQuote, computeQuote, type BaseService, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { todayYmd } from "@/lib/time";
-import { SIZES, sizeLabel, type SizeId } from "@/lib/types";
+import { SIZES, sizeLabel, vehicleLabel, type SizeId, type Vehicle } from "@/lib/types";
 import { CustomerPicker, type PickedCustomer } from "./customer-picker";
 import { SlotPicker } from "./slot-picker";
+import { VehiclePicker } from "./vehicle-picker";
 import { ErrorNote, Field, Sheet } from "./ui";
 
 export function AppointmentSheet({
@@ -36,6 +37,10 @@ export function AppointmentSheet({
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState(defaultCustomer?.addresses?.[0]?.address ?? "");
   const [sizeId, setSizeId] = useState<SizeId>(defaultCustomer?.vehicles?.[0]?.size_id ?? "sedan");
+  const [vehicles, setVehicles] = useState<Vehicle[]>(defaultCustomer?.vehicles ?? []);
+  const [vehicleIds, setVehicleIds] = useState<string[]>(
+    defaultCustomer?.vehicles?.[0] ? [defaultCustomer.vehicles[0].id] : []
+  );
   const [service, setService] = useState<BaseService>("standard");
   const [garageOk, setGarageOk] = useState(false);
   const [addonIds, setAddonIds] = useState<string[]>([]);
@@ -49,7 +54,14 @@ export function AppointmentSheet({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  const quote = useMemo(() => computeQuote(catalog, sizeId, addonIds, service), [catalog, sizeId, addonIds, service]);
+  const selVehicles = useMemo(() => vehicles.filter((v) => vehicleIds.includes(v.id)), [vehicles, vehicleIds]);
+  const quote = useMemo(
+    () =>
+      selVehicles.length
+        ? computeMultiQuote(catalog, selVehicles.map((v) => v.size_id), addonIds, service)
+        : computeQuote(catalog, sizeId, addonIds, service),
+    [catalog, selVehicles, sizeId, addonIds, service]
+  );
   const ceramic = service === "ceramic" && catalog.ceramic;
   const price = priceOverride !== "" ? Number(priceOverride) : quote.price;
   const duration = durationOverride !== "" ? Number(durationOverride) : quote.minutes;
@@ -57,6 +69,8 @@ export function AppointmentSheet({
 
   function pickCustomer(c: PickedCustomer | null) {
     setCustomer(c);
+    setVehicles(c?.vehicles ?? []);
+    setVehicleIds(c?.vehicles?.[0] ? [c.vehicles[0].id] : []);
     if (c) {
       setOneOff(false);
       if (!address) setAddress(c.addresses?.[0]?.address ?? "");
@@ -80,25 +94,30 @@ export function AppointmentSheet({
       return;
     }
     setPending(true);
+    // Multi-car visit: each add-on is priced per car at that car's size, summed.
+    const addonPrice = (a: Catalog["addons"][number]) =>
+      selVehicles.length
+        ? selVehicles.reduce((s, v) => s + addonQuote(a, v.size_id).price, 0)
+        : addonQuote(a, sizeId).price;
     const res = await createAppointment({
       date,
       startMin,
       durationMin: duration,
       price,
-      sizeId,
-      sizeLabel: sizeLabel(sizeId),
+      sizeId: selVehicles.length > 1 ? null : selVehicles[0]?.size_id ?? sizeId,
+      sizeLabel: selVehicles.length ? selVehicles.map(vehicleLabel).join(" + ") : sizeLabel(sizeId),
       serviceName: ceramic ? catalog.ceramic!.name : undefined,
       ceramic: !!ceramic,
       addons: catalog.addons
         .filter((a) => addonIds.includes(a.id))
-        .map((a) => ({ id: a.id, name: a.name, price: addonQuote(a, sizeId).price })),
+        .map((a) => ({ id: a.id, name: a.name, price: addonPrice(a) })),
       name: customer?.name ?? name,
       phone: customer ? null : phone,
       email: customer ? null : email,
       address,
       notes: ceramic ? [notes.trim(), "Ceramic: garage confirmed — car stays garaged 24h after coating."].filter(Boolean).join("\n") : notes,
       customerId: customer?.id ?? null,
-      vehicleId: customer?.vehicles?.find((v) => v.size_id === sizeId)?.id ?? null,
+      vehicleIds,
       force: offGrid,
       notify: notify && !!contactEmail,
     });
@@ -146,22 +165,38 @@ export function AppointmentSheet({
           <input className="input" placeholder="Where's the car?" value={address} onChange={(e) => setAddress(e.target.value)} />
         </Field>
 
-        <Field label="Vehicle size">
-          <div className="grid grid-cols-3 gap-1.5">
-            {SIZES.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => setSizeId(s.id)}
-                className={`h-9 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
-                  sizeId === s.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-                }`}
-              >
-                {s.id === "sedan" ? "Sedan" : s.id === "midsize" ? "Midsize" : "Large"}
-              </button>
-            ))}
-          </div>
-        </Field>
+        {customer ? (
+          <Field
+            label={`Vehicles${selVehicles.length > 1 ? ` — ${selVehicles.length} cars this visit` : ""}`}
+            hint={selVehicles.length > 1 ? selVehicles.map((v) => money(computeQuote(catalog, v.size_id, addonIds, service).price)).join(" + ") : undefined}
+          >
+            <VehiclePicker
+              customerId={customer.id}
+              vehicles={vehicles}
+              selected={vehicleIds}
+              onChange={setVehicleIds}
+              onVehiclesChange={setVehicles}
+            />
+          </Field>
+        ) : null}
+        {selVehicles.length === 0 && (
+          <Field label="Vehicle size" hint={customer ? "No vehicle picked — quoting by size only" : undefined}>
+            <div className="grid grid-cols-3 gap-1.5">
+              {SIZES.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setSizeId(s.id)}
+                  className={`h-9 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
+                    sizeId === s.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
+                  }`}
+                >
+                  {s.id === "sedan" ? "Sedan" : s.id === "midsize" ? "Midsize" : "Large"}
+                </button>
+              ))}
+            </div>
+          </Field>
+        )}
 
         {catalog.ceramic && (
           <Field label="Service">
@@ -217,7 +252,9 @@ export function AppointmentSheet({
                 />
                 <span className="grow">{a.name}</span>
                 <span className="text-xs text-faint num">
-                  {money(addonQuote(a, sizeId).price)} · {addonQuote(a, sizeId).minutes}m
+                  {selVehicles.length > 1
+                    ? `${money(selVehicles.reduce((s, v) => s + addonQuote(a, v.size_id).price, 0))} · ${selVehicles.reduce((s, v) => s + addonQuote(a, v.size_id).minutes, 0)}m`
+                    : `${money(addonQuote(a, selVehicles[0]?.size_id ?? sizeId).price)} · ${addonQuote(a, selVehicles[0]?.size_id ?? sizeId).minutes}m`}
                 </span>
               </label>
             ))}

@@ -128,6 +128,8 @@ export interface Appointment {
   completed_at: string | null;
   completion_note: string | null;
   gcal_event_id: string | null;
+  /** Tyler did this detail himself — Gabe gets no cut of its payments. */
+  self_done: boolean;
 }
 
 export interface LedgerEntry {
@@ -167,6 +169,18 @@ export interface PaymentRequest {
   paid_at: string | null;
   processor_fee: number | null;
   ledger_entry_id: string | null;
+}
+
+export interface Reminder {
+  id: string;
+  created_at: string;
+  due_on: string;
+  title: string;
+  body: string | null;
+  customer_id: string | null;
+  vehicle_ids: string[];
+  sent_at: string | null;
+  done_at: string | null;
 }
 
 export interface Expense {
@@ -216,6 +230,10 @@ export const SIZES: { id: SizeId; label: string }[] = [
 
 export const sizeLabel = (id: string | null | undefined) =>
   SIZES.find((s) => s.id === id)?.label ?? id ?? "";
+
+/** "2021 Tesla Model 3", falling back to the size when make/model are blank. */
+export const vehicleLabel = (v: Pick<Vehicle, "year" | "make" | "model" | "size_id">) =>
+  [v.year, v.make, v.model].filter(Boolean).join(" ") || sizeLabel(v.size_id);
 
 export const EXPENSE_CATEGORIES = ["supplies", "fuel", "equipment", "insurance", "marketing", "other"];
 export const PAYMENT_METHODS: PaymentMethod[] = ["cash", "zelle", "venmo", "card", "check", "other"];

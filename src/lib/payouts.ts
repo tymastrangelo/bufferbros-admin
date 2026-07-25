@@ -10,12 +10,14 @@ export interface PayoutRow {
   fee?: number;
   collectedBy: CollectedBy;
   settledOn: string | null;
+  /** Tyler did the detail himself — Gabe's cut is 0 on this payment. */
+  selfDone?: boolean;
 }
 
 /** What one payment implies for the transfer between the two of them. */
 export function transfer(row: PayoutRow, washerPct: number) {
   const net = row.amount - (row.fee ?? 0);
-  const gabeCut = (net * washerPct) / 100;
+  const gabeCut = row.selfDone ? 0 : (net * washerPct) / 100;
   if (row.collectedBy === "owner") {
     // Tyler holds the cash, owes Gabe his cut.
     return { direction: "owner_to_washer" as const, amount: gabeCut };

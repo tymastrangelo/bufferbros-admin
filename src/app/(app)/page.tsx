@@ -4,9 +4,10 @@ import { netOwed, type PayoutRow } from "@/lib/payouts";
 import { getCatalog, getSettingsMap } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { addDays, fmtDateLong, todayYmd, weekdayOf } from "@/lib/time";
-import type { Plan } from "@/lib/types";
+import { vehicleLabel, type Plan, type Reminder, type Vehicle } from "@/lib/types";
 import { TodayClient, type AttentionData } from "./today-client";
 import type { JobWithCustomer } from "@/components/job-sheet";
+import type { ReminderRow } from "@/components/reminders-card";
 
 export const metadata: Metadata = { title: "Today" };
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export default async function TodayPage() {
   const weekStart = addDays(today, -weekdayOf(today)); // Sunday
   const monthStart = `${today.slice(0, 7)}-01`;
 
-  const [jobsQ, weekPayQ, monthPayQ, doneQ, balancesQ, plansQ, unlinkedQ, planApptsQ, pendingQ, catalog, payoutQ, settings] = await Promise.all([
+  const [jobsQ, weekPayQ, monthPayQ, doneQ, balancesQ, plansQ, unlinkedQ, planApptsQ, pendingQ, catalog, payoutQ, settings, remindersQ] = await Promise.all([
     db
       .from("appointments")
       .select("*, customers(id,name,phone,email,stripe_payments)")
@@ -52,17 +53,37 @@ export default async function TodayPage() {
     getCatalog(),
     db
       .from("ledger_entries")
-      .select("amount,processor_fee,collected_by,settled_on")
+      .select("amount,processor_fee,collected_by,settled_on,appointments(self_done)")
       .in("kind", ["payment", "credit"])
       .is("settled_on", null),
     getSettingsMap(),
+    db.from("reminders").select("*, customers(id,name)").is("done_at", null).order("due_on").limit(10),
   ]);
+
+  // Resolve vehicle_ids -> labels for the reminders card in one lookup.
+  const reminderRows = (remindersQ.data ?? []) as unknown as (Reminder & { customers: { id: string; name: string } | null })[];
+  const reminderVehIds = [...new Set(reminderRows.flatMap((r) => r.vehicle_ids))];
+  const vehById = new Map<string, string>();
+  if (reminderVehIds.length) {
+    const { data: vehRows } = await db.from("vehicles").select("*").in("id", reminderVehIds);
+    for (const v of (vehRows ?? []) as Vehicle[]) vehById.set(v.id, vehicleLabel(v));
+  }
+  const reminders: ReminderRow[] = reminderRows.map((r) => ({
+    ...r,
+    vehicleLabels: r.vehicle_ids.map((id) => vehById.get(id)).filter(Boolean) as string[],
+  }));
 
   const sum = (rows: { amount: number }[] | null) => (rows ?? []).reduce((s, r) => s + Number(r.amount), 0);
   // Net of the Tyler <-> Gabe split across unsettled payments: + = Gabe owes Tyler.
-  const payoutRows: PayoutRow[] = ((payoutQ.data ?? []) as { amount: number; processor_fee: number; collected_by: "owner" | "washer"; settled_on: string | null }[]).map(
-    (r) => ({ amount: Number(r.amount), fee: Number(r.processor_fee ?? 0), collectedBy: r.collected_by, settledOn: r.settled_on })
-  );
+  const payoutRows: PayoutRow[] = (
+    (payoutQ.data ?? []) as unknown as { amount: number; processor_fee: number; collected_by: "owner" | "washer"; settled_on: string | null; appointments: { self_done: boolean } | null }[]
+  ).map((r) => ({
+    amount: Number(r.amount),
+    fee: Number(r.processor_fee ?? 0),
+    collectedBy: r.collected_by,
+    settledOn: r.settled_on,
+    selfDone: !!r.appointments?.self_done,
+  }));
   const payoutNet = Math.round(netOwed(payoutRows, Number(settings.split_washer_pct ?? 60)).net);
   const scheduledPlanIds = new Set((planApptsQ.data ?? []).map((r) => r.plan_id));
   const plans = (plansQ.data ?? []) as (Plan & { customers: { name: string } | null })[];
@@ -100,6 +121,7 @@ export default async function TodayPage() {
           : null
       }
       attention={owner ? attention : null}
+      reminders={owner ? reminders : null}
     />
   );
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { notify } from "@/lib/notify";
 import { createServiceClient } from "@/lib/supabase/server";
 import { minToLabel, todayYmd } from "@/lib/time";
+import { vehicleLabel, type Reminder, type Vehicle } from "@/lib/types";
 
 // Daily Vercel cron at 11:00 UTC — 7am EDT / 6am EST (see vercel.json).
 // Pushes both phones today's schedule; the owner also hears about waiting approvals.
@@ -67,7 +68,43 @@ export async function GET(request: Request) {
         "/money/payments"
       );
     }
-    return NextResponse.json({ ok: true, jobs: jobs.length, pending: pendingQ.count ?? 0, unpaidLinks: unpaid.length });
+    // Manual reminders due today (or missed on a day the cron didn't run). Pushed
+    // once — sent_at marks delivery; the row stays on Today until marked done.
+    const { data: dueRows } = await db
+      .from("reminders")
+      .select("*, customers(id,name)")
+      .lte("due_on", today)
+      .is("sent_at", null)
+      .is("done_at", null)
+      .order("due_on");
+    const due = (dueRows ?? []) as unknown as (Reminder & { customers: { id: string; name: string } | null })[];
+    if (due.length > 0) {
+      const vehIds = [...new Set(due.flatMap((r) => r.vehicle_ids))];
+      const vehById = new Map<string, string>();
+      if (vehIds.length) {
+        const { data: vehRows } = await db.from("vehicles").select("*").in("id", vehIds);
+        for (const v of (vehRows ?? []) as Vehicle[]) vehById.set(v.id, vehicleLabel(v));
+      }
+      for (const r of due) {
+        const parts = [
+          r.customers?.name,
+          r.vehicle_ids.map((id) => vehById.get(id)).filter(Boolean).join(", ") || null,
+          r.body,
+        ].filter(Boolean);
+        await notify(
+          "owner",
+          `Reminder: ${r.title}`,
+          parts.join(" · ") || "You asked to be reminded today.",
+          r.customers ? `/customers/${r.customers.id}` : "/"
+        );
+      }
+      await db
+        .from("reminders")
+        .update({ sent_at: new Date().toISOString() })
+        .in("id", due.map((r) => r.id));
+    }
+
+    return NextResponse.json({ ok: true, jobs: jobs.length, pending: pendingQ.count ?? 0, unpaidLinks: unpaid.length, reminders: due.length });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }

@@ -60,6 +60,7 @@ export async function getCatalog(): Promise<Catalog> {
       ceramicDepositPct: num("ceramic_deposit_pct", 50),
       planInitialDiscountPct: num("plan_initial_discount_pct", 10),
       prepayDiscountPct: num("prepay_discount_pct", 5),
+      multiCarDiscountPct: num("multi_car_discount_pct", 5),
     },
     planPricing: ((planPricing ?? []) as { cadence: PlanCadence; size_id: string; price: number }[]).map((p) => ({
       ...p,

@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import { labelToMin, minToLabel, todayYmd, WEEKDAYS } from "@/lib/time";
 import type { Plan, PlanCadence, SizeId, Vehicle } from "@/lib/types";
 import { CustomerPicker, type PickedCustomer } from "./customer-picker";
+import { VehiclePicker } from "./vehicle-picker";
 import { ErrorNote, Field, Sheet } from "./ui";
 
 const CADENCES: { id: PlanCadence; label: string }[] = [
@@ -39,7 +40,9 @@ export function PlanFormSheet({
   const supabase = createClient();
   const [customer, setCustomer] = useState<PickedCustomer | null>(defaultCustomer ?? null);
   const [vehicles, setVehicles] = useState<Vehicle[]>(defaultCustomer?.vehicles ?? []);
-  const [vehicleId, setVehicleId] = useState<string | "">(plan?.vehicle_id ?? "");
+  const [vehicleIds, setVehicleIds] = useState<string[]>(
+    plan?.vehicle_id ? [plan.vehicle_id] : defaultCustomer?.vehicles?.[0] ? [defaultCustomer.vehicles[0].id] : []
+  );
   const [cadence, setCadence] = useState<PlanCadence>(plan?.cadence ?? "biweekly");
   const [intervalDays, setIntervalDays] = useState(plan?.interval_days ? String(plan.interval_days) : "21");
   const [price, setPrice] = useState(plan ? String(plan.per_visit_price) : "");
@@ -56,39 +59,64 @@ export function PlanFormSheet({
   const [pending, setPending] = useState(false);
   const [confirmApply, setConfirmApply] = useState<PlanFields | null>(null);
 
-  // For editing, load the plan's customer + vehicles once.
+  // For editing, load the plan's customer + vehicles (and which cars the plan covers) once.
   useEffect(() => {
     if (!plan || customer) return;
     (async () => {
-      const { data } = await supabase.from("customers").select("*, vehicles(*)").eq("id", plan.customer_id).single();
+      const [{ data }, pvQ] = await Promise.all([
+        supabase.from("customers").select("*, vehicles(*)").eq("id", plan.customer_id).single(),
+        supabase.from("plan_vehicles").select("vehicle_id").eq("plan_id", plan.id),
+      ]);
       if (data) {
         setCustomer(data as PickedCustomer);
         setVehicles((data as PickedCustomer).vehicles ?? []);
       }
+      const ids = ((pvQ.data ?? []) as { vehicle_id: string }[]).map((r) => r.vehicle_id);
+      if (ids.length) setVehicleIds(ids);
     })();
   }, [plan, customer, supabase]);
 
   if (!open) return null;
 
-  const sizeOf = (vid: string): SizeId =>
-    (vehicles.find((v) => v.id === vid)?.size_id as SizeId) ?? "sedan";
+  const sizesOf = (ids: string[]): SizeId[] => vehicles.filter((v) => ids.includes(v.id)).map((v) => v.size_id);
+  const firstSize: SizeId = sizesOf(vehicleIds)[0] ?? "sedan";
+  const multiPct = vehicleIds.length > 1 ? catalog.rules.multiCarDiscountPct : 0;
 
-  function suggestPrice(nextCadence: PlanCadence, vid: string) {
+  /** Sum of per-size plan prices, minus the multi-car discount when 2+ cars share the visit. */
+  function suggestPrice(nextCadence: PlanCadence, ids: string[]) {
     if (nextCadence === "custom") return;
-    const p = planPrice(catalog, nextCadence, sizeOf(vid));
-    if (p != null) setPrice(String(p));
+    const prices = sizesOf(ids).map((s) => planPrice(catalog, nextCadence, s));
+    if (!prices.length || prices.some((p) => p == null)) return;
+    const raw = (prices as number[]).reduce((s, p) => s + p, 0);
+    const pct = ids.length > 1 ? catalog.rules.multiCarDiscountPct : 0;
+    setPrice(String(Math.round(raw * (1 - pct / 100))));
+  }
+
+  function suggestDuration(ids: string[]) {
+    const mins = sizesOf(ids).map((s) => catalog.detail[s]?.minutes ?? 120);
+    if (mins.length) setDuration(String(mins.reduce((a, b) => a + b, 0)));
+  }
+
+  function pickVehicles(ids: string[]) {
+    setVehicleIds(ids);
+    suggestDuration(ids);
+    suggestPrice(cadence, ids);
   }
 
   function pickCustomer(c: PickedCustomer | null) {
     setCustomer(c);
     setVehicles(c?.vehicles ?? []);
+    setVehicleIds([]);
     if (c) {
       if (!address) setAddress(c.addresses?.[0]?.address ?? "");
       const v = c.vehicles?.[0];
       if (v) {
-        setVehicleId(v.id);
+        setVehicleIds([v.id]);
         setDuration(String(catalog.detail[v.size_id]?.minutes ?? 120));
-        if (!plan) suggestPrice(cadence, v.id);
+        if (!plan) {
+          const p = planPrice(catalog, cadence, v.size_id);
+          if (p != null) setPrice(String(p));
+        }
       }
     }
   }
@@ -106,7 +134,7 @@ export function PlanFormSheet({
     }
     return {
       customerId: plan?.customer_id ?? customer!.id,
-      vehicleId: vehicleId || null,
+      vehicleIds,
       cadence,
       intervalDays: Number(intervalDays) || null,
       perVisitPrice: Number(price) || 0,
@@ -169,31 +197,25 @@ export function PlanFormSheet({
           </Field>
         )}
 
-        {vehicles.length > 0 && (
-          <Field label="Vehicle">
-            <select
-              className="select"
-              value={vehicleId}
-              onChange={(e) => {
-                setVehicleId(e.target.value);
-                setDuration(String(catalog.detail[sizeOf(e.target.value)]?.minutes ?? 120));
-                suggestPrice(cadence, e.target.value);
-              }}
-            >
-              <option value="">No specific vehicle</option>
-              {vehicles.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {[v.year, v.make, v.model].filter(Boolean).join(" ") || v.size_id}
-                </option>
-              ))}
-            </select>
+        {customer && (
+          <Field
+            label={`Vehicles${vehicleIds.length > 1 ? ` — ${vehicleIds.length} cars per visit` : ""}`}
+            hint={multiPct > 0 ? `${multiPct}% multi-car discount applies to the suggested price` : undefined}
+          >
+            <VehiclePicker
+              customerId={customer.id}
+              vehicles={vehicles}
+              selected={vehicleIds}
+              onChange={pickVehicles}
+              onVehiclesChange={setVehicles}
+            />
           </Field>
         )}
 
         {!plan && (
           <p className="text-[13px] bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2.5">
             New plan clients get an initial full Standard Detail at {catalog.rules.planInitialDiscountPct}% off (
-            <span className="num font-medium">{money(initialDetailPrice(catalog, sizeOf(vehicleId)))}</span> for this size) to
+            <span className="num font-medium">{money(initialDetailPrice(catalog, firstSize))}</span> for this size) to
             bring the car to maintenance shape — book it as a one-time job before the plan starts.
           </p>
         )}
@@ -206,7 +228,7 @@ export function PlanFormSheet({
                 type="button"
                 onClick={() => {
                   setCadence(c.id);
-                  suggestPrice(c.id, vehicleId);
+                  suggestPrice(c.id, vehicleIds);
                 }}
                 className={`h-9 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
                   cadence === c.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"

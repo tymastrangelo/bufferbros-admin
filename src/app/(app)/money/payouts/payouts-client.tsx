@@ -18,6 +18,7 @@ export interface PayoutEntry {
   settled_on: string | null;
   memo: string | null;
   customers: { id: string; name: string } | null;
+  appointments: { self_done: boolean } | null;
 }
 
 const FILTERS = [
@@ -33,7 +34,11 @@ export function PayoutsClient({ rows, washerPct }: { rows: PayoutEntry[]; washer
   const router = useRouter();
 
   const { net, count } = useMemo(
-    () => netOwed(rows.map((r) => ({ amount: r.amount, fee: r.processor_fee, collectedBy: r.collected_by, settledOn: r.settled_on })), washerPct),
+    () =>
+      netOwed(
+        rows.map((r) => ({ amount: r.amount, fee: r.processor_fee, collectedBy: r.collected_by, settledOn: r.settled_on, selfDone: !!r.appointments?.self_done })),
+        washerPct
+      ),
     [rows, washerPct]
   );
 
@@ -102,9 +107,15 @@ export function PayoutsClient({ rows, washerPct }: { rows: PayoutEntry[]; washer
             </thead>
             <tbody>
               {shown.map((r) => {
-                const t = transfer({ amount: r.amount, fee: r.processor_fee, collectedBy: r.collected_by, settledOn: r.settled_on }, washerPct);
-                const transferText =
-                  t.direction === "owner_to_washer" ? `Pay Gabe ${money(t.amount)}` : `Gabe owes you ${money(t.amount)}`;
+                const selfDone = !!r.appointments?.self_done;
+                const t = transfer({ amount: r.amount, fee: r.processor_fee, collectedBy: r.collected_by, settledOn: r.settled_on, selfDone }, washerPct);
+                const transferText = selfDone
+                  ? t.amount === 0
+                    ? "No Gabe cut — your job"
+                    : `Gabe owes you ${money(t.amount)} — your job`
+                  : t.direction === "owner_to_washer"
+                    ? `Pay Gabe ${money(t.amount)}`
+                    : `Gabe owes you ${money(t.amount)}`;
                 return (
                   <tr key={r.id}>
                     <td data-label="Date" className="num whitespace-nowrap">
@@ -125,7 +136,7 @@ export function PayoutsClient({ rows, washerPct }: { rows: PayoutEntry[]; washer
                     <td data-label="Collected" className={r.collected_by === "washer" ? "text-ink" : "text-ink-2"}>
                       {r.collected_by === "washer" ? "Gabe" : "Me"}
                     </td>
-                    <td data-label="Transfer" className={t.direction === "owner_to_washer" ? "text-bad" : "text-ok"}>
+                    <td data-label="Transfer" className={selfDone && t.amount === 0 ? "text-ink-2" : t.direction === "owner_to_washer" ? "text-bad" : "text-ok"}>
                       {transferText}
                     </td>
                     <td data-label="Settle" className="text-right">
