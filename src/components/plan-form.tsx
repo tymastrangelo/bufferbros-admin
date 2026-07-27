@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Wheel } from "@/components/brand";
 import { createPlan, updatePlan, type PlanFields } from "@/lib/actions/plans";
-import { initialDetailPrice, planPrice, visitsPerQuarter, type Catalog } from "@/lib/catalog";
+import { BOAT_MAINTENANCE_ID, boatQuote, initialDetailPrice, planPrice, visitsPerQuarter, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { labelToMin, minToLabel, todayYmd, WEEKDAYS } from "@/lib/time";
@@ -82,22 +82,32 @@ export function PlanFormSheet({
 
   if (!open) return null;
 
-  const sizesOf = (ids: string[]): SizeId[] => vehicles.filter((v) => ids.includes(v.id)).map((v) => v.size_id);
+  // Entry-detail pricing is a car thing — boats join plans at the maintenance-wash rate.
+  const sizesOf = (ids: string[]): SizeId[] =>
+    vehicles.filter((v) => ids.includes(v.id) && v.kind !== "boat").map((v) => v.size_id);
   const firstSize: SizeId = sizesOf(vehicleIds)[0] ?? "sedan";
   const multiPct = vehicleIds.length > 1 ? catalog.rules.multiCarDiscountPct : 0;
 
-  /** Sum of per-size plan prices, minus the multi-car discount when 2+ cars share the visit. */
+  const boatMaintenance = (v: Vehicle) => boatQuote(catalog, v.length_ft, { componentIds: [BOAT_MAINTENANCE_ID] });
+
+  /** Cars at their plan price + boats at the maintenance wash rate, minus the multi-vehicle discount. */
   function suggestPrice(nextCadence: PlanCadence, ids: string[]) {
     if (nextCadence === "custom") return;
-    const prices = sizesOf(ids).map((s) => planPrice(catalog, nextCadence, s));
-    if (!prices.length || prices.some((p) => p == null)) return;
-    const raw = (prices as number[]).reduce((s, p) => s + p, 0);
+    const sel = vehicles.filter((v) => ids.includes(v.id));
+    if (!sel.length) return;
+    const carPrices = sel.filter((v) => v.kind !== "boat").map((v) => planPrice(catalog, nextCadence, v.size_id));
+    if (carPrices.some((p) => p == null)) return;
+    const raw =
+      (carPrices as number[]).reduce((s, p) => s + p, 0) +
+      sel.filter((v) => v.kind === "boat").reduce((s, v) => s + boatMaintenance(v).price, 0);
     const pct = ids.length > 1 ? catalog.rules.multiCarDiscountPct : 0;
     setPrice(String(Math.round(raw * (1 - pct / 100))));
   }
 
   function suggestDuration(ids: string[]) {
-    const mins = sizesOf(ids).map((s) => catalog.detail[s]?.minutes ?? 120);
+    const mins = vehicles
+      .filter((v) => ids.includes(v.id))
+      .map((v) => (v.kind === "boat" ? boatMaintenance(v).minutes || 60 : catalog.detail[v.size_id]?.minutes ?? 120));
     if (mins.length) setDuration(String(mins.reduce((a, b) => a + b, 0)));
   }
 
@@ -116,10 +126,16 @@ export function PlanFormSheet({
       const v = c.vehicles?.[0];
       if (v) {
         setVehicleIds([v.id]);
-        setDuration(String(catalog.detail[v.size_id]?.minutes ?? 120));
-        if (!plan) {
-          const p = planPrice(catalog, cadence, v.size_id);
-          if (p != null) setPrice(String(p));
+        if (v.kind === "boat") {
+          const q = boatMaintenance(v);
+          setDuration(String(q.minutes || 60));
+          if (!plan && q.price) setPrice(String(q.price));
+        } else {
+          setDuration(String(catalog.detail[v.size_id]?.minutes ?? 120));
+          if (!plan) {
+            const p = planPrice(catalog, cadence, v.size_id);
+            if (p != null) setPrice(String(p));
+          }
         }
       }
     }

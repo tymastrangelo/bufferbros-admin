@@ -3,7 +3,19 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Wheel } from "@/components/brand";
-import { addonQuote, boatQuote, boatRatePerFt, computeQuote, initialDetailPrice, planPrice, visitsPerQuarter, type BaseService, type Catalog } from "@/lib/catalog";
+import {
+  addonQuote,
+  BOAT_DEFAULT_SERVICES,
+  BOAT_MAINTENANCE_ID,
+  boatQuote,
+  boatTrailerDiscountPct,
+  computeQuote,
+  initialDetailPrice,
+  planPrice,
+  visitsPerQuarter,
+  type BaseService,
+  type Catalog,
+} from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { addDays, fmtDateShort, minToLabel, todayYmd, weekdayOf, WEEKDAYS, WEEKDAYS_SHORT } from "@/lib/time";
@@ -18,6 +30,9 @@ interface QuoteVehicle {
   kind: "car" | "boat";
   size: SizeId;
   lengthFt: string; // boats price per foot
+  boatServices: string[]; // which per-foot services the boat job includes
+  levelIdx: number; // condition level index into catalog.boat.levels
+  trailer: boolean; // on a trailer = discount off the in-water base price
   addons: string[];
 }
 
@@ -27,6 +42,9 @@ const blankVehicle = (key: number, kind: "car" | "boat" = "car"): QuoteVehicle =
   kind,
   size: "sedan",
   lengthFt: "",
+  boatServices: [...BOAT_DEFAULT_SERVICES],
+  levelIdx: 0,
+  trailer: false,
   addons: [],
 });
 
@@ -41,9 +59,19 @@ const CADENCES: { id: PlanCadence; label: string; visitsPerMonth: number }[] = [
 const suggestedDiscount = (n: number) => (n >= 3 ? 10 : n === 2 ? 5 : 0);
 const DISCOUNT_CHOICES = [0, 5, 10, 15];
 
-/** Price for one vehicle. One-time: base service + addons. Plan: per-visit plan price + addons. Boats: per foot, no add-ons. */
+/**
+ * Price for one vehicle. Cars — one-time: base service + addons; plan: per-visit plan
+ * price + addons. Boats: per-foot service menu scaled by size/condition/dock; plan
+ * mode books the recurring maintenance wash instead.
+ */
 function vehicleQuote(catalog: Catalog, v: QuoteVehicle, mode: Mode, cadence: PlanCadence, service: BaseService) {
-  if (v.kind === "boat") return boatQuote(catalog, Number(v.lengthFt) || null);
+  if (v.kind === "boat") {
+    return boatQuote(catalog, Number(v.lengthFt) || null, {
+      componentIds: mode === "plan" ? [BOAT_MAINTENANCE_ID] : v.boatServices,
+      levelPct: catalog.boat?.levels[v.levelIdx]?.pct,
+      trailer: v.trailer,
+    });
+  }
   if (mode === "once") return computeQuote(catalog, v.size, v.addons, service);
   const base = planPrice(catalog, cadence, v.size) ?? catalog.detail[v.size]?.price ?? 0;
   const extras = catalog.addons.filter((a) => v.addons.includes(a.id)).map((a) => addonQuote(a, v.size));
@@ -230,7 +258,7 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
             </div>
 
             {v.kind === "boat" ? (
-              <div className="mt-2.5">
+              <div className="mt-2.5 flex flex-col gap-2.5">
                 <input
                   type="number"
                   min={1}
@@ -239,12 +267,79 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
                   value={v.lengthFt}
                   onChange={(e) => patch(v.key, { lengthFt: e.target.value })}
                 />
-                {catalog.boat ? (
-                  <p className="mt-1.5 text-[12px] text-faint num">
-                    {money(boatRatePerFt(catalog))}/ft — {catalog.boat.components.map((c) => `${c.name.toLowerCase()} ${money(c.ratePerFt)}`).join(" + ")}
+                {!catalog.boat && <p className="text-[12px] text-bad">No boat pricing set — add it in Settings.</p>}
+                {catalog.boat && mode === "plan" && (
+                  <p className="text-[12px] text-faint num">
+                    Maintenance wash — {money(catalog.boat.components.find((c) => c.id === BOAT_MAINTENANCE_ID)?.ratePerFt ?? 0)}/ft per
+                    visit (scaled by size, condition &amp; dock below)
                   </p>
-                ) : (
-                  <p className="mt-1.5 text-[12px] text-bad">No boat pricing set — add it in Settings.</p>
+                )}
+                {catalog.boat && mode === "once" && (
+                  <div>
+                    <p className="label mb-1.5">Services</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {catalog.boat.components.map((c) => {
+                        const on = v.boatServices.includes(c.id);
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() =>
+                              patch(v.key, {
+                                boatServices: on ? v.boatServices.filter((x) => x !== c.id) : [...v.boatServices, c.id],
+                              })
+                            }
+                            className={`rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors duration-150 ${
+                              on ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
+                            }`}
+                          >
+                            {c.name} <span className={`num ${on ? "text-white/80" : "text-faint"}`}>{money(c.ratePerFt)}/ft</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {catalog.boat && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="label mb-1.5">Condition</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {catalog.boat.levels.map((l, li) => (
+                          <button
+                            key={l.label}
+                            type="button"
+                            onClick={() => patch(v.key, { levelIdx: li })}
+                            className={`rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors duration-150 ${
+                              v.levelIdx === li ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
+                            }`}
+                          >
+                            {l.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="label mb-1.5">Where it sits</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          { trailer: false, label: "In the water" },
+                          { trailer: true, label: `On a trailer −${boatTrailerDiscountPct(catalog)}%` },
+                        ].map((o) => (
+                          <button
+                            key={o.label}
+                            type="button"
+                            onClick={() => patch(v.key, { trailer: o.trailer })}
+                            className={`rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors duration-150 ${
+                              v.trailer === o.trailer ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
+                            }`}
+                          >
+                            {o.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             ) : (
@@ -421,7 +516,19 @@ function QuoteResult({
             </div>
             <p className="text-xs text-ink-2 mt-0.5">
               {v.kind === "boat"
-                ? `${catalog.boat?.name ?? "Boat Detail"} · ${Number(v.lengthFt) > 0 ? `${Number(v.lengthFt)} ft` : "length TBD"}`
+                ? [
+                    `${Number(v.lengthFt) > 0 ? `${Number(v.lengthFt)} ft` : "length TBD"}`,
+                    mode === "plan"
+                      ? "Maintenance wash"
+                      : catalog.boat?.components
+                          .filter((c) => v.boatServices.includes(c.id))
+                          .map((c) => c.name)
+                          .join(", ") || "no services picked",
+                    catalog.boat?.levels[v.levelIdx]?.label.toLowerCase(),
+                    v.trailer ? "trailer discount" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
                 : sizeLabel(v.size)}
               {v.kind !== "boat" &&
                 v.addons.length > 0 &&

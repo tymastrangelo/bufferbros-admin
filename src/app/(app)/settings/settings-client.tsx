@@ -107,7 +107,7 @@ export function SettingsClient({
       <h1 className="text-xl md:text-2xl font-bold">Settings</h1>
       <PricingSection pricing={pricing} />
       <CeramicSection pricing={pricing} settings={settings} />
-      <BoatSection pricing={pricing} />
+      <BoatSection pricing={pricing} settings={settings} />
       <AddonsSection services={services} pricing={pricing} />
       <PlanPricingSection planPricing={planPricing} settings={settings} />
       <HoursSection hours={hours} settings={settings} />
@@ -262,15 +262,20 @@ function CeramicSection({ pricing, settings }: { pricing: ServicePricing[]; sett
   );
 }
 
-// The boat detail's per-foot slices — exterior wash + spray wax make the outside
-// rate, interior stacks on top. size_id doubles as the component key in service_pricing.
+// The boat detail's per-foot service menu — jobs pick which services apply.
+// size_id doubles as the component key in service_pricing. "Maintenance wash" is
+// the recurring-plan rate; "Deluxe wash" + "Spray wax" is the default one-off job.
 const BOAT_COMPONENTS = [
-  { id: "wash-ft", label: "Exterior wash" },
+  { id: "maintenance-ft", label: "Maintenance wash" },
+  { id: "wash-ft", label: "Deluxe wash" },
   { id: "wax-ft", label: "Spray wax" },
-  { id: "interior-ft", label: "Interior" },
+  { id: "interior-ft", label: "Interior cabin" },
+  { id: "oxidation-ft", label: "Hull / oxidation removal" },
+  { id: "sealant-ft", label: "Polymer sealant" },
+  { id: "ceramic-ft", label: "Ceramic coating" },
 ] as const;
 
-function BoatSection({ pricing }: { pricing: ServicePricing[] }) {
+function BoatSection({ pricing, settings }: { pricing: ServicePricing[]; settings: Record<string, string> }) {
   const { state, run } = useSave();
   const [rows, setRows] = useState(() => {
     const map = new Map<string, { price: number; minutes: number }>();
@@ -283,20 +288,39 @@ function BoatSection({ pricing }: { pricing: ServicePricing[] }) {
   const set = (id: string, field: "price" | "minutes", v: number) =>
     setRows(new Map(rows).set(id, { ...rows.get(id)!, [field]: v }));
 
-  const exterior = (rows.get("wash-ft")?.price ?? 0) + (rows.get("wax-ft")?.price ?? 0);
-  const everything = exterior + (rows.get("interior-ft")?.price ?? 0);
-  const ex = (ft: number) => `${ft} ft ≈ $${Math.round(ft * exterior)} outside / $${Math.round(ft * everything)} everything`;
+  const [tier2From, setTier2From] = useState(settings.boat_tier2_from_ft ?? "30");
+  const [tier2Pct, setTier2Pct] = useState(settings.boat_tier2_pct ?? "125");
+  const [tier3From, setTier3From] = useState(settings.boat_tier3_from_ft ?? "45");
+  const [tier3Pct, setTier3Pct] = useState(settings.boat_tier3_pct ?? "175");
+  const [level2Pct, setLevel2Pct] = useState(settings.boat_level2_pct ?? "120");
+  const [level3Pct, setLevel3Pct] = useState(settings.boat_level3_pct ?? "150");
+  const [dockPct, setDockPct] = useState(settings.boat_dock_pct ?? "15");
+
+  const deluxe = (rows.get("wash-ft")?.price ?? 0) + (rows.get("wax-ft")?.price ?? 0);
+  const tierPct = (ft: number) =>
+    ft >= Number(tier3From || 0) ? Number(tier3Pct) || 100 : ft >= Number(tier2From || 0) ? Number(tier2Pct) || 100 : 100;
+  const ex = (ft: number) =>
+    `${ft} ft ≈ $${Math.round(((ft * deluxe * tierPct(ft)) / 100) * (1 + (Number(dockPct) || 0) / 100))}`;
+
+  const numField = (label: string, value: string, onChange: (v: string) => void, suffix: string) => (
+    <label className="block">
+      <span className="label block mb-1">
+        {label} <span className="normal-case">({suffix})</span>
+      </span>
+      <input type="number" min={0} className="input num" value={value} onChange={(e) => onChange(e.target.value)} />
+    </label>
+  );
 
   return (
     <Section
       title="Boat Detail"
-      note="Priced by the foot, built from parts — wash + spray wax make the outside rate, interior stacks on top. Quotes suggest all three; every job's price is still adjustable."
+      note="A per-foot service menu — jobs pick which services apply (deluxe wash + spray wax is the default; maintenance wash is the plan rate). Rates scale up by hull size, condition, and in-water vs trailer. Every quote is still adjustable per job."
     >
       <div className="overflow-x-auto">
         <table className={GRID_TABLE}>
           <thead>
             <tr>
-              <th>Component</th>
+              <th>Service</th>
               <th>$ / ft</th>
               <th>Min / ft</th>
             </tr>
@@ -330,18 +354,46 @@ function BoatSection({ pricing }: { pricing: ServicePricing[] }) {
           </tbody>
         </table>
       </div>
-      <p className="text-[13px] text-ink-2 mt-2 num">
-        Outside ${exterior}/ft · everything ${everything}/ft — {ex(30)}
+
+      <p className="label mt-4 mb-1.5">Bigger boats cost more per foot</p>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {numField("Tier 2 from", tier2From, setTier2From, "ft")}
+        {numField("Tier 2 rate", tier2Pct, setTier2Pct, "%")}
+        {numField("Tier 3 from", tier3From, setTier3From, "ft")}
+        {numField("Tier 3 rate", tier3Pct, setTier3Pct, "%")}
+      </div>
+      <p className="label mt-4 mb-1.5">Condition &amp; access</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {numField("Average condition", level2Pct, setLevel2Pct, "%")}
+        {numField("Neglected / oxidized", level3Pct, setLevel3Pct, "%")}
+        {numField("In-water base", dockPct, setDockPct, "+%")}
+      </div>
+      <p className="text-[12px] text-faint mt-1.5">
+        Quotes assume the boat is in the water (base price includes this %) — a boat on a trailer shows it as a discount.
+      </p>
+
+      <p className="text-[13px] text-ink-2 mt-3 num">
+        Deluxe wash &amp; wax, maintained, in the water: {ex(20)} · {ex(35)} · {ex(60)}
       </p>
       <div className="mt-3">
         <SaveButton
           state={state}
           onClick={() =>
-            run(() =>
-              saveServicePricing(
+            run(async () => {
+              const a = await saveServicePricing(
                 BOAT_COMPONENTS.map((c) => ({ service_id: "boat-detail", size_id: c.id, ...rows.get(c.id)! }))
-              )
-            )
+              );
+              if (!a.ok) return a;
+              return saveSettings({
+                boat_tier2_from_ft: tier2From,
+                boat_tier2_pct: tier2Pct,
+                boat_tier3_from_ft: tier3From,
+                boat_tier3_pct: tier3Pct,
+                boat_level2_pct: level2Pct,
+                boat_level3_pct: level3Pct,
+                boat_dock_pct: dockPct,
+              });
+            })
           }
         />
       </div>

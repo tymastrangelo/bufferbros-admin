@@ -32,10 +32,22 @@ export interface Catalog {
   /** Ceramic Coating per size (includes a full detail) — null until priced/active. */
   ceramic: { name: string; note: string | null; bySize: Record<SizeId, { price: number; minutes: number }> } | null;
   /**
-   * Boat detailing, priced per foot of boat and built from components (exterior wash,
-   * spray wax, interior) so each rate edits independently — null until priced/active.
+   * Boat detailing: a per-foot service menu (maintenance wash, deluxe wash, spray wax,
+   * interior, oxidation removal, sealant, ceramic) — jobs pick which apply. Rates then
+   * scale by hull-size tier, condition level, and an in-water surcharge.
+   * Null until priced/active.
    */
-  boat: { name: string; note: string | null; components: BoatComponent[] } | null;
+  boat: {
+    name: string;
+    note: string | null;
+    components: BoatComponent[];
+    /** Sorted ascending; a hull ≥ fromFt multiplies every per-foot rate by pct/100. */
+    tiers: { fromFt: number; pct: number }[];
+    /** Condition multipliers picked per job; index 0 is the 100% baseline. */
+    levels: { label: string; pct: number }[];
+    /** Surcharge % when the boat sits in the water instead of on a trailer. */
+    dockPct: number;
+  } | null;
   addons: CatalogAddon[];
   planPricing: { cadence: PlanCadence; size_id: string; price: number }[];
   /** Business rules from the settings table (with sane defaults). */
@@ -64,32 +76,68 @@ export function computeQuote(
   };
 }
 
-/** Total per-foot rate across the boat's components (the everything-included rate). */
-export function boatRatePerFt(catalog: Catalog): number {
-  return catalog.boat?.components.reduce((s, c) => s + c.ratePerFt, 0) ?? 0;
+/** The default boat job: the deluxe exterior (wash + spray wax). */
+export const BOAT_DEFAULT_SERVICES = ["wash-ft", "wax-ft"];
+/** The recurring-plan boat service. */
+export const BOAT_MAINTENANCE_ID = "maintenance-ft";
+
+export interface BoatQuoteOpts {
+  /** Which per-foot services this job includes (default: deluxe wash + wax). */
+  componentIds?: string[];
+  /** Condition multiplier from catalog.boat.levels (default 100 = maintained). */
+  levelPct?: number;
+  /** Boat is on a trailer — knocks the built-in in-water upcharge back off. */
+  trailer?: boolean;
 }
 
-/** Boat detail quote: length × summed component rates. Zero until a length is on file. */
-export function boatQuote(catalog: Catalog, lengthFt: number | null): { price: number; minutes: number } {
+/** The trailer discount %, as shown to customers (the in-water upcharge, unwound). */
+export function boatTrailerDiscountPct(catalog: Catalog): number {
+  const pct = catalog.boat?.dockPct ?? 0;
+  return Math.round((1 - 1 / (1 + pct / 100)) * 100);
+}
+
+/**
+ * Everything that scales a boat's per-foot rates: size tier × condition × access.
+ * Quotes assume the boat sits in the water (the dockPct upcharge is baked into the
+ * base price); a trailer reads as a discount instead of water reading as a surcharge.
+ */
+export function boatMultiplier(catalog: Catalog, lengthFt: number, opts?: BoatQuoteOpts): number {
+  const b = catalog.boat;
+  if (!b) return 1;
+  const tier = b.tiers.filter((t) => lengthFt >= t.fromFt).at(-1)?.pct ?? 100;
+  return (tier / 100) * ((opts?.levelPct ?? 100) / 100) * (opts?.trailer ? 1 : 1 + b.dockPct / 100);
+}
+
+/** Base per-foot rate for the selected services (before size/condition/dock scaling). */
+export function boatRatePerFt(catalog: Catalog, componentIds: string[] = BOAT_DEFAULT_SERVICES): number {
+  return catalog.boat?.components.filter((c) => componentIds.includes(c.id)).reduce((s, c) => s + c.ratePerFt, 0) ?? 0;
+}
+
+/** Boat quote: length × selected services × size/condition/dock scaling. Zero without a length. */
+export function boatQuote(catalog: Catalog, lengthFt: number | null, opts?: BoatQuoteOpts): { price: number; minutes: number } {
   if (!catalog.boat || !lengthFt) return { price: 0, minutes: 0 };
+  const ids = opts?.componentIds ?? BOAT_DEFAULT_SERVICES;
+  const comps = catalog.boat.components.filter((c) => ids.includes(c.id));
+  const mult = boatMultiplier(catalog, lengthFt, opts);
   return {
-    price: Math.round(lengthFt * boatRatePerFt(catalog)),
-    minutes: Math.round(lengthFt * catalog.boat.components.reduce((s, c) => s + c.minutesPerFt, 0)),
+    price: Math.round(lengthFt * comps.reduce((s, c) => s + c.ratePerFt, 0) * mult),
+    minutes: Math.round(lengthFt * comps.reduce((s, c) => s + c.minutesPerFt, 0) * mult),
   };
 }
 
-/** Mixed selection of cars + boats: cars by size (+ add-ons), boats by the foot. */
+/** Mixed selection of cars + boats: cars by size (+ add-ons), boats by their service menu. */
 export function computeVehiclesQuote(
   catalog: Catalog,
   vehicles: { kind: "car" | "boat"; size_id: SizeId; length_ft: number | null }[],
   addonIds: string[],
-  service: BaseService = "standard"
+  service: BaseService = "standard",
+  boatOpts?: BoatQuoteOpts
 ): { price: number; minutes: number } {
   const cars = vehicles.filter((v) => v.kind !== "boat");
   const boats = vehicles.filter((v) => v.kind === "boat");
   const carQ = cars.length ? computeMultiQuote(catalog, cars.map((v) => v.size_id), addonIds, service) : { price: 0, minutes: 0 };
   return boats.reduce((acc, b) => {
-    const q = boatQuote(catalog, b.length_ft);
+    const q = boatQuote(catalog, b.length_ft, boatOpts);
     return { price: acc.price + q.price, minutes: acc.minutes + q.minutes };
   }, carQ);
 }

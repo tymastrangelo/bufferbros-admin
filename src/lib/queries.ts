@@ -4,11 +4,15 @@ import type { Catalog } from "./catalog";
 import { createClient } from "./supabase/server";
 import type { Employee, PlanCadence, ServicePricing, SizeId } from "./types";
 
-/** service_pricing size_id → display name for the boat detail's per-foot slices. */
+/** service_pricing size_id → display name for the boat detail's per-foot service menu. */
 export const BOAT_COMPONENT_NAMES: Record<string, string> = {
-  "wash-ft": "Exterior wash",
+  "maintenance-ft": "Maintenance wash",
+  "wash-ft": "Deluxe wash",
   "wax-ft": "Spray wax",
-  "interior-ft": "Interior",
+  "interior-ft": "Interior cabin",
+  "oxidation-ft": "Hull / oxidation removal",
+  "sealant-ft": "Polymer sealant",
+  "ceramic-ft": "Ceramic coating",
 };
 
 export async function getCatalog(): Promise<Catalog> {
@@ -49,13 +53,29 @@ export async function getCatalog(): Promise<Catalog> {
   const boatSvc = ((services ?? []) as { id: string; kind: string; name: string; note: string | null }[]).find(
     (s) => s.id === "boat-detail" && s.kind === "detail"
   );
-  // Per-foot components keyed by size_id; the quote sums whatever rows exist.
+  // Per-foot service menu keyed by size_id; a quote sums the services a job picks.
   const boatComponents = Object.entries(BOAT_COMPONENT_NAMES).flatMap(([id, name]) => {
     const r = ((pricing ?? []) as ServicePricing[]).find((p) => p.service_id === "boat-detail" && p.size_id === id);
     return r ? [{ id, name, ratePerFt: Number(r.price), minutesPerFt: r.minutes }] : [];
   });
   const boat: Catalog["boat"] =
-    boatSvc && boatComponents.length ? { name: boatSvc.name, note: boatSvc.note, components: boatComponents } : null;
+    boatSvc && boatComponents.length
+      ? {
+          name: boatSvc.name,
+          note: boatSvc.note,
+          components: boatComponents,
+          tiers: [
+            { fromFt: num("boat_tier2_from_ft", 30), pct: num("boat_tier2_pct", 125) },
+            { fromFt: num("boat_tier3_from_ft", 45), pct: num("boat_tier3_pct", 175) },
+          ].sort((a, b) => a.fromFt - b.fromFt),
+          levels: [
+            { label: "Maintained", pct: 100 },
+            { label: "Average", pct: num("boat_level2_pct", 120) },
+            { label: "Neglected", pct: num("boat_level3_pct", 150) },
+          ],
+          dockPct: num("boat_dock_pct", 15),
+        }
+      : null;
 
   const addons = ((services ?? []) as { id: string; kind: string; name: string }[])
     .filter((s) => s.kind === "addon")

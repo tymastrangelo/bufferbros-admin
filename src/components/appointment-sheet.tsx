@@ -5,7 +5,18 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Wheel } from "@/components/brand";
 import { createAppointment } from "@/lib/actions/appointments";
-import { addonQuote, boatQuote, boatRatePerFt, computeQuote, computeVehiclesQuote, type BaseService, type Catalog } from "@/lib/catalog";
+import {
+  addonQuote,
+  BOAT_DEFAULT_SERVICES,
+  boatQuote,
+  boatRatePerFt,
+  boatTrailerDiscountPct,
+  computeQuote,
+  computeVehiclesQuote,
+  type BaseService,
+  type BoatQuoteOpts,
+  type Catalog,
+} from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { todayYmd } from "@/lib/time";
@@ -74,6 +85,10 @@ export function AppointmentSheet({
   const [address, setAddress] = useState(defaultCustomer?.addresses?.[0]?.address ?? "");
   const [sizeId, setSizeId] = useState<SizeId>(defaultCustomer?.vehicles?.[0]?.size_id ?? "sedan");
   const [boatFt, setBoatFt] = useState("");
+  // The boat side of the visit: which per-foot services, condition, in-water vs trailer.
+  const [boatServices, setBoatServices] = useState<string[]>([...BOAT_DEFAULT_SERVICES]);
+  const [boatLevelIdx, setBoatLevelIdx] = useState(0);
+  const [boatTrailer, setBoatTrailer] = useState(false);
   const [vehicles, setVehicles] = useState<Vehicle[]>(defaultCustomer?.vehicles ?? []);
   const [vehicleIds, setVehicleIds] = useState<string[]>(() => {
     const v = preferredVehicle(defaultCustomer?.vehicles);
@@ -99,14 +114,18 @@ export function AppointmentSheet({
   const mixed = selCars.length > 0 && selBoats.length > 0;
   // Boat-flavored booking: boats selected, or boat mode quoting a bare length.
   const boatish = boatsOnly || (boatMode && selVehicles.length === 0);
+  const boatOpts: BoatQuoteOpts = useMemo(
+    () => ({ componentIds: boatServices, levelPct: catalog.boat?.levels[boatLevelIdx]?.pct, trailer: boatTrailer }),
+    [catalog, boatServices, boatLevelIdx, boatTrailer]
+  );
   const quote = useMemo(
     () =>
       selVehicles.length
-        ? computeVehiclesQuote(catalog, selVehicles, addonIds, service)
+        ? computeVehiclesQuote(catalog, selVehicles, addonIds, service, boatOpts)
         : boatMode
-          ? boatQuote(catalog, Number(boatFt) || null)
+          ? boatQuote(catalog, Number(boatFt) || null, boatOpts)
           : computeQuote(catalog, sizeId, addonIds, service),
-    [catalog, selVehicles, sizeId, addonIds, service, boatMode, boatFt]
+    [catalog, selVehicles, sizeId, addonIds, service, boatMode, boatFt, boatOpts]
   );
   const ceramic = service === "ceramic" && catalog.ceramic;
   const price = priceOverride !== "" ? Number(priceOverride) : quote.price;
@@ -231,12 +250,12 @@ export function AppointmentSheet({
                 ? selVehicles
                     .map((v) =>
                       v.kind === "boat"
-                        ? `${catalog.boat?.name ?? "Boat"} ${money(boatQuote(catalog, v.length_ft).price)}`
+                        ? `${catalog.boat?.name ?? "Boat"} ${money(boatQuote(catalog, v.length_ft, boatOpts).price)}`
                         : `${ceramic ? catalog.ceramic!.name : "Standard Detail"} ${money(computeQuote(catalog, v.size_id, addonIds, service).price)}`
                     )
                     .join(" + ")
                 : selVehicles[0]?.kind === "boat" && catalog.boat
-                  ? `${catalog.boat.name} — ${money(boatRatePerFt(catalog))}/ft${selVehicles[0].length_ft ? "" : " — add the boat's length for a price"}`
+                  ? `${catalog.boat.name} — ${money(boatRatePerFt(catalog, boatServices))}/ft base${selVehicles[0].length_ft ? "" : " — add the boat's length for a price"}`
                   : undefined
             }
           >
@@ -250,23 +269,76 @@ export function AppointmentSheet({
           </Field>
         ) : null}
 
-        {selBoats.length > 0 && catalog.boat && (
+        {catalog.boat && (selBoats.length > 0 || (boatMode && selVehicles.length === 0)) && (
           <Field
             label={`${catalog.boat.name}${mixed ? " — the boat's side of the visit" : ""}`}
-            hint={`${catalog.boat.components.map((c) => `${c.name.toLowerCase()} ${money(c.ratePerFt)}/ft`).join(" · ")} — set in Settings`}
+            hint="Per-foot rates from Settings, scaled by size, condition, and where it sits"
           >
-            <div className="card divide-y divide-line">
-              {selBoats.map((b) => {
-                const q = boatQuote(catalog, b.length_ft);
-                return (
-                  <div key={b.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                    <span className="font-medium truncate">{vehicleLabel(b)}</span>
-                    <span className="num text-ink-2 shrink-0">
-                      {b.length_ft ? `${b.length_ft} ft · ${money(q.price)} · ${q.minutes}m` : "add length for a price"}
-                    </span>
-                  </div>
-                );
-              })}
+            <div className="flex flex-col gap-2.5">
+              {selBoats.length > 0 && (
+                <div className="card divide-y divide-line">
+                  {selBoats.map((b) => {
+                    const q = boatQuote(catalog, b.length_ft, boatOpts);
+                    return (
+                      <div key={b.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                        <span className="font-medium truncate">{vehicleLabel(b)}</span>
+                        <span className="num text-ink-2 shrink-0">
+                          {b.length_ft ? `${b.length_ft} ft · ${money(q.price)} · ${q.minutes}m` : "add length for a price"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-1.5">
+                {catalog.boat.components.map((c) => {
+                  const on = boatServices.includes(c.id);
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() =>
+                        setBoatServices((ids) => (on ? ids.filter((x) => x !== c.id) : [...ids, c.id]))
+                      }
+                      className={`rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors duration-150 ${
+                        on ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
+                      }`}
+                    >
+                      {c.name} <span className={`num ${on ? "text-white/80" : "text-faint"}`}>{money(c.ratePerFt)}/ft</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {catalog.boat.levels.map((l, li) => (
+                  <button
+                    key={l.label}
+                    type="button"
+                    onClick={() => setBoatLevelIdx(li)}
+                    className={`rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors duration-150 ${
+                      boatLevelIdx === li ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
+                    }`}
+                  >
+                    {l.label}
+                  </button>
+                ))}
+                <span className="text-faint text-[11px] mx-0.5">·</span>
+                {[
+                  { trailer: false, label: "In the water" },
+                  { trailer: true, label: `On a trailer −${boatTrailerDiscountPct(catalog)}%` },
+                ].map((o) => (
+                  <button
+                    key={o.label}
+                    type="button"
+                    onClick={() => setBoatTrailer(o.trailer)}
+                    className={`rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors duration-150 ${
+                      boatTrailer === o.trailer ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </Field>
         )}
@@ -276,7 +348,7 @@ export function AppointmentSheet({
               label="Boat length (ft)"
               hint={
                 catalog.boat
-                  ? `${money(boatRatePerFt(catalog))}/ft — ${catalog.boat.components.map((c) => `${c.name.toLowerCase()} ${money(c.ratePerFt)}`).join(" + ")}`
+                  ? `${money(boatRatePerFt(catalog, boatServices))}/ft base for the selected services — pick them below`
                   : "No boat pricing set — add it in Settings"
               }
             >
