@@ -7,6 +7,7 @@ import { AppointmentSheet } from "@/components/appointment-sheet";
 import { IconMail, IconMessage, IconPhone, IconPin, IconPlus } from "@/components/icons";
 import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { LedgerEntrySheet } from "@/components/ledger-entry-sheet";
+import { RelationsCard } from "@/components/relations-card";
 import type { PickedCustomer } from "@/components/customer-picker";
 import { Balance, ErrorNote, Field, Sheet, StatusChip } from "@/components/ui";
 import { deleteVehicle, saveVehicle, setCustomerArchived, updateCustomer } from "@/lib/actions/customers";
@@ -14,7 +15,7 @@ import { cancelPaymentRequest, sendPaymentRequest } from "@/lib/actions/stripe";
 import { boatQuote, type Catalog } from "@/lib/catalog";
 import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
 import { fmtDateShort, minToLabel } from "@/lib/time";
-import { SIZES, sizeLabel, type Customer, type EntryKind, type LedgerEntry, type PaymentRequest, type Plan, type SizeId, type Vehicle } from "@/lib/types";
+import { SIZES, sizeLabel, type Customer, type EntryKind, type LedgerEntry, type OutreachLog, type PaymentRequest, type Plan, type SizeId, type Vehicle } from "@/lib/types";
 
 type Tab = "overview" | "visits" | "ledger";
 
@@ -27,6 +28,10 @@ export function CustomerProfile({
   catalog,
   today,
   paymentRequests,
+  outreachLog,
+  referrals,
+  referrerName,
+  referralCredit,
 }: {
   customer: Customer;
   vehicles: Vehicle[];
@@ -36,6 +41,10 @@ export function CustomerProfile({
   catalog: Catalog;
   today: string;
   paymentRequests: PaymentRequest[];
+  outreachLog: OutreachLog[];
+  referrals: { id: string; name: string }[];
+  referrerName: string | null;
+  referralCredit: number;
 }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [editOpen, setEditOpen] = useState(false);
@@ -159,6 +168,14 @@ export function CustomerProfile({
               <Row k="Source" v={customer.source || "manual"} />
             </div>
           </section>
+
+          <RelationsCard
+            customer={customer}
+            referrerName={referrerName}
+            referrals={referrals}
+            log={outreachLog}
+            referralCredit={referralCredit}
+          />
 
           <section>
             <div className="flex items-center justify-between mb-1.5">

@@ -111,6 +111,7 @@ export function SettingsClient({
       <AddonsSection services={services} pricing={pricing} />
       <PlanPricingSection planPricing={planPricing} settings={settings} />
       <HoursSection hours={hours} settings={settings} />
+      <OutreachSection settings={settings} />
       <OnlineBookingSection settings={settings} employees={employees} />
       <SplitSection settings={settings} />
       <BlocksSection blocks={blocks} />
@@ -668,6 +669,49 @@ function PlanPricingSection({ planPricing, settings }: { planPricing: PlanPricin
               if (!a.ok) return a;
               return saveSettings({ plan_initial_discount_pct: initialPct, prepay_discount_pct: prepayPct, multi_car_discount_pct: multiCarPct });
             })
+          }
+        />
+      </div>
+    </Section>
+  );
+}
+
+function OutreachSection({ settings }: { settings: Record<string, string> }) {
+  const { state, run } = useSave();
+  const [afterDays, setAfterDays] = useState(settings.outreach_after_days ?? "60");
+  const [reviewDays, setReviewDays] = useState(settings.review_ask_window_days ?? "14");
+  const [refCredit, setRefCredit] = useState(settings.referral_credit ?? "10");
+  return (
+    <Section
+      title="Client outreach & referrals"
+      note="Drives the Reach out and Ask for a review lists on Today, and the referral credit amount."
+    >
+      <div className="grid grid-cols-2 gap-3 max-w-sm">
+        <label className="block">
+          <span className="label block mb-1">Reach out after (days)</span>
+          <input type="number" min={1} className="input num" value={afterDays} onChange={(e) => setAfterDays(e.target.value)} />
+        </label>
+        <label className="block">
+          <span className="label block mb-1">Review ask window (days)</span>
+          <input type="number" min={1} className="input num" value={reviewDays} onChange={(e) => setReviewDays(e.target.value)} />
+        </label>
+        <label className="block">
+          <span className="label block mb-1">Referral credit ($ each)</span>
+          <input type="number" min={0} className="input num" value={refCredit} onChange={(e) => setRefCredit(e.target.value)} />
+        </label>
+      </div>
+      <p className="text-[13px] text-ink-2 mt-1.5">
+        Active clients surface on Today once their last detail and last touch are both older than the reach-out window
+        and nothing is booked. Fresh details stay in the review-ask list this many days. Referral credit lands on both
+        ledgers when you tap “Credit both” on the new client&apos;s profile.
+      </p>
+      <div className="mt-3">
+        <SaveButton
+          state={state}
+          onClick={() =>
+            run(() =>
+              saveSettings({ outreach_after_days: afterDays, review_ask_window_days: reviewDays, referral_credit: refCredit })
+            )
           }
         />
       </div>

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getRole } from "@/lib/auth";
 import { netOwed, type PayoutRow } from "@/lib/payouts";
+import { computeOutreachDue, computeReviewAsks, type OutreachCustomer } from "@/lib/outreach";
 import { getCatalog, getSettingsMap } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { addDays, fmtDateLong, todayYmd, weekdayOf } from "@/lib/time";
@@ -60,6 +61,38 @@ export default async function TodayPage() {
     db.from("employees").select("id,name,split_pct,active").order("created_at"),
     db.from("reminders").select("*, customers(id,name)").is("done_at", null).order("due_on").limit(10),
   ]);
+
+  // Client-relations queue: who's due for a reach-out / a review ask.
+  const [outreachCustQ, lastDoneQ, nextVisitQ] = await Promise.all([
+    db
+      .from("customers")
+      .select("id,name,phone,email,archived,outreach_status,resume_on,last_contacted_on,review_asked_on,review_left_on")
+      .eq("archived", false),
+    db.from("appointments").select("customer_id,date").eq("status", "completed").not("customer_id", "is", null).order("date", { ascending: false }),
+    db.from("appointments").select("customer_id,date").eq("status", "scheduled").gte("date", today).not("customer_id", "is", null),
+  ]);
+  const lastDetail = new Map<string, string>();
+  for (const r of (lastDoneQ.data ?? []) as { customer_id: string; date: string }[]) {
+    if (!lastDetail.has(r.customer_id)) lastDetail.set(r.customer_id, r.date);
+  }
+  const nextVisit = new Map<string, string>();
+  for (const r of (nextVisitQ.data ?? []) as { customer_id: string; date: string }[]) nextVisit.set(r.customer_id, r.date);
+  const outreachCustomers = (outreachCustQ.data ?? []) as OutreachCustomer[];
+  const outreach = {
+    due: computeOutreachDue({
+      customers: outreachCustomers,
+      lastDetail,
+      nextVisit,
+      today,
+      afterDays: Number(settings.outreach_after_days ?? 60),
+    }),
+    asks: computeReviewAsks({
+      customers: outreachCustomers,
+      lastDetail,
+      today,
+      windowDays: Number(settings.review_ask_window_days ?? 14),
+    }),
+  };
 
   // Resolve vehicle_ids -> labels for the reminders card in one lookup.
   const reminderRows = (remindersQ.data ?? []) as unknown as (Reminder & { customers: { id: string; name: string } | null })[];
@@ -134,6 +167,7 @@ export default async function TodayPage() {
       }
       attention={owner ? attention : null}
       reminders={owner ? reminders : null}
+      outreach={owner ? outreach : null}
     />
   );
 }

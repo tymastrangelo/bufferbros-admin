@@ -10,6 +10,16 @@ export type AppointmentSource = "web" | "manual" | "recurring";
 export type PlanStatus = "active" | "paused" | "ended";
 export type PlanCadence = "weekly" | "biweekly" | "monthly" | "custom";
 export type PaymentMethod = "cash" | "zelle" | "venmo" | "card" | "check" | "other";
+export type OutreachStatus = "active" | "seasonal" | "declined" | "do_not_contact";
+export type OutreachOutcome =
+  | "booked"
+  | "follow_up"
+  | "seasonal"
+  | "declined"
+  | "no_answer"
+  | "asked_review"
+  | "left_review"
+  | "note";
 export type EntryKind = "charge" | "payment" | "credit" | "refund" | "discount";
 
 export interface Addon {
@@ -31,7 +41,44 @@ export interface Customer {
   archived: boolean;
   /** On: the complete-job flow defaults to emailing a Stripe payment link. */
   stripe_payments: boolean;
+  outreach_status: OutreachStatus;
+  /** Seasonal/declined/snoozed clients resurface on Today from this date. */
+  resume_on: string | null;
+  last_contacted_on: string | null;
+  review_asked_on: string | null;
+  review_left_on: string | null;
+  /** Customer who referred this one. */
+  referred_by: string | null;
+  /** Set once the one-shot referral credit has been paid to both sides. */
+  referral_credited_at: string | null;
 }
+
+export interface OutreachLog {
+  id: string;
+  created_at: string;
+  customer_id: string;
+  occurred_on: string;
+  outcome: OutreachOutcome;
+  note: string | null;
+}
+
+export const OUTREACH_STATUSES: { id: OutreachStatus; label: string }[] = [
+  { id: "active", label: "Active" },
+  { id: "seasonal", label: "Seasonal" },
+  { id: "declined", label: "Not interested" },
+  { id: "do_not_contact", label: "Do not contact" },
+];
+
+export const OUTREACH_OUTCOMES: { id: OutreachOutcome; label: string }[] = [
+  { id: "booked", label: "Booked a detail" },
+  { id: "follow_up", label: "Follow up later" },
+  { id: "seasonal", label: "Back next season" },
+  { id: "declined", label: "Not interested" },
+  { id: "no_answer", label: "No answer" },
+  { id: "asked_review", label: "Asked for a review" },
+  { id: "left_review", label: "Left a review ⭐" },
+  { id: "note", label: "Just a note" },
+];
 
 export interface Vehicle {
   id: string;

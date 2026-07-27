@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getCatalog } from "@/lib/queries";
+import { getCatalog, getSettingsMap } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { todayYmd } from "@/lib/time";
-import type { Customer, LedgerEntry, PaymentRequest, Plan, Vehicle } from "@/lib/types";
+import type { Customer, LedgerEntry, OutreachLog, PaymentRequest, Plan, Vehicle } from "@/lib/types";
 import type { JobWithCustomer } from "@/components/job-sheet";
 import { CustomerProfile } from "./profile-client";
 
@@ -42,10 +42,18 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
   ]);
 
   if (!customerQ.data) notFound();
+  const customer = customerQ.data as Customer;
+
+  const [logQ, referralsQ, settings, referrerQ] = await Promise.all([
+    db.from("outreach_log").select("*").eq("customer_id", id).order("occurred_on", { ascending: false }).order("created_at", { ascending: false }).limit(8),
+    db.from("customers").select("id,name").eq("referred_by", id).order("created_at"),
+    getSettingsMap(),
+    customer.referred_by ? db.from("customers").select("name").eq("id", customer.referred_by).single() : Promise.resolve(null),
+  ]);
 
   return (
     <CustomerProfile
-      customer={customerQ.data as Customer}
+      customer={customer}
       vehicles={(vehiclesQ.data ?? []) as Vehicle[]}
       plans={(plansQ.data ?? []) as Plan[]}
       appointments={(apptsQ.data ?? []) as JobWithCustomer[]}
@@ -53,6 +61,10 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
       catalog={catalog}
       today={todayYmd()}
       paymentRequests={((requestsQ.data ?? []) as PaymentRequest[]).map((r) => ({ ...r, amount: Number(r.amount) }))}
+      outreachLog={(logQ.data ?? []) as OutreachLog[]}
+      referrals={(referralsQ.data ?? []) as { id: string; name: string }[]}
+      referrerName={referrerQ?.data?.name ?? null}
+      referralCredit={Number(settings.referral_credit ?? 10)}
     />
   );
 }

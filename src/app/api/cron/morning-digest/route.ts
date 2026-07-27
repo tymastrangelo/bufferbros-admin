@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { notify } from "@/lib/notify";
+import { computeOutreachDue, type OutreachCustomer } from "@/lib/outreach";
 import { createServiceClient } from "@/lib/supabase/server";
 import { minToLabel, todayYmd } from "@/lib/time";
 import { vehicleLabel, type Reminder, type Vehicle } from "@/lib/types";
@@ -104,7 +105,40 @@ export async function GET(request: Request) {
         .in("id", due.map((r) => r.id));
     }
 
-    return NextResponse.json({ ok: true, jobs: jobs.length, pending: pendingQ.count ?? 0, unpaidLinks: unpaid.length, reminders: due.length });
+    // Client outreach queue — same rules as the Today page (src/lib/outreach.ts).
+    const [custQ, lastDoneQ, nextQ, settingsQ] = await Promise.all([
+      db
+        .from("customers")
+        .select("id,name,phone,email,archived,outreach_status,resume_on,last_contacted_on,review_asked_on,review_left_on")
+        .eq("archived", false),
+      db.from("appointments").select("customer_id,date").eq("status", "completed").not("customer_id", "is", null).order("date", { ascending: false }),
+      db.from("appointments").select("customer_id,date").eq("status", "scheduled").gte("date", today).not("customer_id", "is", null),
+      db.from("settings").select("value").eq("key", "outreach_after_days").single(),
+    ]);
+    const lastDetail = new Map<string, string>();
+    for (const r of (lastDoneQ.data ?? []) as { customer_id: string; date: string }[]) {
+      if (!lastDetail.has(r.customer_id)) lastDetail.set(r.customer_id, r.date);
+    }
+    const nextVisit = new Map<string, string>();
+    for (const r of (nextQ.data ?? []) as { customer_id: string; date: string }[]) nextVisit.set(r.customer_id, r.date);
+    const outreachDue = computeOutreachDue({
+      customers: (custQ.data ?? []) as OutreachCustomer[],
+      lastDetail,
+      nextVisit,
+      today,
+      afterDays: Number(settingsQ.data?.value ?? 60),
+    });
+    if (outreachDue.length > 0) {
+      const names = outreachDue.slice(0, 4).map((d) => `${d.name} (${d.days}d)`).join(", ");
+      await notify(
+        "owner",
+        `Reach out: ${outreachDue.length} client${outreachDue.length === 1 ? "" : "s"}`,
+        `${names}${outreachDue.length > 4 ? "…" : ""} — the full list is on Today.`,
+        "/"
+      );
+    }
+
+    return NextResponse.json({ ok: true, jobs: jobs.length, pending: pendingQ.count ?? 0, unpaidLinks: unpaid.length, reminders: due.length, outreachDue: outreachDue.length });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }

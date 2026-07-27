@@ -144,6 +144,12 @@ export function CustomersClient({
                   <div className="min-w-0 grow">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <p className="text-[15px] font-medium truncate">{c.name}</p>
+                      {c.review_left_on && <span className="shrink-0 text-[13px]" title={`Left a review ${c.review_left_on}`}>⭐</span>}
+                      {c.outreach_status !== "active" && (
+                        <span className="chip bg-warn-wash text-warn shrink-0">
+                          {c.outreach_status === "do_not_contact" ? "no contact" : c.outreach_status === "declined" ? "not interested" : "seasonal"}
+                        </span>
+                      )}
                       {c.tags.map((t) => (
                         <span key={t} className="chip bg-[#f1f4f9] text-ink-2 shrink-0 hidden md:inline-flex">
                           {t}
