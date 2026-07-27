@@ -4,6 +4,13 @@ import type { Catalog } from "./catalog";
 import { createClient } from "./supabase/server";
 import type { Employee, PlanCadence, ServicePricing, SizeId } from "./types";
 
+/** service_pricing size_id → display name for the boat detail's per-foot slices. */
+export const BOAT_COMPONENT_NAMES: Record<string, string> = {
+  "wash-ft": "Exterior wash",
+  "wax-ft": "Spray wax",
+  "interior-ft": "Interior",
+};
+
 export async function getCatalog(): Promise<Catalog> {
   const db = await createClient();
   const [{ data: pricing }, { data: services }, { data: planPricing }, { data: settingRows }] = await Promise.all([
@@ -42,9 +49,13 @@ export async function getCatalog(): Promise<Catalog> {
   const boatSvc = ((services ?? []) as { id: string; kind: string; name: string; note: string | null }[]).find(
     (s) => s.id === "boat-detail" && s.kind === "detail"
   );
-  const boatRow = ((pricing ?? []) as ServicePricing[]).find((p) => p.service_id === "boat-detail" && p.size_id === "per-ft");
+  // Per-foot components keyed by size_id; the quote sums whatever rows exist.
+  const boatComponents = Object.entries(BOAT_COMPONENT_NAMES).flatMap(([id, name]) => {
+    const r = ((pricing ?? []) as ServicePricing[]).find((p) => p.service_id === "boat-detail" && p.size_id === id);
+    return r ? [{ id, name, ratePerFt: Number(r.price), minutesPerFt: r.minutes }] : [];
+  });
   const boat: Catalog["boat"] =
-    boatSvc && boatRow ? { name: boatSvc.name, note: boatSvc.note, ratePerFt: Number(boatRow.price), minutesPerFt: boatRow.minutes } : null;
+    boatSvc && boatComponents.length ? { name: boatSvc.name, note: boatSvc.note, components: boatComponents } : null;
 
   const addons = ((services ?? []) as { id: string; kind: string; name: string }[])
     .filter((s) => s.kind === "addon")

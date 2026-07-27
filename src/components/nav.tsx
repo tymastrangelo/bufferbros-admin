@@ -9,6 +9,7 @@ import { fmtPhone } from "@/lib/format";
 import type { Customer } from "@/lib/types";
 import {
   IconBlock,
+  IconBoat,
   IconCalendar,
   IconDollar,
   IconMore,
@@ -44,12 +45,17 @@ const NAV_WASHER = [
 
 const NEW_ACTIONS = [
   { href: "/calendar?new=1", label: "New appointment", icon: IconCalendar },
+  { href: "/calendar?new=boat", label: "New boat detail", icon: IconBoat },
+  { href: "/plans?new=1", label: "New plan", icon: IconRepeat },
+  { href: "/quote", label: "New quote", icon: IconSparkle },
   { href: "/customers?new=1", label: "New customer", icon: IconUsers },
   { href: "/money/payments?new=1", label: "Record payment", icon: IconDollar },
   { href: "/calendar?block=1", label: "Block time", icon: IconBlock },
 ];
 
-const NEW_ACTIONS_WASHER = NEW_ACTIONS.filter((a) => a.label === "New appointment" || a.label === "Block time");
+const NEW_ACTIONS_WASHER = NEW_ACTIONS.filter((a) =>
+  ["New appointment", "New boat detail", "New quote", "Block time"].includes(a.label)
+);
 
 function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);

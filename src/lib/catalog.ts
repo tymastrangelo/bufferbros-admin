@@ -15,6 +15,14 @@ export function addonQuote(a: CatalogAddon, sizeId: SizeId): { price: number; mi
   return a.bySize?.[sizeId] ?? { price: a.price, minutes: a.minutes };
 }
 
+/** One per-foot slice of the boat detail (exterior wash / spray wax / interior). */
+export interface BoatComponent {
+  id: string;
+  name: string;
+  ratePerFt: number;
+  minutesPerFt: number;
+}
+
 /** Base services a job can be quoted on. Ceramic already includes the full detail. */
 export type BaseService = "standard" | "ceramic";
 
@@ -23,8 +31,11 @@ export interface Catalog {
   detail: Record<SizeId, { price: number; minutes: number }>;
   /** Ceramic Coating per size (includes a full detail) — null until priced/active. */
   ceramic: { name: string; note: string | null; bySize: Record<SizeId, { price: number; minutes: number }> } | null;
-  /** Boat detailing, priced per foot of boat — null until priced/active. */
-  boat: { name: string; note: string | null; ratePerFt: number; minutesPerFt: number } | null;
+  /**
+   * Boat detailing, priced per foot of boat and built from components (exterior wash,
+   * spray wax, interior) so each rate edits independently — null until priced/active.
+   */
+  boat: { name: string; note: string | null; components: BoatComponent[] } | null;
   addons: CatalogAddon[];
   planPricing: { cadence: PlanCadence; size_id: string; price: number }[];
   /** Business rules from the settings table (with sane defaults). */
@@ -53,12 +64,17 @@ export function computeQuote(
   };
 }
 
-/** Boat detail quote: length × per-foot rate. Zero until a length is on file. */
+/** Total per-foot rate across the boat's components (the everything-included rate). */
+export function boatRatePerFt(catalog: Catalog): number {
+  return catalog.boat?.components.reduce((s, c) => s + c.ratePerFt, 0) ?? 0;
+}
+
+/** Boat detail quote: length × summed component rates. Zero until a length is on file. */
 export function boatQuote(catalog: Catalog, lengthFt: number | null): { price: number; minutes: number } {
   if (!catalog.boat || !lengthFt) return { price: 0, minutes: 0 };
   return {
-    price: Math.round(lengthFt * catalog.boat.ratePerFt),
-    minutes: Math.round(lengthFt * catalog.boat.minutesPerFt),
+    price: Math.round(lengthFt * boatRatePerFt(catalog)),
+    minutes: Math.round(lengthFt * catalog.boat.components.reduce((s, c) => s + c.minutesPerFt, 0)),
   };
 }
 

@@ -62,13 +62,22 @@ function SaveButton({ state, onClick }: { state: string; onClick: () => void }) 
   );
 }
 
+// ponytail: native <details> keeps every section collapsed to its title — no state,
+// no JS. Content stays mounted either way, so open/save/collapse loses nothing.
+// The per-section `note` blurbs stay in code for reference but don't render —
+// they only surface as a hover tooltip on the title, keeping the page clean.
 function Section({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
   return (
-    <section className="card p-4 md:p-5">
-      <h2 className="text-[15px] font-semibold">{title}</h2>
-      {note && <p className="text-[13px] text-ink-2 mt-0.5">{note}</p>}
-      <div className="mt-3">{children}</div>
-    </section>
+    <details className="card group">
+      <summary
+        title={note}
+        className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden px-4 md:px-5 py-3.5 flex items-center gap-3"
+      >
+        <h2 className="text-[15px] font-semibold grow">{title}</h2>
+        <span className="text-faint text-xs transition-transform duration-150 group-open:rotate-90">▸</span>
+      </summary>
+      <div className="px-4 md:px-5 pb-4 md:pb-5">{children}</div>
+    </details>
   );
 }
 
@@ -253,36 +262,85 @@ function CeramicSection({ pricing, settings }: { pricing: ServicePricing[]; sett
   );
 }
 
+// The boat detail's per-foot slices — exterior wash + spray wax make the outside
+// rate, interior stacks on top. size_id doubles as the component key in service_pricing.
+const BOAT_COMPONENTS = [
+  { id: "wash-ft", label: "Exterior wash" },
+  { id: "wax-ft", label: "Spray wax" },
+  { id: "interior-ft", label: "Interior" },
+] as const;
+
 function BoatSection({ pricing }: { pricing: ServicePricing[] }) {
   const { state, run } = useSave();
-  const row = pricing.find((p) => p.service_id === "boat-detail" && p.size_id === "per-ft");
-  const [rate, setRate] = useState(String(row?.price ?? 12));
-  const [minutes, setMinutes] = useState(String(row?.minutes ?? 8));
-  const ex = (ft: number) => `${ft} ft ≈ $${Math.round(ft * (Number(rate) || 0))}`;
+  const [rows, setRows] = useState(() => {
+    const map = new Map<string, { price: number; minutes: number }>();
+    for (const c of BOAT_COMPONENTS) {
+      const r = pricing.find((p) => p.service_id === "boat-detail" && p.size_id === c.id);
+      map.set(c.id, { price: Number(r?.price ?? 0), minutes: r?.minutes ?? 0 });
+    }
+    return map;
+  });
+  const set = (id: string, field: "price" | "minutes", v: number) =>
+    setRows(new Map(rows).set(id, { ...rows.get(id)!, [field]: v }));
+
+  const exterior = (rows.get("wash-ft")?.price ?? 0) + (rows.get("wax-ft")?.price ?? 0);
+  const everything = exterior + (rows.get("interior-ft")?.price ?? 0);
+  const ex = (ft: number) => `${ft} ft ≈ $${Math.round(ft * exterior)} outside / $${Math.round(ft * everything)} everything`;
+
   return (
     <Section
       title="Boat Detail"
-      note="Priced by the foot — a boat's length × these rates. Dashboard bookings only; every quote is still adjustable per job."
+      note="Priced by the foot, built from parts — wash + spray wax make the outside rate, interior stacks on top. Quotes suggest all three; every job's price is still adjustable."
     >
-      <div className="grid grid-cols-2 gap-3 max-w-sm">
-        <label className="block">
-          <span className="label block mb-1">$ per foot</span>
-          <input type="number" min={0} className="input num" value={rate} onChange={(e) => setRate(e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="label block mb-1">Minutes per foot</span>
-          <input type="number" min={0} className="input num" value={minutes} onChange={(e) => setMinutes(e.target.value)} />
-        </label>
+      <div className="overflow-x-auto">
+        <table className={GRID_TABLE}>
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>$ / ft</th>
+              <th>Min / ft</th>
+            </tr>
+          </thead>
+          <tbody>
+            {BOAT_COMPONENTS.map((c) => (
+              <tr key={c.id}>
+                <td className="font-medium">{c.label}</td>
+                <td>
+                  <input
+                    type="number"
+                    min={0}
+                    className="input num max-w-[90px]! h-8!"
+                    value={rows.get(c.id)!.price}
+                    onChange={(e) => set(c.id, "price", Number(e.target.value))}
+                    aria-label={`${c.label} $ per foot`}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    min={0}
+                    className="input num max-w-[90px]! h-8!"
+                    value={rows.get(c.id)!.minutes}
+                    onChange={(e) => set(c.id, "minutes", Number(e.target.value))}
+                    aria-label={`${c.label} minutes per foot`}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
       <p className="text-[13px] text-ink-2 mt-2 num">
-        {ex(20)} · {ex(30)} · {ex(40)}
+        Outside ${exterior}/ft · everything ${everything}/ft — {ex(30)}
       </p>
       <div className="mt-3">
         <SaveButton
           state={state}
           onClick={() =>
             run(() =>
-              saveServicePricing([{ service_id: "boat-detail", size_id: "per-ft", price: Number(rate), minutes: Number(minutes) }])
+              saveServicePricing(
+                BOAT_COMPONENTS.map((c) => ({ service_id: "boat-detail", size_id: c.id, ...rows.get(c.id)! }))
+              )
             )
           }
         />

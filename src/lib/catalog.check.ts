@@ -5,7 +5,15 @@ import { boatQuote, computeMultiQuote, computeQuote, computeVehiclesQuote, type 
 const catalog: Catalog = {
   detail: { sedan: { price: 229, minutes: 120 }, midsize: { price: 249, minutes: 150 }, large: { price: 269, minutes: 180 } },
   ceramic: null,
-  boat: { name: "Boat Detail", note: null, ratePerFt: 12, minutesPerFt: 8 },
+  boat: {
+    name: "Boat Detail",
+    note: null,
+    components: [
+      { id: "wash-ft", name: "Exterior wash", ratePerFt: 10, minutesPerFt: 3 },
+      { id: "wax-ft", name: "Spray wax", ratePerFt: 5, minutesPerFt: 2 },
+      { id: "interior-ft", name: "Interior", ratePerFt: 8, minutesPerFt: 3 },
+    ],
+  },
   addons: [
     { id: "pet-hair", name: "Pet hair", price: 40, minutes: 30 },
     {
@@ -30,8 +38,9 @@ assert.deepEqual(computeMultiQuote(catalog, ["midsize"], ["pet-hair"]), computeQ
 // No cars = nothing.
 assert.deepEqual(computeMultiQuote(catalog, [], ["pet-hair"]), { price: 0, minutes: 0 });
 
-// Boats: length × per-foot rate; no length or no boat pricing = 0 (price it by hand).
-assert.deepEqual(boatQuote(catalog, 24), { price: 288, minutes: 192 });
+// Boats: length × summed component rates (10+5+8=$23/ft, 3+2+3=8min/ft);
+// no length or no boat pricing = 0 (price it by hand).
+assert.deepEqual(boatQuote(catalog, 24), { price: 552, minutes: 192 });
 assert.deepEqual(boatQuote(catalog, null), { price: 0, minutes: 0 });
 assert.deepEqual(boatQuote({ ...catalog, boat: null }, 24), { price: 0, minutes: 0 });
 // Mixed visit: car quoted by size (+ add-ons), boat by the foot (add-ons don't apply).
@@ -44,7 +53,7 @@ assert.deepEqual(
     ],
     ["pet-hair"]
   ),
-  { price: 229 + 40 + 240, minutes: 120 + 30 + 160 }
+  { price: 229 + 40 + 460, minutes: 120 + 30 + 160 }
 );
 
 // Plan multi-car discount as applied in plan-form: sum of per-size prices, minus pct when 2+.

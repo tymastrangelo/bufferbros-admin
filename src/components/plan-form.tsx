@@ -4,11 +4,11 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Wheel } from "@/components/brand";
 import { createPlan, updatePlan, type PlanFields } from "@/lib/actions/plans";
-import { initialDetailPrice, planPrice, type Catalog } from "@/lib/catalog";
+import { initialDetailPrice, planPrice, visitsPerQuarter, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { labelToMin, minToLabel, todayYmd, WEEKDAYS } from "@/lib/time";
-import type { Plan, PlanCadence, SizeId, Vehicle } from "@/lib/types";
+import { PAYMENT_METHODS, type PaymentMethod, type Plan, type PlanCadence, type SizeId, type Vehicle } from "@/lib/types";
 import { CustomerPicker, type PickedCustomer } from "./customer-picker";
 import { VehiclePicker } from "./vehicle-picker";
 import { ErrorNote, Field, Sheet } from "./ui";
@@ -55,6 +55,10 @@ export function PlanFormSheet({
   const [billingNote, setBillingNote] = useState(plan?.billing_note ?? "");
   const [notes, setNotes] = useState(plan?.notes ?? "");
   const [emailConf, setEmailConf] = useState(plan?.email_confirmations ?? false);
+  const [skipEntry, setSkipEntry] = useState(plan?.skip_entry ?? false);
+  const [prepay, setPrepay] = useState(false);
+  const [prepayVisits, setPrepayVisits] = useState("");
+  const [prepayMethod, setPrepayMethod] = useState<PaymentMethod>("zelle");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [confirmApply, setConfirmApply] = useState<PlanFields | null>(null);
@@ -132,6 +136,17 @@ export function PlanFormSheet({
       setError("Time should look like 9:00 AM.");
       return null;
     }
+    const prepayN = Math.floor(Number(prepayVisits) || 0);
+    if (!plan && prepay) {
+      if (!(Number(price) > 0)) {
+        setError("Set the per-visit price before recording an upfront payment.");
+        return null;
+      }
+      if (prepayN < 1) {
+        setError("How many visits are they paying for upfront?");
+        return null;
+      }
+    }
     return {
       customerId: plan?.customer_id ?? customer!.id,
       vehicleIds,
@@ -147,6 +162,8 @@ export function PlanFormSheet({
       billingNote,
       notes,
       emailConfirmations: emailConf,
+      skipEntry,
+      prepay: !plan && prepay ? { visits: prepayN, method: prepayMethod } : null,
     };
   }
 
@@ -180,6 +197,8 @@ export function PlanFormSheet({
       return setError(res.error);
     }
     if (!plan && res.id) {
+      const pe = (res as { prepayError?: string }).prepayError;
+      if (pe) window.alert(`Plan created, but recording the upfront payment failed: ${pe} — use “Record prepay” on the plan page.`);
       // navigate straight to the new plan — don't run onClose's URL rewrite first
       router.push(`/plans/${res.id}`);
     } else {
@@ -212,13 +231,40 @@ export function PlanFormSheet({
           </Field>
         )}
 
-        {!plan && (
-          <p className="text-[13px] bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2.5">
-            New plan clients get an initial full Standard Detail at {catalog.rules.planInitialDiscountPct}% off (
-            <span className="num font-medium">{money(initialDetailPrice(catalog, firstSize))}</span> for this size) to
-            bring the car to maintenance shape — book it as a one-time job before the plan starts.
-          </p>
-        )}
+        {!plan &&
+          (() => {
+            const sizes = sizesOf(vehicleIds);
+            const entryPrice = (sizes.length ? sizes : [firstSize]).reduce((s, size) => s + initialDetailPrice(catalog, size), 0);
+            return (
+              <Field label="Getting started">
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setSkipEntry(false)}
+                    className={`card p-3 text-left transition-colors duration-150 ${!skipEntry ? "border-brand" : "hover:border-brand"}`}
+                  >
+                    <p className="text-sm font-semibold">
+                      Entry detail first — <span className="num">{money(entryPrice)}</span>
+                    </p>
+                    <p className="text-[12px] text-ink-2 mt-0.5">
+                      Full Standard Detail at {catalog.rules.planInitialDiscountPct}% off to get the car to maintenance
+                      shape — book it as a one-time job before visits start.
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSkipEntry(true)}
+                    className={`card p-3 text-left transition-colors duration-150 ${skipEntry ? "border-brand" : "hover:border-brand"}`}
+                  >
+                    <p className="text-sm font-semibold">Straight to maintenance</p>
+                    <p className="text-[12px] text-ink-2 mt-0.5">
+                      Skip the entry detail — the car&apos;s already in shape, visits start at the plan rate.
+                    </p>
+                  </button>
+                </div>
+              </Field>
+            );
+          })()}
 
         <Field label="Cadence">
           <div className="grid grid-cols-2 gap-1.5">
@@ -256,6 +302,105 @@ export function PlanFormSheet({
             <input type="number" min={15} step={15} className="input num" value={duration} onChange={(e) => setDuration(e.target.value)} />
           </Field>
         </div>
+        {!plan && (
+          <Field label="Billing">
+            <div className="grid grid-cols-2 gap-1.5">
+              {[
+                { v: false, label: "Collects per visit" },
+                { v: true, label: "Pays upfront" },
+              ].map((o) => (
+                <button
+                  key={o.label}
+                  type="button"
+                  onClick={() => {
+                    setPrepay(o.v);
+                    if (o.v && !prepayVisits) setPrepayVisits(String(visitsPerQuarter(cadence, Number(intervalDays) || null)));
+                  }}
+                  className={`h-9 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
+                    prepay === o.v ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </Field>
+        )}
+        {!plan &&
+          prepay &&
+          (() => {
+            const per = Number(price) || 0;
+            const q = visitsPerQuarter(cadence, Number(intervalDays) || null);
+            const n = Math.max(0, Math.floor(Number(prepayVisits) || 0));
+            const qualifies = n >= q;
+            const discount = qualifies ? Math.round((per * n * catalog.rules.prepayDiscountPct) / 100) : 0;
+            const due = per * n - discount;
+            return (
+              <div className="flex flex-col gap-2 -mt-1.5">
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { label: "Quarter", mult: 1 },
+                    { label: "Half year", mult: 2 },
+                    { label: "Full year", mult: 4 },
+                  ].map((b) => {
+                    const bn = q * b.mult;
+                    const total = Math.round(per * bn * (1 - catalog.rules.prepayDiscountPct / 100));
+                    return (
+                      <button
+                        key={b.label}
+                        type="button"
+                        onClick={() => setPrepayVisits(String(bn))}
+                        className={`chip cursor-pointer num ${n === bn ? "bg-ink text-white" : "bg-[#f1f4f9] text-ink-2 hover:bg-line"}`}
+                      >
+                        {b.label} · {bn}v{per > 0 ? ` · ${money(total)}` : ""}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Visits paid upfront">
+                    <input
+                      type="number"
+                      min={1}
+                      className="input num"
+                      value={prepayVisits}
+                      onChange={(e) => setPrepayVisits(e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Paying via">
+                    <select className="select" value={prepayMethod} onChange={(e) => setPrepayMethod(e.target.value as PaymentMethod)}>
+                      {PAYMENT_METHODS.map((m) => (
+                        <option key={m} value={m}>
+                          {m[0].toUpperCase() + m.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                {n > 0 && per > 0 && (
+                  <p className="text-[13px] text-ink-2 num">
+                    {n} × {money(per)}
+                    {discount > 0 ? ` − ${catalog.rules.prepayDiscountPct}%` : ""} ={" "}
+                    <span className="font-semibold text-ink">{money(due)}</span> onto their balance when you save
+                    {!qualifies ? ` — under ${q} visits, so no prepay discount` : ""}.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+        {Number(price) > 0 &&
+          !prepay &&
+          (() => {
+            const q = visitsPerQuarter(cadence, Number(intervalDays) || null);
+            const block = (n: number) => money(Math.round(Number(price) * n * (1 - catalog.rules.prepayDiscountPct / 100)));
+            return (
+              <p className="text-[13px] text-ink-2 -mt-1.5 num">
+                Paying upfront saves {catalog.rules.prepayDiscountPct}%: quarter ({q}v) {block(q)} · half year {block(q * 2)} · full
+                year {block(q * 4)}
+                {plan ? " — record it from the plan page." : " — switch Billing to “Pays upfront” to record it now."}
+              </p>
+            );
+          })()}
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Preferred day">

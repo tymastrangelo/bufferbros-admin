@@ -4,6 +4,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { confirmedEmail, sendEmail } from "@/lib/email";
 import { syncAppointmentToGcal } from "@/lib/gcal";
+import { stepDays } from "@/lib/plan-projection";
 import { addDays, todayYmd, weekdayOf, whenLabel } from "@/lib/time";
 import { vehicleLabel, type Appointment, type Plan, type Vehicle } from "@/lib/types";
 
@@ -25,19 +26,6 @@ type PlanWithCustomer = Plan & {
 };
 
 const DEFAULT_HORIZON_DAYS = 56; // 8 weeks — used by the weekly cron
-
-function stepDays(plan: Plan): number {
-  switch (plan.cadence) {
-    case "weekly":
-      return 7;
-    case "biweekly":
-      return 14;
-    case "monthly":
-      return 28; // ponytail: monthly = every 4 weeks so the weekday holds; calendar-month stepping if a customer ever needs it
-    default:
-      return plan.interval_days ?? 28;
-  }
-}
 
 export async function generateOccurrences(
   db: SupabaseClient,

@@ -11,7 +11,7 @@ import type { PickedCustomer } from "@/components/customer-picker";
 import { Balance, ErrorNote, Field, Sheet, StatusChip } from "@/components/ui";
 import { deleteVehicle, saveVehicle, setCustomerArchived, updateCustomer } from "@/lib/actions/customers";
 import { cancelPaymentRequest, sendPaymentRequest } from "@/lib/actions/stripe";
-import type { Catalog } from "@/lib/catalog";
+import { boatQuote, type Catalog } from "@/lib/catalog";
 import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
 import { fmtDateShort, minToLabel } from "@/lib/time";
 import { SIZES, sizeLabel, type Customer, type EntryKind, type LedgerEntry, type PaymentRequest, type Plan, type SizeId, type Vehicle } from "@/lib/types";
@@ -39,12 +39,13 @@ export function CustomerProfile({
 }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [editOpen, setEditOpen] = useState(false);
-  const [vehicleEdit, setVehicleEdit] = useState<Vehicle | "new" | null>(null);
+  const [vehicleEdit, setVehicleEdit] = useState<Vehicle | "new" | "new-boat" | null>(null);
   // Store the tapped job, render the fresh copy from server props so an open
   // sheet updates in place after any action refreshes the route.
   const [job, setJob] = useState<JobWithCustomer | null>(null);
   const openJob = job ? (appointments.find((a) => a.id === job.id) ?? job) : null;
-  const [newAppt, setNewAppt] = useState(false);
+  const [newAppt, setNewAppt] = useState<false | "car" | "boat">(false);
+  const [bookMenu, setBookMenu] = useState(false);
   const [stripeSheet, setStripeSheet] = useState(false);
   const [ledgerSheet, setLedgerSheet] = useState<{ entry?: LedgerEntry; kind?: EntryKind } | null>(null);
 
@@ -52,6 +53,8 @@ export function CustomerProfile({
   const upcoming = appointments.filter((a) => a.status === "scheduled" && a.date >= today).reverse();
   const past = appointments.filter((a) => !(a.status === "scheduled" && a.date >= today));
   const picked: PickedCustomer = { ...customer, vehicles };
+  const cars = vehicles.filter((v) => v.kind !== "boat");
+  const boats = vehicles.filter((v) => v.kind === "boat");
 
   return (
     <div className="px-4 md:px-8 py-5 md:py-7 max-w-4xl">
@@ -81,9 +84,33 @@ export function CustomerProfile({
           <button className="btn btn-sm" onClick={() => setEditOpen(true)}>
             Edit
           </button>
-          <button className="btn btn-primary btn-sm" onClick={() => setNewAppt(true)}>
-            <IconPlus width={13} height={13} /> Book
-          </button>
+          <div className="relative">
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => (boats.length ? setBookMenu((v) => !v) : setNewAppt("car"))}
+            >
+              <IconPlus width={13} height={13} /> Book
+            </button>
+            {bookMenu && (
+              <div className="absolute right-0 top-full mt-1 z-20 card p-1 w-40 flex flex-col shadow-lg">
+                {[
+                  { kind: "car" as const, label: "Vehicle detail" },
+                  { kind: "boat" as const, label: "Boat detail" },
+                ].map((o) => (
+                  <button
+                    key={o.kind}
+                    className="text-left text-sm font-medium px-3 py-2 rounded-md hover:bg-brand-wash"
+                    onClick={() => {
+                      setBookMenu(false);
+                      setNewAppt(o.kind);
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -141,8 +168,8 @@ export function CustomerProfile({
               </button>
             </div>
             <div className="card divide-y divide-line">
-              {vehicles.length === 0 && <p className="px-4 py-3 text-sm text-faint">No vehicles yet — size drives pricing.</p>}
-              {vehicles.map((v) => (
+              {cars.length === 0 && <p className="px-4 py-3 text-sm text-faint">No vehicles yet — size drives pricing.</p>}
+              {cars.map((v) => (
                 <button key={v.id} className="w-full text-left px-4 py-3 hover:bg-[#f8fafd] flex items-center justify-between gap-2" onClick={() => setVehicleEdit(v)}>
                   <div>
                     <p className="text-sm font-medium">
@@ -158,6 +185,32 @@ export function CustomerProfile({
                   </span>
                 </button>
               ))}
+            </div>
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between mb-1.5">
+              <h2 className="label">Boats</h2>
+              <button className="text-[13px] text-brand-deep font-medium" onClick={() => setVehicleEdit("new-boat")}>
+                + Add boat
+              </button>
+            </div>
+            <div className="card divide-y divide-line">
+              {boats.length === 0 && <p className="px-4 py-3 text-sm text-faint">No boats on file — length drives pricing.</p>}
+              {boats.map((v) => {
+                const q = boatQuote(catalog, v.length_ft);
+                return (
+                  <button key={v.id} className="w-full text-left px-4 py-3 hover:bg-[#f8fafd] flex items-center justify-between gap-2" onClick={() => setVehicleEdit(v)}>
+                    <div>
+                      <p className="text-sm font-medium">
+                        {[v.year, v.color, v.make, v.model].filter(Boolean).join(" ") || "Boat"}
+                      </p>
+                      <p className="text-xs text-faint">{v.length_ft ? `${v.length_ft} ft` : "Length not set — needed for pricing"}</p>
+                    </div>
+                    <span className="text-xs text-faint num">{v.length_ft ? `${money(q.price)} · ${q.minutes}m` : "—"}</span>
+                  </button>
+                );
+              })}
             </div>
           </section>
 
@@ -250,12 +303,15 @@ export function CustomerProfile({
       {vehicleEdit && (
         <VehicleSheet
           customerId={customer.id}
-          vehicle={vehicleEdit === "new" ? null : vehicleEdit}
+          vehicle={typeof vehicleEdit === "string" ? null : vehicleEdit}
+          boat={vehicleEdit === "new-boat" || (typeof vehicleEdit !== "string" && vehicleEdit.kind === "boat")}
           onClose={() => setVehicleEdit(null)}
         />
       )}
       {openJob && <JobSheet job={openJob} onClose={() => setJob(null)} catalog={catalog} />}
-      {newAppt && <AppointmentSheet open onClose={() => setNewAppt(false)} catalog={catalog} defaultCustomer={picked} />}
+      {newAppt && (
+        <AppointmentSheet open onClose={() => setNewAppt(false)} catalog={catalog} defaultCustomer={picked} defaultKind={newAppt} />
+      )}
       {ledgerSheet && (
         <LedgerEntrySheet
           open
@@ -331,6 +387,10 @@ function VisitList({
 }
 
 function LedgerTable({ ledger, onEdit }: { ledger: LedgerEntry[]; onEdit: (e: LedgerEntry) => void }) {
+  // A completed-and-paid detail books a charge + payment pair on the same appointment;
+  // show it as one clean "paid" line. Tapping a combined line expands the raw entries.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
   // ledger is newest-first; compute running balance from the bottom up
   const totals: number[] = new Array(ledger.length);
   let run = 0;
@@ -338,6 +398,35 @@ function LedgerTable({ ledger, onEdit }: { ledger: LedgerEntry[]; onEdit: (e: Le
     run += ledger[i].amount;
     totals[i] = run;
   }
+
+  const byAppt = new Map<string, LedgerEntry[]>();
+  for (const e of ledger) {
+    if (e.appointment_id) byAppt.set(e.appointment_id, [...(byAppt.get(e.appointment_id) ?? []), e]);
+  }
+  const pairOf = (e: LedgerEntry) => {
+    if (!e.appointment_id || expanded.has(e.appointment_id)) return null;
+    const g = byAppt.get(e.appointment_id);
+    if (!g || g.length !== 2) return null;
+    const charge = g.find((x) => x.kind === "charge");
+    const payment = g.find((x) => x.kind === "payment");
+    return charge && payment && charge.amount + payment.amount === 0 ? { charge, payment } : null;
+  };
+
+  type DisplayRow = { e: LedgerEntry; total: number; pair?: { charge: LedgerEntry; payment: LedgerEntry } };
+  const rows: DisplayRow[] = [];
+  const consumed = new Set<string>();
+  ledger.forEach((e, i) => {
+    if (consumed.has(e.id)) return;
+    const pair = pairOf(e);
+    if (pair) {
+      consumed.add(pair.charge.id);
+      consumed.add(pair.payment.id);
+      rows.push({ e, total: totals[i], pair });
+    } else {
+      rows.push({ e, total: totals[i] });
+    }
+  });
+
   return (
     <table className="tbl tbl-link tbl-stack min-w-[480px]">
       <thead>
@@ -349,21 +438,38 @@ function LedgerTable({ ledger, onEdit }: { ledger: LedgerEntry[]; onEdit: (e: Le
         </tr>
       </thead>
       <tbody>
-        {ledger.map((e, i) => (
-          <tr key={e.id} onClick={() => onEdit(e)}>
-            <td data-label="Date" className="num whitespace-nowrap">{fmtDateShort(e.occurred_on)}</td>
-            <td data-label="Entry">
-              <span className="capitalize font-medium">{e.kind}</span>
-              {e.method && <span className="text-faint"> · {e.method}</span>}
-              {e.memo && <span className="text-faint"> · {e.memo}</span>}
-            </td>
-            <td data-label="Amount" className={`num text-right ${e.amount < 0 ? "text-bad" : "text-ok"}`}>
-              {e.amount < 0 ? "−" : "+"}
-              {money(Math.abs(e.amount))}
-            </td>
-            <td data-label="Balance" className="num text-right text-ink-2">{money(totals[i])}</td>
-          </tr>
-        ))}
+        {rows.map(({ e, total, pair }) =>
+          pair ? (
+            <tr
+              key={e.id}
+              title="Charge + payment for one completed detail — tap to see them separately"
+              onClick={() => setExpanded((s) => new Set(s).add(e.appointment_id!))}
+            >
+              <td data-label="Date" className="num whitespace-nowrap">{fmtDateShort(e.occurred_on)}</td>
+              <td data-label="Entry">
+                <span className="font-medium">Detail — paid</span>
+                {pair.payment.method && <span className="text-faint"> · {pair.payment.method}</span>}
+                {pair.charge.memo && <span className="text-faint"> · {pair.charge.memo}</span>}
+              </td>
+              <td data-label="Amount" className="num text-right text-ink-2">{money(pair.payment.amount)}</td>
+              <td data-label="Balance" className="num text-right text-ink-2">{money(total)}</td>
+            </tr>
+          ) : (
+            <tr key={e.id} onClick={() => onEdit(e)}>
+              <td data-label="Date" className="num whitespace-nowrap">{fmtDateShort(e.occurred_on)}</td>
+              <td data-label="Entry">
+                <span className="capitalize font-medium">{e.kind}</span>
+                {e.method && <span className="text-faint"> · {e.method}</span>}
+                {e.memo && <span className="text-faint"> · {e.memo}</span>}
+              </td>
+              <td data-label="Amount" className={`num text-right ${e.amount < 0 ? "text-bad" : "text-ok"}`}>
+                {e.amount < 0 ? "−" : "+"}
+                {money(Math.abs(e.amount))}
+              </td>
+              <td data-label="Balance" className="num text-right text-ink-2">{money(total)}</td>
+            </tr>
+          )
+        )}
       </tbody>
     </table>
   );
@@ -574,9 +680,21 @@ function EditCustomerSheet({ open, onClose, customer }: { open: boolean; onClose
   );
 }
 
-function VehicleSheet({ customerId, vehicle, onClose }: { customerId: string; vehicle: Vehicle | null; onClose: () => void }) {
+function VehicleSheet({
+  customerId,
+  vehicle,
+  boat = false,
+  onClose,
+}: {
+  customerId: string;
+  vehicle: Vehicle | null;
+  /** Boat mode: length drives pricing instead of size. */
+  boat?: boolean;
+  onClose: () => void;
+}) {
   const router = useRouter();
   const [sizeId, setSizeId] = useState<SizeId>(vehicle?.size_id ?? "sedan");
+  const [lengthFt, setLengthFt] = useState(vehicle?.length_ft ? String(vehicle.length_ft) : "");
   const [make, setMake] = useState(vehicle?.make ?? "");
   const [model, setModel] = useState(vehicle?.model ?? "");
   const [year, setYear] = useState(vehicle?.year ? String(vehicle.year) : "");
@@ -586,17 +704,30 @@ function VehicleSheet({ customerId, vehicle, onClose }: { customerId: string; ve
   const [pending, setPending] = useState(false);
 
   return (
-    <Sheet open onClose={onClose} title={vehicle ? "Edit vehicle" : "Add vehicle"}>
+    <Sheet open onClose={onClose} title={vehicle ? (boat ? "Edit boat" : "Edit vehicle") : boat ? "Add boat" : "Add vehicle"}>
       <div className="flex flex-col gap-4">
-        <Field label="Size (drives pricing)">
-          <select className="select" value={sizeId} onChange={(e) => setSizeId(e.target.value as SizeId)}>
-            {SIZES.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </Field>
+        {boat ? (
+          <Field label="Length in feet (drives pricing)">
+            <input
+              type="number"
+              min={1}
+              className="input num"
+              placeholder="e.g. 30"
+              value={lengthFt}
+              onChange={(e) => setLengthFt(e.target.value)}
+            />
+          </Field>
+        ) : (
+          <Field label="Size (drives pricing)">
+            <select className="select" value={sizeId} onChange={(e) => setSizeId(e.target.value as SizeId)}>
+              {SIZES.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Make">
             <input className="input" value={make} onChange={(e) => setMake(e.target.value)} placeholder="Toyota" />
@@ -620,10 +751,20 @@ function VehicleSheet({ customerId, vehicle, onClose }: { customerId: string; ve
           disabled={pending}
           onClick={async () => {
             setError(null);
+            if (boat && !(Number(lengthFt) > 0)) return setError("How long is the boat? Pricing runs per foot.");
             setPending(true);
             const res = await saveVehicle(
               customerId,
-              { size_id: sizeId, make: make || null, model: model || null, year: year ? Number(year) : null, color: color || null, plate: plate || null },
+              {
+                size_id: sizeId,
+                kind: boat ? "boat" : "car",
+                length_ft: boat ? Number(lengthFt) : null,
+                make: make || null,
+                model: model || null,
+                year: year ? Number(year) : null,
+                color: color || null,
+                plate: plate || null,
+              },
               vehicle?.id
             );
             setPending(false);
@@ -632,7 +773,7 @@ function VehicleSheet({ customerId, vehicle, onClose }: { customerId: string; ve
             router.refresh();
           }}
         >
-          {pending ? "Saving…" : "Save vehicle"}
+          {pending ? "Saving…" : boat ? "Save boat" : "Save vehicle"}
         </button>
         {vehicle && (
           <button
@@ -645,7 +786,7 @@ function VehicleSheet({ customerId, vehicle, onClose }: { customerId: string; ve
               router.refresh();
             }}
           >
-            Remove vehicle
+            {boat ? "Remove boat" : "Remove vehicle"}
           </button>
         )}
       </div>

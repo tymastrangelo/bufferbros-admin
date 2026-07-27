@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Wheel } from "@/components/brand";
-import { addonQuote, computeQuote, initialDetailPrice, planPrice, visitsPerQuarter, type BaseService, type Catalog } from "@/lib/catalog";
+import { addonQuote, boatQuote, boatRatePerFt, computeQuote, initialDetailPrice, planPrice, visitsPerQuarter, type BaseService, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { addDays, fmtDateShort, minToLabel, todayYmd, weekdayOf, WEEKDAYS, WEEKDAYS_SHORT } from "@/lib/time";
@@ -15,9 +15,20 @@ type Mode = "once" | "plan";
 interface QuoteVehicle {
   key: number;
   name: string; // optional free text, e.g. "Range Rover"
+  kind: "car" | "boat";
   size: SizeId;
+  lengthFt: string; // boats price per foot
   addons: string[];
 }
+
+const blankVehicle = (key: number, kind: "car" | "boat" = "car"): QuoteVehicle => ({
+  key,
+  name: "",
+  kind,
+  size: "sedan",
+  lengthFt: "",
+  addons: [],
+});
 
 const CADENCES: { id: PlanCadence; label: string; visitsPerMonth: number }[] = [
   { id: "weekly", label: "Weekly", visitsPerMonth: 52 / 12 },
@@ -30,8 +41,9 @@ const CADENCES: { id: PlanCadence; label: string; visitsPerMonth: number }[] = [
 const suggestedDiscount = (n: number) => (n >= 3 ? 10 : n === 2 ? 5 : 0);
 const DISCOUNT_CHOICES = [0, 5, 10, 15];
 
-/** Price for one vehicle. One-time: base service + addons. Plan: per-visit plan price + addons. */
+/** Price for one vehicle. One-time: base service + addons. Plan: per-visit plan price + addons. Boats: per foot, no add-ons. */
 function vehicleQuote(catalog: Catalog, v: QuoteVehicle, mode: Mode, cadence: PlanCadence, service: BaseService) {
+  if (v.kind === "boat") return boatQuote(catalog, Number(v.lengthFt) || null);
   if (mode === "once") return computeQuote(catalog, v.size, v.addons, service);
   const base = planPrice(catalog, cadence, v.size) ?? catalog.detail[v.size]?.price ?? 0;
   const extras = catalog.addons.filter((a) => v.addons.includes(a.id)).map((a) => addonQuote(a, v.size));
@@ -52,7 +64,7 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
   const [mode, setMode] = useState<Mode>("once");
   const [service, setService] = useState<BaseService>("standard");
   const [cadence, setCadence] = useState<PlanCadence>("biweekly");
-  const [vehicles, setVehicles] = useState<QuoteVehicle[]>([{ key: 1, name: "", size: "sedan", addons: [] }]);
+  const [vehicles, setVehicles] = useState<QuoteVehicle[]>([blankVehicle(1)]);
   const [discountOverride, setDiscountOverride] = useState<number | null>(null);
   const [revealed, setRevealed] = useState(false);
   const nextKey = useRef(2);
@@ -68,12 +80,12 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
 
   const patch = (key: number, p: Partial<QuoteVehicle>) =>
     setVehicles((vs) => vs.map((v) => (v.key === key ? { ...v, ...p } : v)));
-  const addVehicle = (copyOf?: QuoteVehicle) =>
+  const addVehicle = (copyOf?: QuoteVehicle, kind: "car" | "boat" = "car") =>
     setVehicles((vs) => [
       ...vs,
       copyOf
         ? { ...copyOf, key: nextKey.current++, name: copyOf.name ? `${copyOf.name} (copy)` : "" }
-        : { key: nextKey.current++, name: "", size: "sedan", addons: [] },
+        : blankVehicle(nextKey.current++, kind),
     ]);
 
   if (revealed) {
@@ -93,7 +105,7 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
         visitsPerMonth={visitsPerMonth}
         onBack={() => setRevealed(false)}
         onReset={() => {
-          setVehicles([{ key: nextKey.current++, name: "", size: "sedan", addons: [] }]);
+          setVehicles([blankVehicle(nextKey.current++)]);
           setDiscountOverride(null);
           setMode("once");
           setService("standard");
@@ -185,7 +197,9 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
             <div className="flex items-center gap-2">
               <input
                 className="input h-9 grow font-medium"
-                placeholder={`Vehicle ${i + 1} — e.g. Range Rover (optional)`}
+                placeholder={
+                  v.kind === "boat" ? `Boat ${i + 1} — e.g. Sea Ray (optional)` : `Vehicle ${i + 1} — e.g. Range Rover (optional)`
+                }
                 value={v.name}
                 onChange={(e) => patch(v.key, { name: e.target.value })}
               />
@@ -215,22 +229,42 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
               </div>
             </div>
 
-            <div className="mt-2.5 grid grid-cols-3 gap-1.5">
-              {SIZES.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => patch(v.key, { size: s.id })}
-                  className={`min-h-9 rounded-md border px-1 py-1.5 text-[12px] font-medium leading-tight transition-colors duration-150 ${
-                    v.size === s.id ? "bg-brand-wash border-brand text-brand-deep" : "bg-card border-line-2 hover:border-brand"
-                  }`}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
+            {v.kind === "boat" ? (
+              <div className="mt-2.5">
+                <input
+                  type="number"
+                  min={1}
+                  className="input num"
+                  placeholder="Length in feet — drives the price"
+                  value={v.lengthFt}
+                  onChange={(e) => patch(v.key, { lengthFt: e.target.value })}
+                />
+                {catalog.boat ? (
+                  <p className="mt-1.5 text-[12px] text-faint num">
+                    {money(boatRatePerFt(catalog))}/ft — {catalog.boat.components.map((c) => `${c.name.toLowerCase()} ${money(c.ratePerFt)}`).join(" + ")}
+                  </p>
+                ) : (
+                  <p className="mt-1.5 text-[12px] text-bad">No boat pricing set — add it in Settings.</p>
+                )}
+              </div>
+            ) : (
+              <div className="mt-2.5 grid grid-cols-3 gap-1.5">
+                {SIZES.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => patch(v.key, { size: s.id })}
+                    className={`min-h-9 rounded-md border px-1 py-1.5 text-[12px] font-medium leading-tight transition-colors duration-150 ${
+                      v.size === s.id ? "bg-brand-wash border-brand text-brand-deep" : "bg-card border-line-2 hover:border-brand"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            )}
 
-            {catalog.addons.length > 0 && (
+            {v.kind !== "boat" && catalog.addons.length > 0 && (
               <div className="mt-2.5">
                 <p className="label mb-1.5">Add-ons</p>
                 <div className="flex flex-wrap gap-1.5">
@@ -258,9 +292,14 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
         ))}
       </div>
 
-      <button type="button" onClick={() => addVehicle()} className="btn mt-3 w-full">
-        <IconPlus width={15} height={15} /> Add another vehicle
-      </button>
+      <div className="mt-3 grid grid-cols-2 gap-1.5">
+        <button type="button" onClick={() => addVehicle()} className="btn">
+          <IconPlus width={15} height={15} /> Add a vehicle
+        </button>
+        <button type="button" onClick={() => addVehicle(undefined, "boat")} className="btn">
+          <IconPlus width={15} height={15} /> Add a boat
+        </button>
+      </div>
 
       {/* Discount */}
       {vehicles.length > 1 && (
@@ -375,12 +414,17 @@ function QuoteResult({
         {vehicles.map((v, i) => (
           <div key={v.key} className="px-4 py-3">
             <div className="flex items-baseline justify-between gap-3">
-              <p className="text-sm font-semibold truncate">{v.name.trim() || `Vehicle ${i + 1}`}</p>
+              <p className="text-sm font-semibold truncate">
+                {v.name.trim() || (v.kind === "boat" ? `Boat ${i + 1}` : `Vehicle ${i + 1}`)}
+              </p>
               <p className="text-sm font-semibold num">{money(quotes[i].price)}</p>
             </div>
             <p className="text-xs text-ink-2 mt-0.5">
-              {sizeLabel(v.size)}
-              {v.addons.length > 0 &&
+              {v.kind === "boat"
+                ? `${catalog.boat?.name ?? "Boat Detail"} · ${Number(v.lengthFt) > 0 ? `${Number(v.lengthFt)} ft` : "length TBD"}`
+                : sizeLabel(v.size)}
+              {v.kind !== "boat" &&
+                v.addons.length > 0 &&
                 ` · ${catalog.addons
                   .filter((a) => v.addons.includes(a.id))
                   .map((a) => a.name)
@@ -424,7 +468,9 @@ function QuoteResult({
           <div className="mt-3 card p-4 text-[13px]">
             <div className="flex items-baseline justify-between gap-3">
               <p className="font-semibold text-sm">First visit — full Standard Detail ({catalog.rules.planInitialDiscountPct}% off)</p>
-              <p className="font-bold num">{money(vehicles.reduce((s, v) => s + initialDetailPrice(catalog, v.size), 0))}</p>
+              <p className="font-bold num">
+                {money(vehicles.filter((v) => v.kind !== "boat").reduce((s, v) => s + initialDetailPrice(catalog, v.size), 0))}
+              </p>
             </div>
             <p className="mt-1 text-ink-2">
               Every plan starts with an all-in detail to get the car to maintenance shape — {catalog.rules.planInitialDiscountPct}% off

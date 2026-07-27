@@ -11,7 +11,8 @@ import { recordPlanPrepay, resumePlan, setPlanStatus } from "@/lib/actions/plans
 import { sendPaymentRequest } from "@/lib/actions/stripe";
 import { initialDetailPrice, visitsPerQuarter, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
-import { diffDays, fmtDateShort, minToLabel, todayYmd, WEEKDAYS } from "@/lib/time";
+import { stepDays } from "@/lib/plan-projection";
+import { addDays, diffDays, fmtDateShort, minToLabel, todayYmd, WEEKDAYS } from "@/lib/time";
 import { PAYMENT_METHODS, vehicleLabel, type Customer, type LedgerEntry, type PaymentMethod, type Plan, type SizeId, type Vehicle } from "@/lib/types";
 import type { OccurrenceConflict } from "@/lib/occurrences";
 
@@ -61,6 +62,19 @@ export function PlanDetail({
     .reduce((s, e) => s + Math.abs(e.amount), 0);
   const balance = ledger.reduce((s, e) => s + e.amount, 0);
   const visitsLeft = balance > 0 && plan.per_visit_price > 0 ? Math.floor(balance / plan.per_visit_price) : 0;
+
+  // "Set it in stone" preset: materialize exactly what their credit covers.
+  // ponytail: through-date = last scheduled + remaining × step (capped at the action's
+  // 18-month guard) — conflicts may land a visit or two short; the sheet reports them.
+  const remainingPrepaid = visitsLeft - upcoming.length;
+  const prepaidPreset =
+    remainingPrepaid > 0
+      ? (() => {
+          const raw = addDays(upcoming[upcoming.length - 1]?.date ?? today, remainingPrepaid * stepDays(plan));
+          const cap = addDays(today, 550);
+          return [{ label: `Prepaid — ${visitsLeft} visit${visitsLeft === 1 ? "" : "s"}`, ymd: raw < cap ? raw : cap }];
+        })()
+      : undefined;
 
   async function act(fn: () => Promise<{ ok: boolean; error?: string }>) {
     setError(null);
@@ -119,7 +133,7 @@ export function PlanDetail({
         </div>
       </header>
 
-      {!hasInitialDetail && plan.status === "active" && (
+      {!hasInitialDetail && plan.status === "active" && !plan.skip_entry && (
         <div className="mt-3 rounded-md border border-[#fde68a] bg-warn-wash px-4 py-3 text-sm">
           <p className="font-medium text-warn">No completed detail on record yet.</p>
           <p className="text-warn mt-0.5">
@@ -254,6 +268,7 @@ export function PlanDetail({
         today={today}
         planId={plan.id}
         scopeLabel={`${plan.customers.name}'s plan`}
+        presets={prepaidPreset}
         onDone={(result) => {
           setConflicts(result.conflicts);
           setGenMsg(`Scheduled ${result.created} visit${result.created === 1 ? "" : "s"}.`);
@@ -445,6 +460,26 @@ function PrepaySheet({
           {money(plan.per_visit_price)}/visit · {catalog.rules.prepayDiscountPct}% off when they prepay a quarter or more (
           {minVisits}+ visits on this cadence).
         </p>
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            { label: "Quarter", mult: 1 },
+            { label: "Half year", mult: 2 },
+            { label: "Full year", mult: 4 },
+          ].map((b) => {
+            const bn = minVisits * b.mult;
+            const total = Math.round(plan.per_visit_price * bn * (1 - catalog.rules.prepayDiscountPct / 100));
+            return (
+              <button
+                key={b.label}
+                type="button"
+                onClick={() => setVisits(String(bn))}
+                className={`chip cursor-pointer num ${n === bn ? "bg-ink text-white" : "bg-[#f1f4f9] text-ink-2 hover:bg-line"}`}
+              >
+                {b.label} · {bn}v · {money(total)}
+              </button>
+            );
+          })}
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
             <span className="label block mb-1">Visits prepaid</span>

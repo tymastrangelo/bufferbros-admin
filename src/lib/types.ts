@@ -121,6 +121,8 @@ export interface Plan {
   billing_note: string | null;
   notes: string | null;
   email_confirmations: boolean;
+  /** True = no discounted entry detail — the plan starts straight at the maintenance rate. */
+  skip_entry: boolean;
 }
 
 export interface Appointment {

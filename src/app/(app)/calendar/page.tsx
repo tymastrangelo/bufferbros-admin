@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import { after } from "next/server";
 import { getRole } from "@/lib/auth";
 import { syncEmployeeCalendar } from "@/lib/ical";
+import { projectPlanDates, type ProjectedVisit } from "@/lib/plan-projection";
 import { getCatalog, getMyEmployee } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { addDays, monthGridStart, todayYmd, weekdayOf, ymOf } from "@/lib/time";
-import type { Block, Employee, WeeklyHours } from "@/lib/types";
+import type { Block, Employee, Plan, WeeklyHours } from "@/lib/types";
 import type { JobWithCustomer } from "@/components/job-sheet";
 import { CalendarClient, type CalView } from "./calendar-client";
 
@@ -45,7 +46,7 @@ export default async function CalendarPage({
     .lt("date", rangeEnd)
     .neq("status", "cancelled")
     .order("start_min");
-  const [apptsQ, blocksQ, hoursQ, catalog, myEmployee, employeesQ] = await Promise.all([
+  const [apptsQ, blocksQ, hoursQ, catalog, myEmployee, employeesQ, plansQ] = await Promise.all([
     // Pending web bookings stay off the washer's calendar until the owner approves.
     owner ? apptsQuery : apptsQuery.neq("status", "pending"),
     db.from("blocks").select("*").gte("date", rangeStart).lt("date", rangeEnd).order("start_min"),
@@ -53,7 +54,23 @@ export default async function CalendarPage({
     getCatalog(),
     getMyEmployee(),
     db.from("employees").select("id,name,ical_url,ical_synced_at").eq("active", true),
+    // Active plans + every visit date on file — projects standing slots past the materialized horizon.
+    db.from("plans").select("*, customers(name), appointments(date,status)").eq("status", "active").not("preferred_min", "is", null),
   ]);
+
+  const today = todayYmd();
+  const projected: ProjectedVisit[] = (
+    (plansQ.data ?? []) as unknown as (Plan & { customers: { name: string } | null; appointments: { date: string; status: string }[] })[]
+  ).flatMap((p) =>
+    projectPlanDates(p, p.appointments, today, rangeStart, rangeEnd).map((date) => ({
+      plan_id: p.id,
+      customer_name: p.customers?.name ?? "Plan",
+      date,
+      start_min: p.preferred_min!,
+      duration_min: p.duration_min,
+      price: Number(p.per_visit_price),
+    }))
+  );
 
   // Opportunistic freshness between cron runs: re-pull any feed older than 6h.
   // (Staleness check runs inside after() — render must stay pure.)
@@ -71,13 +88,15 @@ export default async function CalendarPage({
       employeeNames={Object.fromEntries(employees.map((e) => [e.id, e.name]))}
       view={view}
       anchor={anchor}
-      today={todayYmd()}
+      today={today}
       jobs={(apptsQ.data ?? []) as JobWithCustomer[]}
+      projected={projected}
       owner={owner}
       blocks={(blocksQ.data ?? []) as Block[]}
       hours={(hoursQ.data ?? []) as WeeklyHours[]}
       catalog={catalog}
-      openNew={params.new === "1"}
+      openNew={params.new === "1" || params.new === "boat"}
+      newKind={params.new === "boat" ? "boat" : "car"}
       openBlock={params.block === "1"}
     />
   );

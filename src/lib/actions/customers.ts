@@ -63,6 +63,9 @@ export async function setCustomerArchived(id: string, archived: boolean): Promis
 
 export interface VehicleFields {
   size_id: SizeId;
+  /** Boats price per foot of length instead of by size. */
+  kind?: "car" | "boat";
+  length_ft?: number | null;
   make?: string | null;
   model?: string | null;
   year?: number | null;

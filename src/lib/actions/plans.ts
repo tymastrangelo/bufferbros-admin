@@ -31,6 +31,14 @@ export interface PlanFields {
   billingNote?: string | null;
   notes?: string | null;
   emailConfirmations?: boolean;
+  /** Skip the discounted entry detail — start straight at the maintenance rate. */
+  skipEntry?: boolean;
+  /**
+   * Record an upfront block payment right after the plan is created (payment +
+   * discount credit on the ledger, so visits draw from the balance). Omit = they
+   * pay per visit, collected on each completed detail as usual.
+   */
+  prepay?: { visits: number; method: PaymentMethod } | null;
 }
 
 function toRow(fields: PlanFields) {
@@ -49,6 +57,7 @@ function toRow(fields: PlanFields) {
     billing_note: fields.billingNote?.trim() || null,
     notes: fields.notes?.trim() || null,
     email_confirmations: fields.emailConfirmations ?? false,
+    skip_entry: fields.skipEntry ?? false,
   };
 }
 
@@ -61,17 +70,28 @@ async function setPlanVehicles(db: Awaited<ReturnType<typeof createClient>>, pla
   return error;
 }
 
-export async function createPlan(fields: PlanFields): Promise<ActionResult> {
+export async function createPlan(fields: PlanFields): Promise<ActionResult & { prepayError?: string }> {
   if (fields.cadence === "custom" && !fields.intervalDays) {
     return { ok: false, error: "Custom cadence needs an every-N-days interval." };
+  }
+  if (fields.prepay && fields.perVisitPrice <= 0) {
+    return { ok: false, error: "Set the per-visit price before recording a prepay." };
   }
   const db = await createClient();
   const { data, error } = await db.from("plans").insert(toRow(fields)).select("id").single();
   if (error) return { ok: false, error: error.message };
   const vehErr = await setPlanVehicles(db, data.id, fields.vehicleIds ?? []);
   if (vehErr) return { ok: false, error: `Plan saved, but linking vehicles failed: ${vehErr.message}` };
+
+  // ponytail: prepay failing after the plan row exists is surfaced, not rolled back —
+  // the plan page's "Record prepay" is the retry path.
+  let prepayError: string | undefined;
+  if (fields.prepay) {
+    const pre = await recordPlanPrepay(data.id, { ...fields.prepay, occurredOn: todayYmd() });
+    if (!pre.ok) prepayError = pre.error;
+  }
   refresh();
-  return { ok: true, id: data.id };
+  return { ok: true, id: data.id, prepayError };
 }
 
 export async function updatePlan(

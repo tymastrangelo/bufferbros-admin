@@ -124,6 +124,12 @@ export const IconCar = (p: SVGProps<SVGSVGElement>) => (
     <circle cx="16.5" cy="14" r="0.5" fill="currentColor" />
   </I>
 );
+export const IconBoat = (p: SVGProps<SVGSVGElement>) => (
+  <I {...p}>
+    <path d="M3 15l9-2 9 2-2.5 4.5H5.5L3 15z" />
+    <path d="M12 13V4l5 7" />
+  </I>
+);
 export const IconBlock = (p: SVGProps<SVGSVGElement>) => (
   <I {...p}>
     <circle cx="12" cy="12" r="9" />

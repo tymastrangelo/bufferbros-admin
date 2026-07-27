@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Wheel } from "@/components/brand";
 import { createAppointment } from "@/lib/actions/appointments";
-import { addonQuote, boatQuote, computeQuote, computeVehiclesQuote, type BaseService, type Catalog } from "@/lib/catalog";
+import { addonQuote, boatQuote, boatRatePerFt, computeQuote, computeVehiclesQuote, type BaseService, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { todayYmd } from "@/lib/time";
@@ -23,6 +23,7 @@ export function AppointmentSheet({
   defaultDate,
   defaultStartMin,
   defaultCustomer,
+  defaultKind = "car",
 }: {
   open: boolean;
   onClose: () => void;
@@ -30,7 +31,13 @@ export function AppointmentSheet({
   defaultDate?: string;
   defaultStartMin?: number;
   defaultCustomer?: PickedCustomer | null;
+  /** "boat" opens the boat-detail flow: boats preselected, per-foot pricing, no car add-ons. */
+  defaultKind?: "car" | "boat";
 }) {
+  const boatMode = defaultKind === "boat";
+  /** The vehicle a picked customer starts with — their first boat in boat mode, first car otherwise. */
+  const preferredVehicle = (list: Vehicle[] | undefined) =>
+    list?.find((v) => (boatMode ? v.kind === "boat" : v.kind !== "boat")) ?? list?.[0];
   const router = useRouter();
   const owner = useOwner();
   // Who's doing the job: [] = "Me" (the owner books against the business calendar
@@ -66,10 +73,12 @@ export function AppointmentSheet({
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState(defaultCustomer?.addresses?.[0]?.address ?? "");
   const [sizeId, setSizeId] = useState<SizeId>(defaultCustomer?.vehicles?.[0]?.size_id ?? "sedan");
+  const [boatFt, setBoatFt] = useState("");
   const [vehicles, setVehicles] = useState<Vehicle[]>(defaultCustomer?.vehicles ?? []);
-  const [vehicleIds, setVehicleIds] = useState<string[]>(
-    defaultCustomer?.vehicles?.[0] ? [defaultCustomer.vehicles[0].id] : []
-  );
+  const [vehicleIds, setVehicleIds] = useState<string[]>(() => {
+    const v = preferredVehicle(defaultCustomer?.vehicles);
+    return v ? [v.id] : [];
+  });
   const [service, setService] = useState<BaseService>("standard");
   const [garageOk, setGarageOk] = useState(false);
   const [addonIds, setAddonIds] = useState<string[]>([]);
@@ -85,13 +94,19 @@ export function AppointmentSheet({
 
   const selVehicles = useMemo(() => vehicles.filter((v) => vehicleIds.includes(v.id)), [vehicles, vehicleIds]);
   const selCars = useMemo(() => selVehicles.filter((v) => v.kind !== "boat"), [selVehicles]);
+  const selBoats = useMemo(() => selVehicles.filter((v) => v.kind === "boat"), [selVehicles]);
   const boatsOnly = selVehicles.length > 0 && selCars.length === 0;
+  const mixed = selCars.length > 0 && selBoats.length > 0;
+  // Boat-flavored booking: boats selected, or boat mode quoting a bare length.
+  const boatish = boatsOnly || (boatMode && selVehicles.length === 0);
   const quote = useMemo(
     () =>
       selVehicles.length
         ? computeVehiclesQuote(catalog, selVehicles, addonIds, service)
-        : computeQuote(catalog, sizeId, addonIds, service),
-    [catalog, selVehicles, sizeId, addonIds, service]
+        : boatMode
+          ? boatQuote(catalog, Number(boatFt) || null)
+          : computeQuote(catalog, sizeId, addonIds, service),
+    [catalog, selVehicles, sizeId, addonIds, service, boatMode, boatFt]
   );
   const ceramic = service === "ceramic" && catalog.ceramic;
   const price = priceOverride !== "" ? Number(priceOverride) : quote.price;
@@ -101,12 +116,12 @@ export function AppointmentSheet({
   function pickCustomer(c: PickedCustomer | null) {
     setCustomer(c);
     setVehicles(c?.vehicles ?? []);
-    setVehicleIds(c?.vehicles?.[0] ? [c.vehicles[0].id] : []);
+    const v = preferredVehicle(c?.vehicles);
+    setVehicleIds(v ? [v.id] : []);
     if (c) {
       setOneOff(false);
       if (!address) setAddress(c.addresses?.[0]?.address ?? "");
-      const v = c.vehicles?.[0];
-      if (v) setSizeId(v.size_id);
+      if (v && v.kind !== "boat") setSizeId(v.size_id);
     }
   }
 
@@ -136,9 +151,19 @@ export function AppointmentSheet({
       startMin,
       durationMin: duration,
       price,
-      sizeId: selVehicles.length > 1 ? null : selVehicles[0]?.size_id ?? sizeId,
-      sizeLabel: selVehicles.length ? selVehicles.map(vehicleLabel).join(" + ") : sizeLabel(sizeId),
-      serviceName: ceramic ? catalog.ceramic!.name : boatsOnly && catalog.boat ? catalog.boat.name : undefined,
+      sizeId: selVehicles.length > 1 || boatish ? null : selVehicles[0]?.size_id ?? sizeId,
+      sizeLabel: selVehicles.length
+        ? selVehicles.map(vehicleLabel).join(" + ")
+        : boatMode
+          ? `Boat${Number(boatFt) > 0 ? ` — ${Number(boatFt)} ft` : ""}`
+          : sizeLabel(sizeId),
+      serviceName: ceramic
+        ? catalog.ceramic!.name
+        : boatish && catalog.boat
+          ? catalog.boat.name
+          : mixed && catalog.boat
+            ? `The Standard Detail + ${catalog.boat.name}`
+            : undefined,
       ceramic: !!ceramic,
       addons: catalog.addons
         .filter((a) => addonIds.includes(a.id))
@@ -164,7 +189,7 @@ export function AppointmentSheet({
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title="New appointment">
+    <Sheet open={open} onClose={onClose} title={boatMode ? "New boat detail" : "New appointment"}>
       <div className="flex flex-col gap-4">
         <Field label="Customer">
           {!oneOff ? (
@@ -205,11 +230,13 @@ export function AppointmentSheet({
               selVehicles.length > 1
                 ? selVehicles
                     .map((v) =>
-                      money(v.kind === "boat" ? boatQuote(catalog, v.length_ft).price : computeQuote(catalog, v.size_id, addonIds, service).price)
+                      v.kind === "boat"
+                        ? `${catalog.boat?.name ?? "Boat"} ${money(boatQuote(catalog, v.length_ft).price)}`
+                        : `${ceramic ? catalog.ceramic!.name : "Standard Detail"} ${money(computeQuote(catalog, v.size_id, addonIds, service).price)}`
                     )
                     .join(" + ")
                 : selVehicles[0]?.kind === "boat" && catalog.boat
-                  ? `Boat detail — ${money(catalog.boat.ratePerFt)}/ft${selVehicles[0].length_ft ? "" : " — add the boat's length for a price"}`
+                  ? `${catalog.boat.name} — ${money(boatRatePerFt(catalog))}/ft${selVehicles[0].length_ft ? "" : " — add the boat's length for a price"}`
                   : undefined
             }
           >
@@ -222,27 +249,67 @@ export function AppointmentSheet({
             />
           </Field>
         ) : null}
-        {selVehicles.length === 0 && (
-          <Field label="Vehicle size" hint={customer ? "No vehicle picked — quoting by size only" : undefined}>
-            <div className="grid grid-cols-3 gap-1.5">
-              {SIZES.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => setSizeId(s.id)}
-                  className={`h-9 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
-                    sizeId === s.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-                  }`}
-                >
-                  {s.id === "sedan" ? "Sedan" : s.id === "midsize" ? "Midsize" : "Large"}
-                </button>
-              ))}
+
+        {selBoats.length > 0 && catalog.boat && (
+          <Field
+            label={`${catalog.boat.name}${mixed ? " — the boat's side of the visit" : ""}`}
+            hint={`${catalog.boat.components.map((c) => `${c.name.toLowerCase()} ${money(c.ratePerFt)}/ft`).join(" · ")} — set in Settings`}
+          >
+            <div className="card divide-y divide-line">
+              {selBoats.map((b) => {
+                const q = boatQuote(catalog, b.length_ft);
+                return (
+                  <div key={b.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                    <span className="font-medium truncate">{vehicleLabel(b)}</span>
+                    <span className="num text-ink-2 shrink-0">
+                      {b.length_ft ? `${b.length_ft} ft · ${money(q.price)} · ${q.minutes}m` : "add length for a price"}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </Field>
         )}
+        {selVehicles.length === 0 &&
+          (boatMode ? (
+            <Field
+              label="Boat length (ft)"
+              hint={
+                catalog.boat
+                  ? `${money(boatRatePerFt(catalog))}/ft — ${catalog.boat.components.map((c) => `${c.name.toLowerCase()} ${money(c.ratePerFt)}`).join(" + ")}`
+                  : "No boat pricing set — add it in Settings"
+              }
+            >
+              <input
+                type="number"
+                min={1}
+                className="input num"
+                placeholder="Length in feet — drives the price"
+                value={boatFt}
+                onChange={(e) => setBoatFt(e.target.value)}
+              />
+            </Field>
+          ) : (
+            <Field label="Vehicle size" hint={customer ? "No vehicle picked — quoting by size only" : undefined}>
+              <div className="grid grid-cols-3 gap-1.5">
+                {SIZES.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setSizeId(s.id)}
+                    className={`h-9 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
+                      sizeId === s.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
+                    }`}
+                  >
+                    {s.id === "sedan" ? "Sedan" : s.id === "midsize" ? "Midsize" : "Large"}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          ))}
 
-        {catalog.ceramic && !boatsOnly && (
-          <Field label="Service">
+        {catalog.ceramic && !boatish && (
+          <Field label={mixed ? "Service — for the cars" : "Service"} hint={mixed ? "The boat prices per foot above, on its own" : undefined}>
             <div className="grid grid-cols-2 gap-1.5">
               {(
                 [
@@ -282,7 +349,7 @@ export function AppointmentSheet({
           </Field>
         )}
 
-        {!boatsOnly && (
+        {!boatish && (
           <Field label="Add-ons" hint={selCars.length > 0 && selVehicles.length > selCars.length ? "Add-ons apply to the cars only" : undefined}>
             <div className="flex flex-col gap-1">
               {catalog.addons.map((a) => (

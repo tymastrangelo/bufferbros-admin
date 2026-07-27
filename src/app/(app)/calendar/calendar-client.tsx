@@ -11,6 +11,7 @@ import { deleteBlock } from "@/lib/actions/settings";
 import { saveMyCalendarFeed, syncCalendarNow } from "@/lib/actions/employees";
 import type { Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
+import type { ProjectedVisit } from "@/lib/plan-projection";
 import { addDays, addMonths, fmtDateLong, fmtDateShort, fmtMonth, minToLabel, monthGridStart, weekdayOf, WEEKDAYS_SHORT, ymOf } from "@/lib/time";
 import type { Block, Employee, WeeklyHours } from "@/lib/types";
 
@@ -23,10 +24,12 @@ export function CalendarClient({
   anchor,
   today,
   jobs,
+  projected,
   blocks,
   hours,
   catalog,
   openNew,
+  newKind = "car",
   openBlock,
   owner,
   myEmployee,
@@ -36,10 +39,14 @@ export function CalendarClient({
   anchor: string;
   today: string;
   jobs: JobWithCustomer[];
+  /** Standing plan slots beyond the materialized visits — held, not booked yet. */
+  projected: ProjectedVisit[];
   blocks: Block[];
   hours: WeeklyHours[];
   catalog: Catalog;
   openNew: boolean;
+  /** What the ?new= sheet books — "boat" preloads the boat-detail flow. */
+  newKind?: "car" | "boat";
   openBlock: boolean;
   owner: boolean;
   /** The signed-in worker's employee row (null for the owner) — powers "My other job". */
@@ -51,18 +58,19 @@ export function CalendarClient({
   // after an action refreshes the route, the open sheet updates in place.
   const [selected, setSelected] = useState<JobWithCustomer | null>(null);
   const selectedJob = selected ? (jobs.find((j) => j.id === selected.id) ?? selected) : null;
-  const [newSheet, setNewSheet] = useState<{ date: string; startMin?: number } | null>(
-    openNew ? { date: anchor } : null
+  const [newSheet, setNewSheet] = useState<{ date: string; startMin?: number; kind?: "car" | "boat" } | null>(
+    openNew ? { date: anchor, kind: newKind } : null
   );
   const [blockSheet, setBlockSheet] = useState(openBlock);
   const [blockDetail, setBlockDetail] = useState<Block | null>(null);
   const [feedSheet, setFeedSheet] = useState(false);
+  const [showProjected, setShowProjected] = useState(true);
 
   // re-arm when the ＋New menu navigates here with ?new=1 / ?block=1
   const [prevOpenNew, setPrevOpenNew] = useState(openNew);
   if (prevOpenNew !== openNew) {
     setPrevOpenNew(openNew);
-    if (openNew) setNewSheet({ date: anchor });
+    if (openNew) setNewSheet({ date: anchor, kind: newKind });
   }
   const [prevOpenBlock, setPrevOpenBlock] = useState(openBlock);
   if (prevOpenBlock !== openBlock) {
@@ -93,6 +101,10 @@ export function CalendarClient({
   const hoursByDow = useMemo(() => new Map(hours.map((h) => [h.weekday, h])), [hours]);
   const jobsByDate = useMemo(() => groupBy(jobs, (j) => j.date), [jobs]);
   const blocksByDate = useMemo(() => groupBy(blocks, (b) => b.date), [blocks]);
+  const projectedByDate = useMemo(
+    () => groupBy(showProjected ? projected : [], (p) => p.date),
+    [projected, showProjected]
+  );
 
   return (
     <div className="px-3 md:px-8 py-5 md:py-7 max-w-6xl">
@@ -125,6 +137,16 @@ export function CalendarClient({
           ))}
         </div>
         <div className="flex gap-1.5">
+          {projected.length > 0 && (
+            <button
+              className="btn btn-sm"
+              aria-pressed={showProjected}
+              onClick={() => setShowProjected((v) => !v)}
+              title="Standing plan slots that aren't booked as visits yet"
+            >
+              Plans ahead: {showProjected ? "on" : "off"}
+            </button>
+          )}
           {myEmployee && (
             <button className="btn btn-sm" onClick={() => setFeedSheet(true)}>
               My other job
@@ -144,6 +166,9 @@ export function CalendarClient({
         <LegendDot className="bg-brand" label="scheduled" />
         <LegendDot className="bg-ok" label="completed" />
         <LegendDot className="bg-brand-wash border border-brand" label="recurring" />
+        {showProjected && projected.length > 0 && (
+          <LegendDot className="bg-card border border-dashed border-brand" label="plan slot (held, not booked)" />
+        )}
         <LegendDot className="bg-line-2" label="blocked" />
         <LegendDot className="bg-[repeating-linear-gradient(45deg,#e5e7eb_0_3px,#f6f8fb_3px_6px)]" label="closed" />
       </div>
@@ -154,6 +179,7 @@ export function CalendarClient({
             anchor={anchor}
             today={today}
             jobsByDate={jobsByDate}
+            projectedByDate={projectedByDate}
             blocksByDate={blocksByDate}
             hoursByDow={hoursByDow}
             onDay={(d) => nav("day", d)}
@@ -164,9 +190,11 @@ export function CalendarClient({
             dates={view === "week" ? Array.from({ length: 7 }, (_, i) => addDays(addDays(anchor, -weekdayOf(anchor)), i)) : [anchor]}
             today={today}
             jobsByDate={jobsByDate}
+            projectedByDate={projectedByDate}
             blocksByDate={blocksByDate}
             hoursByDow={hoursByDow}
             onJob={setSelected}
+            onProjected={(p) => router.push(`/plans/${p.plan_id}`)}
             onBlock={setBlockDetail}
             onEmpty={(date, min) => setNewSheet({ date, startMin: min })}
             onDayHeader={view === "week" ? (d) => nav("day", d) : undefined}
@@ -186,6 +214,7 @@ export function CalendarClient({
           catalog={catalog}
           defaultDate={newSheet.date}
           defaultStartMin={newSheet.startMin}
+          defaultKind={newSheet.kind}
         />
       )}
       <BlockSheet
@@ -227,6 +256,7 @@ function MonthGrid({
   anchor,
   today,
   jobsByDate,
+  projectedByDate,
   blocksByDate,
   hoursByDow,
   onDay,
@@ -234,6 +264,7 @@ function MonthGrid({
   anchor: string;
   today: string;
   jobsByDate: Map<string, JobWithCustomer[]>;
+  projectedByDate: Map<string, ProjectedVisit[]>;
   blocksByDate: Map<string, Block[]>;
   hoursByDow: Map<number, WeeklyHours>;
   onDay: (d: string) => void;
@@ -257,6 +288,7 @@ function MonthGrid({
           const isToday = d === today;
           const closed = !(hoursByDow.get(weekdayOf(d))?.enabled ?? true);
           const dayJobs = jobsByDate.get(d) ?? [];
+          const dayProj = projectedByDate.get(d) ?? [];
           const dayBlocks = blocksByDate.get(d) ?? [];
           return (
             <button
@@ -294,6 +326,14 @@ function MonthGrid({
                     {minToLabel(j.start_min).replace(":00", "").replace(" ", "").toLowerCase()}·{(j.customers?.name ?? j.contact_name ?? "?").split(" ")[0]}
                   </span>
                 ))}
+                {dayProj.slice(0, Math.max(0, 3 - dayJobs.length)).map((p, i) => (
+                  <span
+                    key={`${p.plan_id}-${i}`}
+                    className="chip h-[18px]! truncate max-w-full num bg-card text-brand-deep border border-dashed border-brand/50"
+                  >
+                    {minToLabel(p.start_min).replace(":00", "").replace(" ", "").toLowerCase()}·{p.customer_name.split(" ")[0]}
+                  </span>
+                ))}
                 {dayJobs.length > 3 && <span className="text-[10px] text-faint pl-1">+{dayJobs.length - 3} more</span>}
               </span>
               <span className="md:hidden flex flex-wrap gap-0.5 mt-1">
@@ -303,6 +343,9 @@ function MonthGrid({
                     key={j.id}
                     className={`w-1.5 h-1.5 rounded-full ${j.status === "completed" ? "bg-ok" : "bg-brand"}`}
                   />
+                ))}
+                {dayProj.slice(0, Math.max(0, 4 - dayJobs.length)).map((p, i) => (
+                  <span key={`${p.plan_id}-${i}`} className="w-1.5 h-1.5 rounded-full border border-brand bg-transparent" />
                 ))}
                 {dayJobs.length > 4 && <span className="text-[9px] text-faint leading-none">+{dayJobs.length - 4}</span>}
               </span>
@@ -320,9 +363,11 @@ function TimeGrid({
   dates,
   today,
   jobsByDate,
+  projectedByDate,
   blocksByDate,
   hoursByDow,
   onJob,
+  onProjected,
   onBlock,
   onEmpty,
   onDayHeader,
@@ -331,9 +376,11 @@ function TimeGrid({
   dates: string[];
   today: string;
   jobsByDate: Map<string, JobWithCustomer[]>;
+  projectedByDate: Map<string, ProjectedVisit[]>;
   blocksByDate: Map<string, Block[]>;
   hoursByDow: Map<number, WeeklyHours>;
   onJob: (j: JobWithCustomer) => void;
+  onProjected: (p: ProjectedVisit) => void;
   onBlock: (b: Block) => void;
   onEmpty: (date: string, startMin: number) => void;
   onDayHeader?: (d: string) => void;
@@ -351,6 +398,10 @@ function TimeGrid({
     for (const j of jobsByDate.get(d) ?? []) {
       start = Math.min(start, j.start_min);
       end = Math.max(end, j.start_min + j.duration_min);
+    }
+    for (const p of projectedByDate.get(d) ?? []) {
+      start = Math.min(start, p.start_min);
+      end = Math.max(end, p.start_min + p.duration_min);
     }
     for (const b of blocksByDate.get(d) ?? []) {
       if (!(b.start_min === 0 && b.end_min === 1440)) {
@@ -402,6 +453,7 @@ function TimeGrid({
             const h = hoursByDow.get(weekdayOf(d));
             const closed = !(h?.enabled ?? true);
             const dayJobs = jobsByDate.get(d) ?? [];
+            const dayProj = projectedByDate.get(d) ?? [];
             const dayBlocks = blocksByDate.get(d) ?? [];
             return (
               <div
@@ -446,6 +498,22 @@ function TimeGrid({
                     </button>
                   );
                 })}
+                {dayProj.map((p, i) => (
+                  <button
+                    key={`${p.plan_id}-${i}`}
+                    data-item
+                    onClick={() => onProjected(p)}
+                    title="Standing plan slot — not booked yet; opens the plan"
+                    className="absolute rounded-md border border-dashed border-brand/60 bg-brand-wash/40 px-1.5 py-1 text-left overflow-hidden hover:bg-brand-wash transition-colors duration-150"
+                    style={{ top: y(p.start_min) + 1, height: Math.max((p.duration_min / 60) * HOUR_PX - 2, 22), left: 2, right: 2 }}
+                  >
+                    <span className="text-[11px] font-semibold truncate block leading-tight text-brand-deep">
+                      {p.customer_name.split(" ")[0]}
+                      {owner ? ` · ${money(p.price)}` : ""}
+                    </span>
+                    <span className="text-[10px] num block leading-tight text-ink-2">{minToLabel(p.start_min)} · plan slot</span>
+                  </button>
+                ))}
                 {dayJobs.map((j) => (
                   <button
                     key={j.id}

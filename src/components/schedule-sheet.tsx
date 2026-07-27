@@ -15,6 +15,7 @@ export function ScheduleSheet({
   today,
   planId,
   scopeLabel,
+  presets = [],
   onDone,
 }: {
   open: boolean;
@@ -22,6 +23,8 @@ export function ScheduleSheet({
   today: string;
   planId?: string; // omit = all active plans
   scopeLabel: string; // "Joan Delgado's plan" | "all active plans"
+  /** Extra through-date chips, e.g. "Prepaid — 6 visits" on a plan with credit. */
+  presets?: { label: string; ymd: string }[];
   onDone: (result: GenerateResult) => void;
 }) {
   const [until, setUntil] = useState(addDays(today, 56));
@@ -62,8 +65,9 @@ export function ScheduleSheet({
             { label: "3 months", d: 91 },
             { label: "6 months", d: 182 },
             { label: `Rest of ${today.slice(0, 4)}`, ymd: `${today.slice(0, 4)}-12-31` },
+            ...presets,
           ].map((p) => {
-            const value = "ymd" in p && p.ymd ? p.ymd : addDays(today, p.d as number);
+            const value = "ymd" in p && p.ymd ? p.ymd : addDays(today, ("d" in p ? p.d : 0) as number);
             if (value <= today) return null;
             return (
               <button
