@@ -11,7 +11,7 @@ import type { CompanyLedgerEntry } from "@/lib/types";
 const FILTERS = [
   { id: "all", label: "All" },
   { id: "payout", label: "Payouts" },
-  { id: "gabe", label: "Gabe" },
+  { id: "gabe", label: "Workers" },
   { id: "ceo", label: "CEO" },
   { id: "capital", label: "Capital" },
   { id: "expense", label: "Expenses" },
@@ -20,7 +20,7 @@ type FilterId = (typeof FILTERS)[number]["id"];
 
 function label(e: CompanyLedgerEntry) {
   if (e.kind === "revenue") return `Payment — ${e.memo ?? "customer"}`;
-  if (e.kind === "payout") return `Payout — ${e.party === "gabe" ? "Gabe" : "CEO"}${e.memo ? ` · ${e.memo}` : ""}`;
+  if (e.kind === "payout") return `Payout — ${e.party === "ceo" ? "CEO" : "Worker"}${e.memo ? ` · ${e.memo}` : ""}`;
   if (e.kind === "expense") return e.memo ?? "Expense";
   return e.memo ? `Capital — ${e.memo}` : "Capital added";
 }
@@ -32,7 +32,8 @@ export function CapitalClient({ rows, balance }: { rows: CompanyLedgerEntry[]; b
 
   const shown = rows.filter((e) => {
     if (filter === "all") return true;
-    if (filter === "gabe" || filter === "ceo") return e.kind === "payout" && e.party === filter;
+    if (filter === "gabe") return e.kind === "payout" && e.party !== "ceo";
+    if (filter === "ceo") return e.kind === "payout" && e.party === "ceo";
     return e.kind === filter;
   });
 
@@ -156,7 +157,7 @@ function EditEntrySheet({ entry, onClose }: { entry: CompanyLedgerEntry; onClose
   const kind = entry.kind as "capital" | "payout";
 
   return (
-    <Sheet open onClose={onClose} title={kind === "capital" ? "Edit capital" : `Edit payout — ${entry.party === "gabe" ? "Gabe" : "CEO"}`}>
+    <Sheet open onClose={onClose} title={kind === "capital" ? "Edit capital" : `Edit payout — ${entry.party === "ceo" ? "CEO" : "Worker"}`}>
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Amount">

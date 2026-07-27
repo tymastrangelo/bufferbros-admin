@@ -1,11 +1,15 @@
 import type { Metadata } from "next";
+import { after } from "next/server";
 import { getRole } from "@/lib/auth";
-import { getCatalog } from "@/lib/queries";
+import { syncEmployeeCalendar } from "@/lib/ical";
+import { getCatalog, getMyEmployee } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { addDays, monthGridStart, todayYmd, weekdayOf, ymOf } from "@/lib/time";
-import type { Block, WeeklyHours } from "@/lib/types";
+import type { Block, Employee, WeeklyHours } from "@/lib/types";
 import type { JobWithCustomer } from "@/components/job-sheet";
 import { CalendarClient, type CalView } from "./calendar-client";
+
+const STALE_MS = 6 * 60 * 60 * 1000; // refresh feeds older than 6h when someone looks at the calendar
 
 export const metadata: Metadata = { title: "Calendar" };
 export const dynamic = "force-dynamic";
@@ -41,16 +45,30 @@ export default async function CalendarPage({
     .lt("date", rangeEnd)
     .neq("status", "cancelled")
     .order("start_min");
-  const [apptsQ, blocksQ, hoursQ, catalog] = await Promise.all([
+  const [apptsQ, blocksQ, hoursQ, catalog, myEmployee, employeesQ] = await Promise.all([
     // Pending web bookings stay off the washer's calendar until the owner approves.
     owner ? apptsQuery : apptsQuery.neq("status", "pending"),
     db.from("blocks").select("*").gte("date", rangeStart).lt("date", rangeEnd).order("start_min"),
     db.from("weekly_hours").select("*").order("weekday"),
     getCatalog(),
+    getMyEmployee(),
+    db.from("employees").select("id,name,ical_url,ical_synced_at").eq("active", true),
   ]);
+
+  // Opportunistic freshness between cron runs: re-pull any feed older than 6h.
+  // (Staleness check runs inside after() — render must stay pure.)
+  const employees = (employeesQ.data ?? []) as Pick<Employee, "id" | "name" | "ical_url" | "ical_synced_at">[];
+  after(() => {
+    const stale = employees.filter(
+      (e) => e.ical_url && (!e.ical_synced_at || Date.now() - new Date(e.ical_synced_at).getTime() > STALE_MS)
+    );
+    return Promise.all(stale.map((e) => syncEmployeeCalendar(e.id)));
+  });
 
   return (
     <CalendarClient
+      myEmployee={myEmployee}
+      employeeNames={Object.fromEntries(employees.map((e) => [e.id, e.name]))}
       view={view}
       anchor={anchor}
       today={todayYmd()}

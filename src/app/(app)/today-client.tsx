@@ -21,8 +21,10 @@ interface Stats {
   weekCollected: number;
   monthCollected: number;
   jobsCompleted: number;
-  /** Tyler <-> Gabe settlement net: positive = Gabe owes Tyler, negative = Tyler owes Gabe. */
+  /** Owner <-> workers settlement net: positive = they owe Tyler, negative = Tyler owes them. */
   payoutNet: number;
+  /** "Gabe" with one worker, "Workers" with more. */
+  workerLabel: string;
   activePlans: number;
 }
 
@@ -82,7 +84,7 @@ export function TodayClient({
           <Stat label="Collected this month" value={money(stats.monthCollected)} />
           <Stat label="Jobs done this month" value={String(stats.jobsCompleted)} />
           <Stat
-            label={stats.payoutNet > 0 ? "Gabe owes you" : stats.payoutNet < 0 ? "You owe Gabe" : "Payouts"}
+            label={stats.payoutNet > 0 ? `${stats.workerLabel} owes you` : stats.payoutNet < 0 ? `You owe ${stats.workerLabel}` : "Payouts"}
             value={stats.payoutNet === 0 ? "Even" : money(Math.abs(stats.payoutNet))}
             tone={stats.payoutNet < 0 ? "bad" : undefined}
             href="/money/payouts"
@@ -245,9 +247,12 @@ function JobCard({ job, inProgress, onOpen }: { job: JobWithCustomer; inProgress
       className={`card flex overflow-hidden transition-colors duration-150 ${inProgress ? "border-brand" : ""} ${done || noShow ? "opacity-60" : ""}`}
     >
       <button onClick={onOpen} className="flex grow text-left min-w-0">
-        {/* time rail */}
-        <div className={`w-[74px] shrink-0 px-3 py-3 border-r border-line ${inProgress ? "bg-brand-wash" : "bg-[#fafbfd]"}`}>
-          <p className="text-[15px] font-bold num leading-tight">{minToLabel(job.start_min).replace(" ", "")}</p>
+        {/* time rail — meridiem rides small so "12:00PM" can't overflow the rail */}
+        <div className={`w-[78px] shrink-0 px-2.5 py-3 border-r border-line ${inProgress ? "bg-brand-wash" : "bg-[#fafbfd]"}`}>
+          <p className="text-[15px] font-bold num leading-tight whitespace-nowrap">
+            {minToLabel(job.start_min).split(" ")[0]}
+            <span className="text-[11px] font-semibold">{minToLabel(job.start_min).split(" ")[1]}</span>
+          </p>
           <p className="text-[11px] text-faint num mt-0.5">{job.duration_min}m</p>
           {done && <p className="text-[10px] font-bold uppercase tracking-wide text-ok mt-1">done</p>}
           {noShow && <p className="text-[10px] font-bold uppercase tracking-wide text-warn mt-1">no-show</p>}

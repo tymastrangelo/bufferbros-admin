@@ -23,6 +23,8 @@ export interface Catalog {
   detail: Record<SizeId, { price: number; minutes: number }>;
   /** Ceramic Coating per size (includes a full detail) — null until priced/active. */
   ceramic: { name: string; note: string | null; bySize: Record<SizeId, { price: number; minutes: number }> } | null;
+  /** Boat detailing, priced per foot of boat — null until priced/active. */
+  boat: { name: string; note: string | null; ratePerFt: number; minutesPerFt: number } | null;
   addons: CatalogAddon[];
   planPricing: { cadence: PlanCadence; size_id: string; price: number }[];
   /** Business rules from the settings table (with sane defaults). */
@@ -49,6 +51,31 @@ export function computeQuote(
     price: base.price + extras.reduce((s, a) => s + a.price, 0),
     minutes: base.minutes + extras.reduce((s, a) => s + a.minutes, 0),
   };
+}
+
+/** Boat detail quote: length × per-foot rate. Zero until a length is on file. */
+export function boatQuote(catalog: Catalog, lengthFt: number | null): { price: number; minutes: number } {
+  if (!catalog.boat || !lengthFt) return { price: 0, minutes: 0 };
+  return {
+    price: Math.round(lengthFt * catalog.boat.ratePerFt),
+    minutes: Math.round(lengthFt * catalog.boat.minutesPerFt),
+  };
+}
+
+/** Mixed selection of cars + boats: cars by size (+ add-ons), boats by the foot. */
+export function computeVehiclesQuote(
+  catalog: Catalog,
+  vehicles: { kind: "car" | "boat"; size_id: SizeId; length_ft: number | null }[],
+  addonIds: string[],
+  service: BaseService = "standard"
+): { price: number; minutes: number } {
+  const cars = vehicles.filter((v) => v.kind !== "boat");
+  const boats = vehicles.filter((v) => v.kind === "boat");
+  const carQ = cars.length ? computeMultiQuote(catalog, cars.map((v) => v.size_id), addonIds, service) : { price: 0, minutes: 0 };
+  return boats.reduce((acc, b) => {
+    const q = boatQuote(catalog, b.length_ft);
+    return { price: acc.price + q.price, minutes: acc.minutes + q.minutes };
+  }, carQ);
 }
 
 /** One visit covering several cars: each car quoted at its own size, summed. */

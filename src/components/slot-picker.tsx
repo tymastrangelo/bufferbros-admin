@@ -13,6 +13,7 @@ export function SlotPicker({
   value,
   onChange,
   excludeAppointmentId,
+  employeeIds,
 }: {
   date: string;
   durationMin: number;
@@ -20,13 +21,19 @@ export function SlotPicker({
   onChange: (min: number | null, offGrid: boolean) => void;
   /** informational only — when rescheduling, its own slot shows as busy */
   excludeAppointmentId?: string;
+  /**
+   * Whose free time to show: [] = the owner (business calendar only), ids = times
+   * every listed worker is free. Omit for the website-toggle/whole-business view.
+   */
+  employeeIds?: string[];
 }) {
   const [slots, setSlots] = useState<number[] | null>(null);
   const [custom, setCustom] = useState(false);
   const supabase = createClient();
 
   // Reset to loading when the query changes (state adjustment during render).
-  const fetchKey = `${date}:${durationMin}`;
+  const empKey = employeeIds ? employeeIds.join(",") : "∅";
+  const fetchKey = `${date}:${durationMin}:${empKey}`;
   const [prevKey, setPrevKey] = useState(fetchKey);
   if (prevKey !== fetchKey) {
     setPrevKey(fetchKey);
@@ -37,14 +44,19 @@ export function SlotPicker({
     if (!date || !durationMin) return;
     let stale = false;
     supabase
-      .rpc("get_available_slots", { p_date: date, p_duration_min: durationMin })
+      .rpc("get_available_slots", {
+        p_date: date,
+        p_duration_min: durationMin,
+        ...(employeeIds ? { p_employee_ids: employeeIds } : {}),
+      })
       .then(({ data }) => {
         if (!stale) setSlots(((data ?? []) as { slot_min: number }[]).map((r) => r.slot_min));
       });
     return () => {
       stale = true;
     };
-  }, [date, durationMin, supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- empKey stands in for the employeeIds array identity
+  }, [date, durationMin, empKey, supabase]);
 
   const onGrid = value != null && slots?.includes(value);
 

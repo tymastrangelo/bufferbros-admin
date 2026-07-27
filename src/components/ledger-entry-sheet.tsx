@@ -38,7 +38,7 @@ export function LedgerEntrySheet({
   const [picked, setPicked] = useState<PickedCustomer | null>(null);
   const [kind, setKind] = useState<EntryKind>(entry?.kind ?? defaultKind);
   const [amount, setAmount] = useState(entry ? String(Math.abs(Number(entry.amount))) : "");
-  const [method, setMethod] = useState<PaymentMethod>(entry?.method ?? "zelle");
+  const [method, setMethod] = useState<PaymentMethod>(entry?.method ?? "cash");
   const [date, setDate] = useState(entry?.occurred_on ?? todayYmd());
   const [memo, setMemo] = useState(entry?.memo ?? "");
   const [collectedBy, setCollectedBy] = useState<"owner" | "washer">(entry?.collected_by ?? "owner");
@@ -153,7 +153,7 @@ export function LedgerEntrySheet({
                     collectedBy === who ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
                   }`}
                 >
-                  {who === "owner" ? "Me" : "Gabe"}
+                  {who === "owner" ? "Me" : "Worker"}
                 </button>
               ))}
             </div>

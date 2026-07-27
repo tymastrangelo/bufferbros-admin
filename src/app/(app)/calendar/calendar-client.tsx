@@ -8,10 +8,11 @@ import { IconChevronLeft, IconChevronRight, IconPlus } from "@/components/icons"
 import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { Sheet } from "@/components/ui";
 import { deleteBlock } from "@/lib/actions/settings";
+import { saveMyCalendarFeed, syncCalendarNow } from "@/lib/actions/employees";
 import type { Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { addDays, addMonths, fmtDateLong, fmtDateShort, fmtMonth, minToLabel, monthGridStart, weekdayOf, WEEKDAYS_SHORT, ymOf } from "@/lib/time";
-import type { Block, WeeklyHours } from "@/lib/types";
+import type { Block, Employee, WeeklyHours } from "@/lib/types";
 
 export type CalView = "month" | "week" | "day";
 
@@ -28,6 +29,8 @@ export function CalendarClient({
   openNew,
   openBlock,
   owner,
+  myEmployee,
+  employeeNames,
 }: {
   view: CalView;
   anchor: string;
@@ -39,6 +42,9 @@ export function CalendarClient({
   openNew: boolean;
   openBlock: boolean;
   owner: boolean;
+  /** The signed-in worker's employee row (null for the owner) — powers "My other job". */
+  myEmployee: Employee | null;
+  employeeNames: Record<string, string>;
 }) {
   const router = useRouter();
   // Store the tapped job, but always render the fresh copy from server props —
@@ -50,6 +56,7 @@ export function CalendarClient({
   );
   const [blockSheet, setBlockSheet] = useState(openBlock);
   const [blockDetail, setBlockDetail] = useState<Block | null>(null);
+  const [feedSheet, setFeedSheet] = useState(false);
 
   // re-arm when the ＋New menu navigates here with ?new=1 / ?block=1
   const [prevOpenNew, setPrevOpenNew] = useState(openNew);
@@ -118,6 +125,11 @@ export function CalendarClient({
           ))}
         </div>
         <div className="flex gap-1.5">
+          {myEmployee && (
+            <button className="btn btn-sm" onClick={() => setFeedSheet(true)}>
+              My other job
+            </button>
+          )}
           <button className="btn btn-sm" onClick={() => setBlockSheet(true)}>
             Block time
           </button>
@@ -184,7 +196,8 @@ export function CalendarClient({
         }}
         defaultDate={view === "month" ? today : anchor}
       />
-      {blockDetail && <BlockDetailSheet block={blockDetail} onClose={() => setBlockDetail(null)} />}
+      {blockDetail && <BlockDetailSheet block={blockDetail} employeeNames={employeeNames} onClose={() => setBlockDetail(null)} />}
+      {myEmployee && feedSheet && <FeedSheet employee={myEmployee} onClose={() => setFeedSheet(false)} />}
     </div>
   );
 }
@@ -469,9 +482,18 @@ function TimeGrid({
 
 /* ---------------- Blocks ---------------- */
 
-function BlockDetailSheet({ block, onClose }: { block: Block; onClose: () => void }) {
+function BlockDetailSheet({
+  block,
+  employeeNames,
+  onClose,
+}: {
+  block: Block;
+  employeeNames: Record<string, string>;
+  onClose: () => void;
+}) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
+  const who = block.employee_id ? employeeNames[block.employee_id] : null;
   return (
     <Sheet open onClose={onClose} title="Blocked time">
       <div className="flex flex-col gap-4">
@@ -483,19 +505,90 @@ function BlockDetailSheet({ block, onClose }: { block: Block; onClose: () => voi
               : `${minToLabel(block.start_min)} – ${minToLabel(block.end_min)}`}
           </p>
           {block.reason && <p className="text-sm mt-1">{block.reason}</p>}
+          {who && (
+            <p className="text-[13px] text-faint mt-1">
+              {block.source === "ical" ? `Synced from ${who}'s calendar` : `${who}'s time off`}
+            </p>
+          )}
         </div>
-        <button
-          className="btn btn-danger"
-          disabled={pending}
-          onClick={async () => {
-            setPending(true);
-            await deleteBlock(block.id);
-            onClose();
-            router.refresh();
-          }}
-        >
-          {pending ? "Removing…" : "Remove block"}
+        {block.source === "ical" ? (
+          <p className="text-[13px] text-ink-2 bg-surface border border-line rounded-md px-3 py-2">
+            This comes from a synced calendar — deleting it here would just bring it back on the next sync. Remove the
+            event on that calendar instead.
+          </p>
+        ) : (
+          <button
+            className="btn btn-danger"
+            disabled={pending}
+            onClick={async () => {
+              setPending(true);
+              await deleteBlock(block.id);
+              onClose();
+              router.refresh();
+            }}
+          >
+            {pending ? "Removing…" : "Remove block"}
+          </button>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
+/**
+ * A worker's other-job calendar feed: paste the Google Calendar secret iCal link
+ * once and shifts keep blocking the schedule on their own.
+ */
+function FeedSheet({ employee, onClose }: { employee: Employee; onClose: () => void }) {
+  const router = useRouter();
+  const [url, setUrl] = useState(employee.ical_url ?? "");
+  const [state, setState] = useState<"idle" | "busy" | string>("idle");
+
+  async function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
+    setState("busy");
+    const res = await fn();
+    if (!res.ok) return setState(res.error ?? "Failed.");
+    setState("idle");
+    onClose();
+    router.refresh();
+  }
+
+  return (
+    <Sheet open onClose={onClose} title="My other job">
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-ink-2">
+          Paste your other job&apos;s calendar link and those shifts block this schedule automatically — no more typing
+          them in. In Google Calendar: Settings → your calendar → <span className="font-medium">Secret address in iCal
+          format</span>, copy the link ending in .ics.
+        </p>
+        <input
+          className="input"
+          placeholder="https://calendar.google.com/calendar/ical/…/basic.ics"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+        />
+        {employee.ical_synced_at && (
+          <p className="text-[12px] text-faint -mt-2">
+            Last synced{" "}
+            {new Date(employee.ical_synced_at).toLocaleString("en-US", {
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+              timeZone: "America/New_York",
+            })}
+            . Re-syncs daily and whenever the calendar page is opened.
+          </p>
+        )}
+        {state !== "idle" && state !== "busy" && <p className="text-sm text-bad">{state}</p>}
+        <button className="btn btn-primary h-11" disabled={state === "busy"} onClick={() => run(() => saveMyCalendarFeed(url))}>
+          {state === "busy" ? "Syncing…" : url.trim() ? "Save & sync" : "Remove feed"}
         </button>
+        {employee.ical_url && url === employee.ical_url && (
+          <button className="btn" disabled={state === "busy"} onClick={() => run(() => syncCalendarNow())}>
+            Sync now
+          </button>
+        )}
       </div>
     </Sheet>
   );

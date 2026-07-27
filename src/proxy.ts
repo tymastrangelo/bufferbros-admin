@@ -32,7 +32,7 @@ export async function proxy(request: NextRequest, event: NextFetchEvent) {
   // `next-action` header, so this one guard sees all washer activity — including
   // actions added later. Owner's own activity stays silent.
   if (user && user.app_metadata?.role !== "owner" && request.method === "POST" && request.headers.has("next-action")) {
-    event.waitUntil(notify("owner", "Gabe made a change", `From ${path}`, path));
+    event.waitUntil(notify("owner", "Your worker made a change", `From ${path}`, path));
   }
 
   const onLogin = path === "/login";

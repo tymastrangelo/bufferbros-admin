@@ -19,13 +19,13 @@ export default async function MyPayPage() {
     .limit(900);
   const entries = ((data ?? []) as CompanyLedgerEntry[]).map((e) => ({ ...e, amount: Number(e.amount) }));
 
-  // Pair each of Gabe's payouts with the payment it came from (owners also see CEO
-  // payout rows here — ignore them; this page is Gabe's slice only).
+  // Pair each of the worker's payouts with the payment it came from. RLS scopes a
+  // washer to their own rows already; the employee_id filter drops CEO payout rows.
   const revenueByEntry = new Map(
     entries.filter((e) => e.kind === "revenue" && e.ledger_entry_id).map((e) => [e.ledger_entry_id as string, e.amount])
   );
   const rows = entries
-    .filter((e) => e.kind === "payout" && e.party === "gabe")
+    .filter((e) => e.kind === "payout" && e.employee_id != null)
     .map((e) => {
       const keep = -e.amount; // payouts are stored negative
       // Gabe only owes Tyler on cash he physically collected. On Tyler-collected jobs he

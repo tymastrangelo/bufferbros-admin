@@ -48,6 +48,9 @@ next-env.d.ts
 # graphify knowledge graph
 graphify-out/
 
-# session/plugin scratch
+# session/plugin scratch — Claude Code local config + tool outputs, never on GitHub
 .remember/
 .playwright-mcp/
+.claude/
+/test-results/
+/playwright-report/

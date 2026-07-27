@@ -3,13 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { getRole } from "@/lib/auth";
-import { visitsPerQuarter } from "@/lib/catalog";
+import { initialDetailPrice, visitsPerQuarter } from "@/lib/catalog";
 import { syncAppointmentToGcal } from "@/lib/gcal";
 import { notify } from "@/lib/notify";
 import { generateOccurrences, type GenerateResult } from "@/lib/occurrences";
+import { getCatalog } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { diffDays, todayYmd } from "@/lib/time";
-import type { PaymentMethod, Plan, PlanCadence, PlanStatus } from "@/lib/types";
+import type { PaymentMethod, Plan, PlanCadence, PlanStatus, SizeId, Vehicle } from "@/lib/types";
 import type { ActionResult } from "./appointments";
 
 const refresh = () => revalidatePath("/", "layout");
@@ -133,6 +134,79 @@ export async function setPlanStatus(id: string, status: PlanStatus): Promise<Act
   }
   refresh();
   return { ok: true, id };
+}
+
+/**
+ * Bring a paused (or ended) plan back, seasonal-client style. Reactivates the plan
+ * and regenerates its visits; in "entry" mode the first visit back is repriced as a
+ * full re-entry detail (the same discounted full detail every new plan client gets),
+ * since a car that sat out a season isn't in maintenance shape anymore.
+ */
+export async function resumePlan(
+  planId: string,
+  mode: "entry" | "maintenance"
+): Promise<
+  | { ok: true; result: GenerateResult; entry: { date: string; price: number } | null }
+  | { ok: false; error: string }
+> {
+  const db = await createClient();
+  const { data: planData, error: planErr } = await db
+    .from("plans")
+    .select("*, plan_vehicles(vehicles(*))")
+    .eq("id", planId)
+    .single();
+  if (planErr || !planData) return { ok: false, error: "Plan not found." };
+  const plan = planData as Plan & { plan_vehicles: { vehicles: Vehicle | null }[] };
+
+  const { error } = await db.from("plans").update({ status: "active" }).eq("id", planId);
+  if (error) return { ok: false, error: error.message };
+
+  let result: GenerateResult;
+  try {
+    result = await generateOccurrences(db, planId);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+
+  let entry: { date: string; price: number } | null = null;
+  if (mode === "entry") {
+    const catalog = await getCatalog();
+    const cars = plan.plan_vehicles.map((r) => r.vehicles).filter((v): v is Vehicle => !!v && v.kind !== "boat");
+    const sizes: SizeId[] = cars.length ? cars.map((v) => v.size_id) : ["sedan"];
+    const price = sizes.reduce((s, size) => s + initialDetailPrice(catalog, size), 0);
+    const minutes = sizes.reduce((s, size) => s + (catalog.detail[size]?.minutes ?? 120), 0);
+
+    const { data: first } = await db
+      .from("appointments")
+      .select("id,date,duration_min,notes")
+      .eq("plan_id", planId)
+      .eq("source", "recurring")
+      .eq("status", "scheduled")
+      .gte("date", todayYmd())
+      .order("date")
+      .limit(1)
+      .maybeSingle();
+    if (first) {
+      const note = "Re-entry detail — full detail after the plan pause, then back to the maintenance rate.";
+      const { error: updErr } = await db
+        .from("appointments")
+        .update({
+          price,
+          duration_min: Math.max(first.duration_min, minutes),
+          notes: first.notes ? `${first.notes}\n${note}` : note,
+        })
+        .eq("id", first.id);
+      if (updErr) return { ok: false, error: `Plan resumed, but repricing the first visit failed: ${updErr.message}` };
+      entry = { date: first.date, price };
+      after(() => syncAppointmentToGcal(first.id));
+    } else {
+      // Every regenerated date conflicted — the owner places the first visit by hand;
+      // hand back the entry price so the UI can say what to charge.
+      entry = { date: "", price };
+    }
+  }
+  refresh();
+  return { ok: true, result, entry };
 }
 
 /**

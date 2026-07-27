@@ -30,6 +30,7 @@ const NAV = [
   { href: "/plans", label: "Plans", icon: IconRepeat },
   { href: "/quote", label: "Quote", icon: IconSparkle },
   { href: "/money", label: "Money", icon: IconDollar },
+  { href: "/team", label: "Team", icon: IconUsers },
   { href: "/settings", label: "Settings", icon: IconSettings },
 ];
 
@@ -215,6 +216,7 @@ export function Shell({
             [
               { href: "/plans", label: "Plans", icon: IconRepeat },
               { href: "/quote", label: "Quote builder", icon: IconSparkle },
+              { href: "/team", label: "Team", icon: IconUsers },
               { href: "/settings", label: "Settings", icon: IconSettings },
               { href: "/customers/import", label: "Import contacts", icon: IconUpload },
             ].map(({ href, label, icon: Icon }) => (

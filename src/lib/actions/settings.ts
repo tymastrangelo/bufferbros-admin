@@ -111,13 +111,23 @@ export async function addBlock(fields: BlockFields): Promise<ActionResult> {
   const endMin = fields.allDay ? 1440 : fields.endMin ?? 1440;
   if (startMin >= endMin) return { ok: false, error: "Start time must be before end time." };
 
+  const db = await createClient();
+  // A worker's manual block is tagged as theirs; the owner's stays business-wide.
+  // Either way it blocks booking — one crew on the road.
+  const {
+    data: { user },
+  } = await db.auth.getUser();
+  const { data: mine } = user
+    ? await db.from("employees").select("id").eq("user_id", user.id).maybeSingle()
+    : { data: null };
+
   const rows = Array.from({ length: days }, (_, i) => ({
     date: addDays(from, i),
     start_min: startMin,
     end_min: endMin,
     reason: fields.reason?.trim() || null,
+    employee_id: mine?.id ?? null,
   }));
-  const db = await createClient();
   const { error } = await db.from("blocks").insert(rows);
   if (error) return { ok: false, error: error.message };
   refresh();

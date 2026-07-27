@@ -1,6 +1,7 @@
-// Reconciliation math for the Tyler <-> Gabe split. A payment's client cash is either
-// collected by the owner (Tyler owes Gabe his washer %) or by the washer (Gabe keeps his
-// %, owes Tyler the rest). Pure functions so the Payouts view and its check share one source.
+// Reconciliation math for the owner <-> worker split. A payment's client cash is either
+// collected by the owner (Tyler owes the worker their %) or by the worker (they keep
+// their %, owe Tyler the rest). Pure functions so the Payouts view and its check share
+// one source.
 
 export type CollectedBy = "owner" | "washer";
 
@@ -10,25 +11,27 @@ export interface PayoutRow {
   fee?: number;
   collectedBy: CollectedBy;
   settledOn: string | null;
-  /** Tyler did the detail himself — Gabe's cut is 0 on this payment. */
+  /** Keep-all-the-money job — the worker's cut is 0 on this payment. */
   selfDone?: boolean;
+  /** Per-row worker % (each employee has their own); falls back to the call-level pct. */
+  pct?: number;
 }
 
-/** What one payment implies for the transfer between the two of them. */
+/** What one payment implies for the transfer between Tyler and the worker. */
 export function transfer(row: PayoutRow, washerPct: number) {
   const net = row.amount - (row.fee ?? 0);
-  const gabeCut = row.selfDone ? 0 : (net * washerPct) / 100;
+  const workerCut = row.selfDone ? 0 : (net * (row.pct ?? washerPct)) / 100;
   if (row.collectedBy === "owner") {
-    // Tyler holds the cash, owes Gabe his cut.
-    return { direction: "owner_to_washer" as const, amount: gabeCut };
+    // Tyler holds the cash, owes the worker their cut.
+    return { direction: "owner_to_washer" as const, amount: workerCut };
   }
-  // Gabe holds the cash, keeps his cut, owes Tyler the remainder.
-  return { direction: "washer_to_owner" as const, amount: net - gabeCut };
+  // The worker holds the cash, keeps their cut, owes Tyler the remainder.
+  return { direction: "washer_to_owner" as const, amount: net - workerCut };
 }
 
 /**
- * Net across the unsettled money-in rows. Positive => Gabe owes Tyler; negative => Tyler
- * owes Gabe. `count` is the number of unsettled rows.
+ * Net across the unsettled money-in rows. Positive => the worker owes Tyler; negative =>
+ * Tyler owes the worker. `count` is the number of unsettled rows.
  */
 export function netOwed(rows: PayoutRow[], washerPct: number) {
   let net = 0;

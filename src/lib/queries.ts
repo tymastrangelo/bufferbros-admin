@@ -2,7 +2,7 @@
 import "server-only";
 import type { Catalog } from "./catalog";
 import { createClient } from "./supabase/server";
-import type { PlanCadence, ServicePricing, SizeId } from "./types";
+import type { Employee, PlanCadence, ServicePricing, SizeId } from "./types";
 
 export async function getCatalog(): Promise<Catalog> {
   const db = await createClient();
@@ -39,6 +39,13 @@ export async function getCatalog(): Promise<Catalog> {
     if (Object.keys(bySize).length === 3) ceramic = { name: ceramicSvc.name, note: ceramicSvc.note, bySize };
   }
 
+  const boatSvc = ((services ?? []) as { id: string; kind: string; name: string; note: string | null }[]).find(
+    (s) => s.id === "boat-detail" && s.kind === "detail"
+  );
+  const boatRow = ((pricing ?? []) as ServicePricing[]).find((p) => p.service_id === "boat-detail" && p.size_id === "per-ft");
+  const boat: Catalog["boat"] =
+    boatSvc && boatRow ? { name: boatSvc.name, note: boatSvc.note, ratePerFt: Number(boatRow.price), minutesPerFt: boatRow.minutes } : null;
+
   const addons = ((services ?? []) as { id: string; kind: string; name: string }[])
     .filter((s) => s.kind === "addon")
     .map((s) => {
@@ -54,6 +61,7 @@ export async function getCatalog(): Promise<Catalog> {
   return {
     detail,
     ceramic,
+    boat,
     addons,
     rules: {
       ceramicLeadDays: num("ceramic_lead_days", 7),
@@ -67,6 +75,23 @@ export async function getCatalog(): Promise<Catalog> {
       price: Number(p.price),
     })),
   };
+}
+
+export async function getActiveEmployees(): Promise<Employee[]> {
+  const db = await createClient();
+  const { data } = await db.from("employees").select("*").eq("active", true).order("created_at");
+  return ((data ?? []) as Employee[]).map((e) => ({ ...e, split_pct: Number(e.split_pct) }));
+}
+
+/** The signed-in user's employee row, or null for the owner / unlinked accounts. */
+export async function getMyEmployee(): Promise<Employee | null> {
+  const db = await createClient();
+  const {
+    data: { user },
+  } = await db.auth.getUser();
+  if (!user) return null;
+  const { data } = await db.from("employees").select("*").eq("user_id", user.id).maybeSingle();
+  return data ? ({ ...(data as Employee), split_pct: Number((data as Employee).split_pct) } as Employee) : null;
 }
 
 export async function getSettingsMap(): Promise<Record<string, string>> {

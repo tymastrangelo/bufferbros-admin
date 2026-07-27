@@ -3,7 +3,7 @@ import { requireOwner } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getSettingsMap } from "@/lib/queries";
 import { todayYmd } from "@/lib/time";
-import type { Block, PlanPricing, Service, ServicePricing, WeeklyHours } from "@/lib/types";
+import type { Block, Employee, PlanPricing, Service, ServicePricing, WeeklyHours } from "@/lib/types";
 import { SettingsClient } from "./settings-client";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function SettingsPage() {
   await requireOwner();
   const db = await createClient();
-  const [servicesQ, pricingQ, planPricingQ, hoursQ, blocksQ, settings, userQ] = await Promise.all([
+  const [servicesQ, pricingQ, planPricingQ, hoursQ, blocksQ, settings, userQ, employeesQ] = await Promise.all([
     db.from("services").select("*").order("sort"),
     db.from("service_pricing").select("*"),
     db.from("plan_pricing").select("*"),
@@ -20,6 +20,7 @@ export default async function SettingsPage() {
     db.from("blocks").select("*").gte("date", todayYmd()).order("date").limit(50),
     getSettingsMap(),
     db.auth.getUser(),
+    db.from("employees").select("*").eq("active", true).order("created_at"),
   ]);
 
   return (
@@ -30,6 +31,7 @@ export default async function SettingsPage() {
       hours={(hoursQ.data ?? []) as WeeklyHours[]}
       blocks={(blocksQ.data ?? []) as Block[]}
       settings={settings}
+      employees={(employeesQ.data ?? []) as Employee[]}
       emailFrom={process.env.EMAIL_FROM ?? "not configured"}
       userEmail={userQ.data.user?.email ?? ""}
     />

@@ -2,13 +2,15 @@
 
 // New-appointment sheet: phone bookings, walk-ups, and calendar taps all land here.
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Wheel } from "@/components/brand";
 import { createAppointment } from "@/lib/actions/appointments";
-import { addonQuote, computeMultiQuote, computeQuote, type BaseService, type Catalog } from "@/lib/catalog";
+import { addonQuote, boatQuote, computeQuote, computeVehiclesQuote, type BaseService, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
+import { createClient } from "@/lib/supabase/client";
 import { todayYmd } from "@/lib/time";
-import { SIZES, sizeLabel, vehicleLabel, type SizeId, type Vehicle } from "@/lib/types";
+import { useOwner } from "@/lib/use-owner";
+import { SIZES, sizeLabel, vehicleLabel, type Employee, type SizeId, type Vehicle } from "@/lib/types";
 import { CustomerPicker, type PickedCustomer } from "./customer-picker";
 import { SlotPicker } from "./slot-picker";
 import { VehiclePicker } from "./vehicle-picker";
@@ -30,6 +32,33 @@ export function AppointmentSheet({
   defaultCustomer?: PickedCustomer | null;
 }) {
   const router = useRouter();
+  const owner = useOwner();
+  // Who's doing the job: [] = "Me" (the owner books against the business calendar
+  // only); worker ids narrow the slot grid to times they're ALL free. A washer
+  // booking is auto-assigned to themselves (their RLS-visible row is just their own).
+  const [assignees, setAssignees] = useState<string[]>([]);
+  const [workers, setWorkers] = useState<Pick<Employee, "id" | "name" | "active" | "user_id">[]>([]);
+  useEffect(() => {
+    let stale = false;
+    (async () => {
+      const db = createClient();
+      const [{ data: rows }, { data: sess }] = await Promise.all([
+        db.from("employees").select("id,name,active,user_id").eq("active", true).order("created_at"),
+        db.auth.getSession(),
+      ]);
+      if (stale) return;
+      const list = (rows as Pick<Employee, "id" | "name" | "active" | "user_id">[]) ?? [];
+      setWorkers(list);
+      // A washer booking a job is the one doing it — self-assign their row.
+      const mine = list.find((w) => w.user_id === sess.session?.user.id);
+      if (sess.session?.user.app_metadata?.role !== "owner" && mine) {
+        setAssignees((cur) => (cur.length ? cur : [mine.id]));
+      }
+    })();
+    return () => {
+      stale = true;
+    };
+  }, []);
   const [customer, setCustomer] = useState<PickedCustomer | null>(defaultCustomer ?? null);
   const [oneOff, setOneOff] = useState(false);
   const [name, setName] = useState("");
@@ -55,10 +84,12 @@ export function AppointmentSheet({
   const [pending, setPending] = useState(false);
 
   const selVehicles = useMemo(() => vehicles.filter((v) => vehicleIds.includes(v.id)), [vehicles, vehicleIds]);
+  const selCars = useMemo(() => selVehicles.filter((v) => v.kind !== "boat"), [selVehicles]);
+  const boatsOnly = selVehicles.length > 0 && selCars.length === 0;
   const quote = useMemo(
     () =>
       selVehicles.length
-        ? computeMultiQuote(catalog, selVehicles.map((v) => v.size_id), addonIds, service)
+        ? computeVehiclesQuote(catalog, selVehicles, addonIds, service)
         : computeQuote(catalog, sizeId, addonIds, service),
     [catalog, selVehicles, sizeId, addonIds, service]
   );
@@ -95,9 +126,10 @@ export function AppointmentSheet({
     }
     setPending(true);
     // Multi-car visit: each add-on is priced per car at that car's size, summed.
+    // Add-ons are car things — boats don't take them.
     const addonPrice = (a: Catalog["addons"][number]) =>
       selVehicles.length
-        ? selVehicles.reduce((s, v) => s + addonQuote(a, v.size_id).price, 0)
+        ? selCars.reduce((s, v) => s + addonQuote(a, v.size_id).price, 0)
         : addonQuote(a, sizeId).price;
     const res = await createAppointment({
       date,
@@ -106,7 +138,7 @@ export function AppointmentSheet({
       price,
       sizeId: selVehicles.length > 1 ? null : selVehicles[0]?.size_id ?? sizeId,
       sizeLabel: selVehicles.length ? selVehicles.map(vehicleLabel).join(" + ") : sizeLabel(sizeId),
-      serviceName: ceramic ? catalog.ceramic!.name : undefined,
+      serviceName: ceramic ? catalog.ceramic!.name : boatsOnly && catalog.boat ? catalog.boat.name : undefined,
       ceramic: !!ceramic,
       addons: catalog.addons
         .filter((a) => addonIds.includes(a.id))
@@ -118,6 +150,7 @@ export function AppointmentSheet({
       notes: ceramic ? [notes.trim(), "Ceramic: garage confirmed — car stays garaged 24h after coating."].filter(Boolean).join("\n") : notes,
       customerId: customer?.id ?? null,
       vehicleIds,
+      employeeIds: assignees,
       force: offGrid,
       notify: notify && !!contactEmail,
     });
@@ -167,8 +200,18 @@ export function AppointmentSheet({
 
         {customer ? (
           <Field
-            label={`Vehicles${selVehicles.length > 1 ? ` — ${selVehicles.length} cars this visit` : ""}`}
-            hint={selVehicles.length > 1 ? selVehicles.map((v) => money(computeQuote(catalog, v.size_id, addonIds, service).price)).join(" + ") : undefined}
+            label={`Vehicles${selVehicles.length > 1 ? ` — ${selVehicles.length} this visit` : ""}`}
+            hint={
+              selVehicles.length > 1
+                ? selVehicles
+                    .map((v) =>
+                      money(v.kind === "boat" ? boatQuote(catalog, v.length_ft).price : computeQuote(catalog, v.size_id, addonIds, service).price)
+                    )
+                    .join(" + ")
+                : selVehicles[0]?.kind === "boat" && catalog.boat
+                  ? `Boat detail — ${money(catalog.boat.ratePerFt)}/ft${selVehicles[0].length_ft ? "" : " — add the boat's length for a price"}`
+                  : undefined
+            }
           >
             <VehiclePicker
               customerId={customer.id}
@@ -198,7 +241,7 @@ export function AppointmentSheet({
           </Field>
         )}
 
-        {catalog.ceramic && (
+        {catalog.ceramic && !boatsOnly && (
           <Field label="Service">
             <div className="grid grid-cols-2 gap-1.5">
               {(
@@ -239,27 +282,72 @@ export function AppointmentSheet({
           </Field>
         )}
 
-        <Field label="Add-ons">
-          <div className="flex flex-col gap-1">
-            {catalog.addons.map((a) => (
-              <label key={a.id} className="flex items-center gap-2.5 text-sm py-0.5">
-                <input
-                  type="checkbox"
-                  checked={addonIds.includes(a.id)}
-                  onChange={(e) =>
-                    setAddonIds((ids) => (e.target.checked ? [...ids, a.id] : ids.filter((i) => i !== a.id)))
-                  }
-                />
-                <span className="grow">{a.name}</span>
-                <span className="text-xs text-faint num">
-                  {selVehicles.length > 1
-                    ? `${money(selVehicles.reduce((s, v) => s + addonQuote(a, v.size_id).price, 0))} · ${selVehicles.reduce((s, v) => s + addonQuote(a, v.size_id).minutes, 0)}m`
-                    : `${money(addonQuote(a, selVehicles[0]?.size_id ?? sizeId).price)} · ${addonQuote(a, selVehicles[0]?.size_id ?? sizeId).minutes}m`}
-                </span>
-              </label>
-            ))}
-          </div>
-        </Field>
+        {!boatsOnly && (
+          <Field label="Add-ons" hint={selCars.length > 0 && selVehicles.length > selCars.length ? "Add-ons apply to the cars only" : undefined}>
+            <div className="flex flex-col gap-1">
+              {catalog.addons.map((a) => (
+                <label key={a.id} className="flex items-center gap-2.5 text-sm py-0.5">
+                  <input
+                    type="checkbox"
+                    checked={addonIds.includes(a.id)}
+                    onChange={(e) =>
+                      setAddonIds((ids) => (e.target.checked ? [...ids, a.id] : ids.filter((i) => i !== a.id)))
+                    }
+                  />
+                  <span className="grow">{a.name}</span>
+                  <span className="text-xs text-faint num">
+                    {selCars.length > 1
+                      ? `${money(selCars.reduce((s, v) => s + addonQuote(a, v.size_id).price, 0))} · ${selCars.reduce((s, v) => s + addonQuote(a, v.size_id).minutes, 0)}m`
+                      : `${money(addonQuote(a, selCars[0]?.size_id ?? sizeId).price)} · ${addonQuote(a, selCars[0]?.size_id ?? sizeId).minutes}m`}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </Field>
+        )}
+
+        {owner && workers.length > 0 && (
+          <Field
+            label="Who's doing it?"
+            hint={
+              assignees.length === 0
+                ? "You — times come from the business calendar; your own time is assumed free."
+                : assignees.length > 1
+                  ? "Times shown are when they're all free."
+                  : "Times shown are when they're free."
+            }
+          >
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setAssignees([]);
+                  setStartMin(null);
+                }}
+                className={`h-9 px-3 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
+                  assignees.length === 0 ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
+                }`}
+              >
+                Me
+              </button>
+              {workers.map((w) => (
+                <button
+                  key={w.id}
+                  type="button"
+                  onClick={() => {
+                    setAssignees((ids) => (ids.includes(w.id) ? ids.filter((i) => i !== w.id) : [...ids, w.id]));
+                    setStartMin(null);
+                  }}
+                  className={`h-9 px-3 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
+                    assignees.includes(w.id) ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
+                  }`}
+                >
+                  {w.name}
+                </button>
+              ))}
+            </div>
+          </Field>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Date">
@@ -282,6 +370,7 @@ export function AppointmentSheet({
             date={date}
             durationMin={duration}
             value={startMin}
+            employeeIds={assignees}
             onChange={(min, off) => {
               setStartMin(min);
               setOffGrid(off);

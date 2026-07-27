@@ -19,7 +19,7 @@ export default async function TodayPage() {
   const weekStart = addDays(today, -weekdayOf(today)); // Sunday
   const monthStart = `${today.slice(0, 7)}-01`;
 
-  const [jobsQ, weekPayQ, monthPayQ, doneQ, balancesQ, plansQ, unlinkedQ, planApptsQ, pendingQ, catalog, payoutQ, settings, remindersQ] = await Promise.all([
+  const [jobsQ, weekPayQ, monthPayQ, doneQ, balancesQ, plansQ, unlinkedQ, planApptsQ, pendingQ, catalog, payoutQ, settings, employeesQ, remindersQ] = await Promise.all([
     db
       .from("appointments")
       .select("*, customers(id,name,phone,email,stripe_payments)")
@@ -53,10 +53,11 @@ export default async function TodayPage() {
     getCatalog(),
     db
       .from("ledger_entries")
-      .select("amount,processor_fee,collected_by,settled_on,appointments(self_done)")
+      .select("amount,processor_fee,collected_by,settled_on,appointments(self_done,employee_id)")
       .in("kind", ["payment", "credit"])
       .is("settled_on", null),
     getSettingsMap(),
+    db.from("employees").select("id,name,split_pct,active").order("created_at"),
     db.from("reminders").select("*, customers(id,name)").is("done_at", null).order("due_on").limit(10),
   ]);
 
@@ -74,17 +75,27 @@ export default async function TodayPage() {
   }));
 
   const sum = (rows: { amount: number }[] | null) => (rows ?? []).reduce((s, r) => s + Number(r.amount), 0);
-  // Net of the Tyler <-> Gabe split across unsettled payments: + = Gabe owes Tyler.
+  // Net of the owner <-> workers split across unsettled payments: + = workers owe Tyler.
+  // Each payment runs at its job's worker's cut; unlinked ones at the default worker's.
+  const employees = ((employeesQ.data ?? []) as { id: string; name: string; split_pct: number; active: boolean }[]).map(
+    (e) => ({ ...e, split_pct: Number(e.split_pct) })
+  );
+  const defaultEmp = employees.find((e) => e.id === settings.default_employee_id) ?? employees[0];
+  const pctFor = (employeeId: string | null) =>
+    (employees.find((e) => e.id === employeeId) ?? defaultEmp)?.split_pct ?? Number(settings.split_washer_pct ?? 60);
   const payoutRows: PayoutRow[] = (
-    (payoutQ.data ?? []) as unknown as { amount: number; processor_fee: number; collected_by: "owner" | "washer"; settled_on: string | null; appointments: { self_done: boolean } | null }[]
+    (payoutQ.data ?? []) as unknown as { amount: number; processor_fee: number; collected_by: "owner" | "washer"; settled_on: string | null; appointments: { self_done: boolean; employee_id: string | null } | null }[]
   ).map((r) => ({
     amount: Number(r.amount),
     fee: Number(r.processor_fee ?? 0),
     collectedBy: r.collected_by,
     settledOn: r.settled_on,
     selfDone: !!r.appointments?.self_done,
+    pct: pctFor(r.appointments?.employee_id ?? null),
   }));
   const payoutNet = Math.round(netOwed(payoutRows, Number(settings.split_washer_pct ?? 60)).net);
+  const activeWorkers = employees.filter((e) => e.active);
+  const workerLabel = activeWorkers.length === 1 ? activeWorkers[0].name : "Workers";
   const scheduledPlanIds = new Set((planApptsQ.data ?? []).map((r) => r.plan_id));
   const plans = (plansQ.data ?? []) as (Plan & { customers: { name: string } | null })[];
   const plansWithoutVisit = plans
@@ -116,6 +127,7 @@ export default async function TodayPage() {
               monthCollected: sum(monthPayQ.data),
               jobsCompleted: doneQ.count ?? 0,
               payoutNet,
+              workerLabel,
               activePlans: plans.length,
             }
           : null

@@ -37,12 +37,29 @@ export interface Vehicle {
   id: string;
   customer_id: string;
   size_id: SizeId;
+  /** Boats are priced per foot (length_ft) instead of by size. */
+  kind: "car" | "boat";
+  length_ft: number | null;
   make: string | null;
   model: string | null;
   year: number | null;
   color: string | null;
   plate: string | null;
   notes: string | null;
+}
+
+export interface Employee {
+  id: string;
+  created_at: string;
+  user_id: string | null;
+  name: string;
+  email: string | null;
+  /** % of collected revenue on this employee's jobs. */
+  split_pct: number;
+  /** Secret .ics address of their other-job calendar; synced into blocks. */
+  ical_url: string | null;
+  ical_synced_at: string | null;
+  active: boolean;
 }
 
 export interface Service {
@@ -80,6 +97,10 @@ export interface Block {
   start_min: number;
   end_min: number;
   reason: string | null;
+  /** null = business-wide block; set = that employee's time off. */
+  employee_id: string | null;
+  source: "manual" | "ical";
+  ical_uid: string | null;
 }
 
 export interface Plan {
@@ -128,8 +149,10 @@ export interface Appointment {
   completed_at: string | null;
   completion_note: string | null;
   gcal_event_id: string | null;
-  /** Tyler did this detail himself — Gabe gets no cut of its payments. */
+  /** Keep-all-the-money flag: no employee split on this job's payments. */
   self_done: boolean;
+  /** Who did the detail; null = the owner (or unassigned pre-0015 history). */
+  employee_id: string | null;
 }
 
 export interface LedgerEntry {
@@ -194,13 +217,15 @@ export interface Expense {
 }
 
 export type CompanyLedgerKind = "revenue" | "payout" | "capital" | "expense";
-export type PayoutParty = "gabe" | "ceo";
+/** 'gabe' is pre-0015 history; new employee payouts are 'employee' + employee_id. */
+export type PayoutParty = "gabe" | "ceo" | "employee";
 
 export interface CompanyLedgerEntry {
   id: string;
   occurred_on: string;
   kind: CompanyLedgerKind;
   party: PayoutParty | null;
+  employee_id: string | null;
   amount: number; // revenue/capital > 0, payout/expense < 0
   memo: string | null;
   ledger_entry_id: string | null;
@@ -231,9 +256,12 @@ export const SIZES: { id: SizeId; label: string }[] = [
 export const sizeLabel = (id: string | null | undefined) =>
   SIZES.find((s) => s.id === id)?.label ?? id ?? "";
 
-/** "2021 Tesla Model 3", falling back to the size when make/model are blank. */
-export const vehicleLabel = (v: Pick<Vehicle, "year" | "make" | "model" | "size_id">) =>
-  [v.year, v.make, v.model].filter(Boolean).join(" ") || sizeLabel(v.size_id);
+/** "2021 Tesla Model 3" / "24′ Boston Whaler", falling back to size when blank. */
+export const vehicleLabel = (v: Pick<Vehicle, "year" | "make" | "model" | "size_id"> & Partial<Pick<Vehicle, "kind" | "length_ft">>) => {
+  const name = [v.year, v.make, v.model].filter(Boolean).join(" ");
+  if (v.kind === "boat") return [v.length_ft ? `${v.length_ft}′` : null, name || "Boat"].filter(Boolean).join(" ");
+  return name || sizeLabel(v.size_id);
+};
 
 export const EXPENSE_CATEGORIES = ["supplies", "fuel", "equipment", "insurance", "marketing", "other"];
 export const PAYMENT_METHODS: PaymentMethod[] = ["cash", "zelle", "venmo", "card", "check", "other"];

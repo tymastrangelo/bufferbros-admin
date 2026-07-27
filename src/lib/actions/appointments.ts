@@ -44,6 +44,8 @@ export interface NewAppointment {
   customerId?: string | null;
   /** All vehicles this visit covers; the first doubles as the legacy vehicle_id. */
   vehicleIds?: string[];
+  /** Workers assigned to the job; [] (default) = the owner's own booking. */
+  employeeIds?: string[];
   planId?: string | null;
   force?: boolean;
   notify?: boolean;
@@ -134,6 +136,8 @@ export async function createAppointment(input: NewAppointment): Promise<ActionRe
     p_vehicle_id: vehicleIds[0] ?? null,
     p_plan_id: input.planId || null,
     p_mode: input.force ? "force" : "overlap",
+    // [] = owner's booking: only business blocks + unassigned jobs conflict.
+    p_employee_ids: input.employeeIds ?? [],
   });
   if (error) return { ok: false, error: friendly(error.message) };
 
@@ -320,20 +324,41 @@ export async function completeAppointment(
   note?: string | null,
   /** Email a Stripe checkout link for the final price instead of collecting now. */
   stripeLink = false,
-  /** Owner washed this one himself — Gabe gets no cut of its payments. */
-  selfDone = false
+  /** Keep-all-the-money: no worker split on this job (owner did it himself). */
+  keepAll = false,
+  /** Who did the detail; null = the owner. Ignored for washers (always themselves). */
+  employeeId?: string | null
 ): Promise<ActionResult> {
   const db = await createClient();
   const appt = await getAppt(id);
   if (!appt) return { ok: false, error: "Appointment not found." };
 
   const role = await getRole();
-  const self = selfDone && role === "owner"; // washer can't flag jobs as owner-done
+  // A washer completing a job is the one who did it; only the owner assigns or keeps all.
+  let empId: string | null = employeeId ?? null;
+  if (role !== "owner") {
+    const {
+      data: { user },
+    } = await db.auth.getUser();
+    const { data: mine } = await db.from("employees").select("id").eq("user_id", user!.id).maybeSingle();
+    empId = mine?.id ?? appt.employee_id ?? null;
+  }
+  const self = keepAll && role === "owner" && !empId;
+  // Attribution changed at completion (e.g. pre-assigned Gabe but Tyler did it):
+  // keep the assignment rows matching so nothing shows as still on Gabe's plate.
+  if (empId !== appt.employee_id) await syncAssignees(db, id, empId ? [empId] : []);
   const completedAt = new Date();
-  // self_done lands before the payment insert so the mirror trigger splits it right.
+  // self_done/employee_id land before the payment insert so the mirror trigger splits it right.
   const { error } = await db
     .from("appointments")
-    .update({ status: "completed", completed_at: completedAt.toISOString(), price: finalPrice, completion_note: note || null, self_done: self })
+    .update({
+      status: "completed",
+      completed_at: completedAt.toISOString(),
+      price: finalPrice,
+      completion_note: note || null,
+      self_done: self,
+      employee_id: empId,
+    })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
 
@@ -396,6 +421,38 @@ export async function completeAppointment(
   after(() => syncAppointmentToGcal(id));
   refresh();
   return { ok: true, id };
+}
+
+/**
+ * Owner-only: change who did a detail (or keep-all-the-money) on any job, past or
+ * present. The DB re-mirror trigger rebuilds the payout split on its payments.
+ */
+export async function setJobAttribution(
+  id: string,
+  employeeId: string | null,
+  keepAll: boolean
+): Promise<ActionResult> {
+  if ((await getRole()) !== "owner") return { ok: false, error: "Only Tyler can change who did a job." };
+  const db = await createClient();
+  const { error } = await db
+    .from("appointments")
+    .update({ employee_id: employeeId, self_done: keepAll && !employeeId })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  await syncAssignees(db, id, employeeId ? [employeeId] : []);
+  refresh();
+  return { ok: true, id };
+}
+
+/** Keep the scheduling assignment rows in step with the money-side attribution. */
+async function syncAssignees(db: Awaited<ReturnType<typeof createClient>>, id: string, employeeIds: string[]) {
+  await db.from("appointment_employees").delete().eq("appointment_id", id);
+  if (employeeIds.length) {
+    const { error } = await db
+      .from("appointment_employees")
+      .insert(employeeIds.map((employee_id) => ({ appointment_id: id, employee_id })));
+    if (error) console.error("appointment_employees insert:", error.message);
+  }
 }
 
 /** Owner confirms a pending web booking — possibly at an edited time/price. */

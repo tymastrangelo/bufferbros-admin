@@ -7,11 +7,11 @@ import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { PlanFormSheet } from "@/components/plan-form";
 import { ScheduleSheet } from "@/components/schedule-sheet";
 import { Balance, ErrorNote, Sheet, StatusChip } from "@/components/ui";
-import { recordPlanPrepay, setPlanStatus } from "@/lib/actions/plans";
+import { recordPlanPrepay, resumePlan, setPlanStatus } from "@/lib/actions/plans";
 import { sendPaymentRequest } from "@/lib/actions/stripe";
 import { initialDetailPrice, visitsPerQuarter, type Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
-import { fmtDateShort, minToLabel, WEEKDAYS } from "@/lib/time";
+import { diffDays, fmtDateShort, minToLabel, todayYmd, WEEKDAYS } from "@/lib/time";
 import { PAYMENT_METHODS, vehicleLabel, type Customer, type LedgerEntry, type PaymentMethod, type Plan, type SizeId, type Vehicle } from "@/lib/types";
 import type { OccurrenceConflict } from "@/lib/occurrences";
 
@@ -45,6 +45,7 @@ export function PlanDetail({
   const openJob = job ? (appointments.find((a) => a.id === job.id) ?? job) : null;
   const [editOpen, setEditOpen] = useState(false);
   const [prepayOpen, setPrepayOpen] = useState(false);
+  const [resumeOpen, setResumeOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [showAll, setShowAll] = useState<{ title: string; jobs: JobWithCustomer[] } | null>(null);
   const [pending, setPending] = useState(false);
@@ -172,8 +173,8 @@ export function PlanDetail({
         )}
         {plan.status === "paused" && (
           <>
-            <button className="btn btn-sm btn-primary" disabled={pending} onClick={() => act(() => setPlanStatus(plan.id, "active"))}>
-              Resume plan
+            <button className="btn btn-sm btn-primary" disabled={pending} onClick={() => setResumeOpen(true)}>
+              Resume plan…
             </button>
             <button className="btn btn-sm btn-danger" disabled={pending} onClick={() => act(() => setPlanStatus(plan.id, "ended"))}>
               End plan
@@ -181,13 +182,16 @@ export function PlanDetail({
           </>
         )}
         {plan.status === "ended" && (
-          <button className="btn btn-sm" disabled={pending} onClick={() => act(() => setPlanStatus(plan.id, "active"))}>
-            Reactivate
+          <button className="btn btn-sm" disabled={pending} onClick={() => setResumeOpen(true)}>
+            Reactivate…
           </button>
         )}
       </div>
-      {plan.status !== "ended" && (
-        <p className="mt-1.5 text-[12px] text-faint">Pausing or ending cancels this plan&apos;s future generated visits.</p>
+      {plan.status === "active" && (
+        <p className="mt-1.5 text-[12px] text-faint">
+          Pausing takes every upcoming visit off the calendar but keeps the plan (and its rate) on file — for
+          snowbirds and season breaks. Ending does the same, permanently.
+        </p>
       )}
 
       {/* Visits */}
@@ -207,6 +211,22 @@ export function PlanDetail({
       />
 
       {openJob && <JobSheet job={openJob} onClose={() => setJob(null)} catalog={catalog} />}
+      {resumeOpen && (
+        <ResumeSheet
+          plan={plan}
+          catalog={catalog}
+          vehicles={vehicles}
+          vehicleSize={vehicleSize}
+          lastVisit={completed[0]?.date ?? null}
+          onClose={() => setResumeOpen(false)}
+          onDone={(msg, confl) => {
+            setResumeOpen(false);
+            setGenMsg(msg);
+            setConflicts(confl);
+            router.refresh();
+          }}
+        />
+      )}
       {prepayOpen && (
         <PrepaySheet
           plan={plan}
@@ -257,6 +277,107 @@ export function PlanDetail({
         </Sheet>
       )}
     </div>
+  );
+}
+
+/**
+ * Seasonal comeback: resume the plan straight at the maintenance rate, or make the
+ * first visit back a full re-entry detail. Recommends based on how long they've
+ * been gone relative to their cadence — a car that missed a season needs the works.
+ */
+function ResumeSheet({
+  plan,
+  catalog,
+  vehicles,
+  vehicleSize,
+  lastVisit,
+  onClose,
+  onDone,
+}: {
+  plan: Plan & { customers: Customer };
+  catalog: Catalog;
+  vehicles: Vehicle[];
+  vehicleSize: SizeId;
+  lastVisit: string | null;
+  onClose: () => void;
+  onDone: (msg: string, conflicts: OccurrenceConflict[]) => void;
+}) {
+  const [pending, setPending] = useState<"entry" | "maintenance" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const cars = vehicles.filter((v) => v.kind !== "boat");
+  const sizes: SizeId[] = cars.length ? cars.map((v) => v.size_id) : [vehicleSize];
+  const entryPrice = sizes.reduce((s, size) => s + initialDetailPrice(catalog, size), 0);
+
+  const step =
+    plan.cadence === "weekly" ? 7 : plan.cadence === "biweekly" ? 14 : plan.cadence === "monthly" ? 28 : plan.interval_days ?? 28;
+  const gapDays = lastVisit ? diffDays(lastVisit, todayYmd()) : null;
+  // Gone for 3+ cycles (or 6+ weeks, whichever is longer) = the car has lost its
+  // maintenance shape; recommend starting over with the full detail.
+  const recommendEntry = gapDays == null || gapDays > Math.max(45, step * 3);
+
+  async function go(mode: "entry" | "maintenance") {
+    setError(null);
+    setPending(mode);
+    const res = await resumePlan(plan.id, mode);
+    setPending(null);
+    if (!res.ok) return setError(res.error);
+    const scheduled = `Scheduled ${res.result.created} visit${res.result.created === 1 ? "" : "s"}.`;
+    const msg =
+      mode === "entry" && res.entry
+        ? res.entry.date
+          ? `Plan resumed — first visit back on ${fmtDateShort(res.entry.date)} is the re-entry detail at ${money(res.entry.price)}, maintenance after that. ${scheduled}`
+          : `Plan resumed, but every date needs manual placement — book the re-entry detail by hand at ${money(res.entry.price)}. ${scheduled}`
+        : `Plan resumed at the maintenance rate. ${scheduled}`;
+    onDone(msg, res.result.conflicts);
+  }
+
+  const options = [
+    {
+      mode: "entry" as const,
+      title: `Re-entry detail first — ${money(entryPrice)}`,
+      desc: `Their first visit back is a full detail${cars.length > 1 ? ` (${cars.length} cars)` : ""} at the plan-start price (${catalog.rules.planInitialDiscountPct}% off full), then every visit after runs at ${money(plan.per_visit_price)}.`,
+      recommended: recommendEntry,
+    },
+    {
+      mode: "maintenance" as const,
+      title: `Straight back to maintenance — ${money(plan.per_visit_price)}/visit`,
+      desc: "Pick up right where they left off; every visit at the plan rate.",
+      recommended: !recommendEntry,
+    },
+  ].sort((a, b) => Number(b.recommended) - Number(a.recommended));
+
+  return (
+    <Sheet open onClose={onClose} title={`Resume — ${plan.customers.name}`}>
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-ink-2">
+          {lastVisit ? (
+            <>
+              Last visit was <span className="font-medium num">{fmtDateShort(lastVisit)}</span> —{" "}
+              {Math.round((gapDays ?? 0) / 7)} weeks ago.
+            </>
+          ) : (
+            "No completed visits on record for this plan yet."
+          )}{" "}
+          Visits regenerate on their usual {plan.preferred_dow != null ? `${WEEKDAYS[plan.preferred_dow]} ` : ""}schedule.
+        </p>
+        {options.map((o) => (
+          <button
+            key={o.mode}
+            className={`card p-4 text-left hover:border-brand transition-colors duration-150 ${o.recommended ? "border-brand" : ""}`}
+            disabled={pending != null}
+            onClick={() => go(o.mode)}
+          >
+            <p className="text-[15px] font-semibold flex items-center gap-2">
+              {pending === o.mode ? "Resuming…" : o.title}
+              {o.recommended && <span className="chip bg-brand-wash text-brand-deep">recommended</span>}
+            </p>
+            <p className="text-[13px] text-ink-2 mt-1">{o.desc}</p>
+          </button>
+        ))}
+        <ErrorNote>{error}</ErrorNote>
+      </div>
+    </Sheet>
   );
 }
 

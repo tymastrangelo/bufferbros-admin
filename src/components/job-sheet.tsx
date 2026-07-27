@@ -18,11 +18,12 @@ import {
 } from "@/lib/actions/appointments";
 import { useOwner } from "@/lib/use-owner";
 import { Wheel } from "@/components/brand";
-import { addonQuote, computeMultiQuote, computeQuote, type Catalog } from "@/lib/catalog";
+import { addonQuote, computeQuote, computeVehiclesQuote, type Catalog } from "@/lib/catalog";
 import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { fmtDateShort, minToLabel, whenLabel } from "@/lib/time";
-import { PAYMENT_METHODS, SIZES, sizeLabel, vehicleLabel, type Appointment, type Customer, type PaymentMethod, type SizeId, type Vehicle } from "@/lib/types";
+import { setJobAttribution } from "@/lib/actions/appointments";
+import { PAYMENT_METHODS, SIZES, sizeLabel, vehicleLabel, type Appointment, type Customer, type Employee, type PaymentMethod, type SizeId, type Vehicle } from "@/lib/types";
 import { IconMail, IconMessage, IconPhone, IconPin } from "./icons";
 import { CustomerPicker, type PickedCustomer } from "./customer-picker";
 import { VehiclePicker } from "./vehicle-picker";
@@ -33,7 +34,9 @@ export type JobWithCustomer = Appointment & {
   customers: Pick<Customer, "id" | "name" | "phone" | "email" | "stripe_payments"> | null;
 };
 
-type Panel = "none" | "approve" | "complete" | "reschedule" | "edit" | "cancel" | "link" | "times";
+type Panel = "none" | "approve" | "complete" | "reschedule" | "edit" | "cancel" | "link" | "times" | "who";
+
+type EmployeeLite = Pick<Employee, "id" | "name" | "active">;
 
 const fmtDur = (mins: number) => {
   const h = Math.floor(mins / 60);
@@ -58,6 +61,22 @@ export function JobSheet({
   const [panel, setPanel] = useState<Panel>("none");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Who-did-it chips (owner only; RLS gives washers just their own row anyway).
+  const [employees, setEmployees] = useState<EmployeeLite[]>([]);
+  useEffect(() => {
+    if (!owner) return;
+    let stale = false;
+    createClient()
+      .from("employees")
+      .select("id,name,active")
+      .order("created_at")
+      .then(({ data }) => {
+        if (!stale) setEmployees((data as EmployeeLite[]) ?? []);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [owner]);
 
   // Reset panels when a different job opens (state adjustment during render).
   const [prevJobId, setPrevJobId] = useState(job?.id);
@@ -94,7 +113,10 @@ export function JobSheet({
         <div>
           <div className="flex items-center gap-2 flex-wrap">
             <StatusChip status={job.status} />
-            {job.self_done && <span className="chip bg-ok-wash text-ok">Tyler&apos;s job — no payout</span>}
+            {job.employee_id && employees.some((e) => e.id === job.employee_id) && (
+              <span className="chip bg-[#f1f4f9] text-ink-2">{employees.find((e) => e.id === job.employee_id)!.name}</span>
+            )}
+            {owner && job.self_done && <span className="chip bg-ok-wash text-ok">Your job — kept in full</span>}
             {job.plan_id && <span className="chip bg-brand-wash text-brand-deep">plan</span>}
             {job.source === "web" && <span className="chip bg-[#f1f4f9] text-ink-2">web booking</span>}
             {unlinked && <span className="chip bg-warn-wash text-warn">not linked</span>}
@@ -175,9 +197,12 @@ export function JobSheet({
         {job.status === "scheduled" && panel === "none" && (
           <div className="flex flex-col gap-2">
             {!job.started_at ? (
-              <button className="btn h-11" disabled={pending} onClick={() => run(() => startAppointment(job.id))}>
-                ▶ Start job — starts the clock
-              </button>
+              // Workers punch in so Tyler sees real detail times; the boss doesn't clock himself.
+              !owner && (
+                <button className="btn h-11" disabled={pending} onClick={() => run(() => startAppointment(job.id))}>
+                  ▶ Start job — starts the clock
+                </button>
+              )
             ) : (
               <p className="text-[13px] font-medium text-ok bg-ok-wash border border-[#bbe7c9] rounded-md px-3 py-2">
                 On the clock since <span className="num">{fmtClock(job.started_at)}</span>
@@ -186,13 +211,18 @@ export function JobSheet({
             <button className="btn btn-primary h-11" onClick={() => setPanel("complete")}>
               Complete job
             </button>
-            <div className="grid grid-cols-3 gap-2">
+            <div className={`grid gap-2 ${owner ? "grid-cols-2" : "grid-cols-3"}`}>
               <button className="btn" onClick={() => setPanel("reschedule")}>
                 Reschedule
               </button>
               <button className="btn" onClick={() => setPanel("edit")}>
                 Edit
               </button>
+              {owner && (
+                <button className="btn" onClick={() => setPanel("who")}>
+                  Assign
+                </button>
+              )}
               <button className="btn btn-danger" onClick={() => setPanel("cancel")}>
                 Cancel…
               </button>
@@ -244,18 +274,31 @@ export function JobSheet({
               </p>
             )}
             {owner && (
-              <div className="grid grid-cols-2 gap-2">
-                <button className="btn btn-sm" onClick={() => setPanel("times")}>
-                  Adjust times
-                </button>
-                <button
-                  className="btn btn-sm"
-                  disabled={pending}
-                  onClick={() => run(() => setAppointmentStatus(job.id, "scheduled"))}
-                >
-                  Mark incomplete
-                </button>
-              </div>
+              <>
+                <p className="text-[13px] bg-surface border border-line rounded-md px-3 py-2">
+                  <span className="label block mb-0.5">Done by</span>
+                  {job.employee_id
+                    ? employees.find((e) => e.id === job.employee_id)?.name ?? "a worker"
+                    : job.self_done
+                      ? "You — kept in full, no worker split"
+                      : "You — split still applies"}
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  <button className="btn btn-sm" onClick={() => setPanel("who")}>
+                    Who did it
+                  </button>
+                  <button className="btn btn-sm" onClick={() => setPanel("times")}>
+                    Adjust times
+                  </button>
+                  <button
+                    className="btn btn-sm"
+                    disabled={pending}
+                    onClick={() => run(() => setAppointmentStatus(job.id, "scheduled"))}
+                  >
+                    Mark incomplete
+                  </button>
+                </div>
+              </>
             )}
           </div>
         )}
@@ -275,10 +318,22 @@ export function JobSheet({
           <CompletePanel
             job={job}
             owner={owner}
+            employees={employees}
             pending={pending}
             onCancel={() => setPanel("none")}
-            onSubmit={(finalPrice, payment, note, stripeLink, selfDone) =>
-              run(() => completeAppointment(job.id, finalPrice, payment, note, stripeLink, selfDone)).then((ok) => ok && onClose())
+            onSubmit={(finalPrice, payment, note, stripeLink, keepAll, employeeId) =>
+              run(() => completeAppointment(job.id, finalPrice, payment, note, stripeLink, keepAll, employeeId)).then((ok) => ok && onClose())
+            }
+          />
+        )}
+        {panel === "who" && (
+          <WhoPanel
+            job={job}
+            employees={employees}
+            pending={pending}
+            onCancel={() => setPanel("none")}
+            onSubmit={(employeeId, keepAll) =>
+              run(() => setJobAttribution(job.id, employeeId, keepAll)).then((ok) => ok && setPanel("none"))
             }
           />
         )}
@@ -339,15 +394,72 @@ export function JobSheet({
 
 type PayMode = "now" | "stripe" | "balance";
 
+/**
+ * Owner-only "who did this detail" chips. Picking "Me" reveals the
+ * keep-all-the-money box — checked, the worker/business split is skipped and the
+ * whole payment stays with the business.
+ */
+function WhoPicker({
+  employees,
+  value,
+  keepAll,
+  onChange,
+  label = "Who did this detail?",
+}: {
+  employees: EmployeeLite[];
+  value: string | null;
+  keepAll: boolean;
+  onChange: (employeeId: string | null, keepAll: boolean) => void;
+  label?: string;
+}) {
+  // Active workers, plus the current assignee even if since deactivated.
+  const options = employees.filter((e) => e.active || e.id === value);
+  return (
+    <Field label={label}>
+      <div className="grid grid-cols-3 gap-1.5">
+        {options.map((e) => (
+          <button
+            key={e.id}
+            type="button"
+            onClick={() => onChange(e.id, false)}
+            className={`min-h-9 rounded-md border px-1 py-1.5 text-[13px] font-medium transition-colors duration-150 ${
+              value === e.id ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
+            }`}
+          >
+            {e.name}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => onChange(null, true)}
+          className={`min-h-9 rounded-md border px-1 py-1.5 text-[13px] font-medium transition-colors duration-150 ${
+            value === null ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
+          }`}
+        >
+          Me
+        </button>
+      </div>
+      {value === null && (
+        <label className="mt-2 flex items-center gap-2.5 text-sm font-medium">
+          <input type="checkbox" checked={keepAll} onChange={(e) => onChange(null, e.target.checked)} />
+          Keep all the money — skip the worker split
+        </label>
+      )}
+    </Field>
+  );
+}
+
 function CompletePanel({
   job,
   owner,
+  employees,
   pending,
   onCancel,
   onSubmit,
 }: {
   job: JobWithCustomer;
   owner: boolean;
+  employees: EmployeeLite[];
   pending: boolean;
   onCancel: () => void;
   onSubmit: (
@@ -355,12 +467,16 @@ function CompletePanel({
     payment: { amount: number; method: PaymentMethod; memo?: string } | null,
     note: string,
     stripeLink: boolean,
-    selfDone: boolean
+    keepAll: boolean,
+    employeeId: string | null
   ) => void;
 }) {
   const email = job.customers?.email ?? null;
   const canStripe = !!job.customer_id && !!email;
-  const [selfDone, setSelfDone] = useState(job.self_done ?? false);
+  // undefined = untouched: default to the job's assignee, else the first active worker.
+  const [who, setWho] = useState<{ employeeId: string | null; keepAll: boolean } | undefined>(undefined);
+  const employeeId = who ? who.employeeId : job.employee_id ?? employees.find((e) => e.active)?.id ?? null;
+  const keepAll = who ? who.keepAll : job.self_done || (!job.employee_id && !employees.some((e) => e.active));
   const [finalPrice, setFinalPrice] = useState(String(job.price));
   const [payMode, setPayMode] = useState<PayMode>(() => {
     if (!job.customer_id) return "balance";
@@ -368,7 +484,7 @@ function CompletePanel({
     return job.plan_id ? "balance" : "now";
   });
   const [amount, setAmount] = useState(String(job.price));
-  const [method, setMethod] = useState<PaymentMethod>("zelle");
+  const [method, setMethod] = useState<PaymentMethod>("cash");
   const [memo, setMemo] = useState("");
   const [note, setNote] = useState("");
 
@@ -456,12 +572,7 @@ function CompletePanel({
           Not linked to a customer — completing won&apos;t touch any ledger. Link first to track the money.
         </p>
       )}
-      {owner && (
-        <label className="flex items-center gap-2.5 text-sm font-medium">
-          <input type="checkbox" checked={selfDone} onChange={(e) => setSelfDone(e.target.checked)} />
-          I did this detail myself — no payout to Gabe
-        </label>
-      )}
+      {owner && <WhoPicker employees={employees} value={employeeId} keepAll={keepAll} onChange={(e, k) => setWho({ employeeId: e, keepAll: k })} />}
       <Field label="Anything to note? (optional)">
         <textarea
           className="textarea"
@@ -484,7 +595,8 @@ function CompletePanel({
               payMode === "now" && job.customer_id ? { amount: Number(amount), method, memo } : null,
               note.trim(),
               payMode === "stripe",
-              selfDone
+              keepAll,
+              employeeId
             )
           }
         >
@@ -562,6 +674,54 @@ const toLocalInput = (iso: string | null) => {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
+
+/**
+ * Owner-only: fix who did any detail — past ones included. Saving re-splits every
+ * payment on the job (the DB trigger rebuilds the payout rows).
+ */
+function WhoPanel({
+  job,
+  employees,
+  pending,
+  onCancel,
+  onSubmit,
+}: {
+  job: JobWithCustomer;
+  employees: EmployeeLite[];
+  pending: boolean;
+  onCancel: () => void;
+  onSubmit: (employeeId: string | null, keepAll: boolean) => void;
+}) {
+  const [employeeId, setEmployeeId] = useState<string | null>(job.employee_id);
+  const [keepAll, setKeepAll] = useState(job.self_done);
+  return (
+    <div className="card p-4 flex flex-col gap-3 bg-surface">
+      <WhoPicker
+        employees={employees}
+        value={employeeId}
+        keepAll={keepAll}
+        label={job.status === "completed" ? "Who did this detail?" : "Who's doing this detail?"}
+        onChange={(e, k) => {
+          setEmployeeId(e);
+          setKeepAll(k);
+        }}
+      />
+      <p className="text-[12px] text-faint -mt-1">
+        {job.status === "completed"
+          ? "Changing this re-splits any payments already recorded on this job."
+          : "Their calendar picks up the job; picking Me frees the worker's time."}
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <button className="btn" onClick={onCancel}>
+          Back
+        </button>
+        <button className="btn btn-primary" disabled={pending} onClick={() => onSubmit(employeeId, keepAll)}>
+          {pending ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /** Owner-only: correct the recorded start/finish times on a completed job. */
 function TimesPanel({
@@ -641,7 +801,14 @@ function ApprovePanel({
         </Field>
       </div>
       <Field label="Time">
-        <SlotPicker date={date} durationMin={duration} value={startMin} onChange={(m) => setStartMin(m)} excludeAppointmentId={job.id} />
+        <SlotPicker
+          date={date}
+          durationMin={duration}
+          value={startMin}
+          onChange={(m) => setStartMin(m)}
+          excludeAppointmentId={job.id}
+          employeeIds={job.employee_id ? [job.employee_id] : []}
+        />
       </Field>
       <Field label="Price">
         <div className="relative">
@@ -701,7 +868,14 @@ function ReschedulePanel({
         </Field>
       </div>
       <Field label="New time">
-        <SlotPicker date={date} durationMin={duration} value={startMin} onChange={(m) => setStartMin(m)} excludeAppointmentId={job.id} />
+        <SlotPicker
+          date={date}
+          durationMin={duration}
+          value={startMin}
+          onChange={(m) => setStartMin(m)}
+          excludeAppointmentId={job.id}
+          employeeIds={job.employee_id ? [job.employee_id] : []}
+        />
       </Field>
       {hasEmail && (
         <label className="flex items-center gap-2.5 text-sm">
@@ -770,15 +944,17 @@ function EditPanel({
   }, [job.id, job.customer_id]);
 
   const selVehicles = vehicles.filter((v) => vehicleIds.includes(v.id));
+  const selCars = selVehicles.filter((v) => v.kind !== "boat");
   const requote = (ids: string[], addons: string[]) => {
     const sel = vehicles.filter((v) => ids.includes(v.id));
     return sel.length
-      ? computeMultiQuote(catalog, sel.map((v) => v.size_id), addons, service)
+      ? computeVehiclesQuote(catalog, sel, addons, service)
       : computeQuote(catalog, sizeId, addons, service);
   };
+  // Add-ons are car things — boats don't take them.
   const addonPrice = (a: Catalog["addons"][number]) =>
     selVehicles.length
-      ? selVehicles.reduce((s, v) => s + addonQuote(a, v.size_id).price, 0)
+      ? selCars.reduce((s, v) => s + addonQuote(a, v.size_id).price, 0)
       : addonQuote(a, sizeId).price;
 
   return (

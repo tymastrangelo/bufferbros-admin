@@ -18,7 +18,7 @@ export interface PayoutEntry {
   settled_on: string | null;
   memo: string | null;
   customers: { id: string; name: string } | null;
-  appointments: { self_done: boolean } | null;
+  appointments: { self_done: boolean; employee_id: string | null } | null;
 }
 
 const FILTERS = [
@@ -28,7 +28,7 @@ const FILTERS = [
 ] as const;
 type FilterId = (typeof FILTERS)[number]["id"];
 
-export function PayoutsClient({ rows, washerPct }: { rows: PayoutEntry[]; washerPct: number }) {
+export function PayoutsClient({ rows, washerPct, name }: { rows: PayoutEntry[]; washerPct: number; name: string }) {
   const [filter, setFilter] = useState<FilterId>("unsettled");
   const [busy, setBusy] = useState<string | null>(null);
   const router = useRouter();
@@ -51,23 +51,23 @@ export function PayoutsClient({ rows, washerPct }: { rows: PayoutEntry[]; washer
     router.refresh();
   }
 
-  // net > 0 => Gabe owes Tyler; net < 0 => Tyler owes Gabe.
+  // net > 0 => the worker owes Tyler; net < 0 => Tyler owes the worker.
   const banner =
     count === 0
       ? { text: "All squared up", cls: "text-ok" }
       : net > 0
-        ? { text: `Gabe owes you ${money(net)}`, cls: "text-ok" }
+        ? { text: `${name} owes you ${money(net)}`, cls: "text-ok" }
         : net < 0
-          ? { text: `You owe Gabe ${money(-net)}`, cls: "text-bad" }
+          ? { text: `You owe ${name} ${money(-net)}`, cls: "text-bad" }
           : { text: "Even — nothing to move", cls: "" };
 
   return (
     <div className="mt-4 flex flex-col gap-4">
       <div className="card p-3.5">
-        <p className="label">Net with Gabe · unsettled</p>
+        <p className="label">Net with {name} · unsettled</p>
         <p className={`mt-1 text-2xl font-bold num ${banner.cls}`}>{banner.text}</p>
         <p className="mt-1 text-[11px] text-faint">
-          {count} unsettled · Gabe {washerPct}% / you {100 - washerPct}% · edit split in Settings
+          {count} unsettled · {name} {washerPct}% / you {100 - washerPct}% · edit their cut on the Team page
         </p>
       </div>
 
@@ -89,7 +89,7 @@ export function PayoutsClient({ rows, washerPct }: { rows: PayoutEntry[]; washer
             title={filter === "unsettled" ? "Nothing to settle." : "Nothing here."}
             hint={
               filter === "unsettled"
-                ? "As payments come in, each one shows up here until you and Gabe square up the split."
+                ? `As payments come in, each one shows up here until you and ${name} square up the split.`
                 : undefined
             }
           />
@@ -111,11 +111,11 @@ export function PayoutsClient({ rows, washerPct }: { rows: PayoutEntry[]; washer
                 const t = transfer({ amount: r.amount, fee: r.processor_fee, collectedBy: r.collected_by, settledOn: r.settled_on, selfDone }, washerPct);
                 const transferText = selfDone
                   ? t.amount === 0
-                    ? "No Gabe cut — your job"
-                    : `Gabe owes you ${money(t.amount)} — your job`
+                    ? "No worker cut — your job"
+                    : `${name} owes you ${money(t.amount)} — your job`
                   : t.direction === "owner_to_washer"
-                    ? `Pay Gabe ${money(t.amount)}`
-                    : `Gabe owes you ${money(t.amount)}`;
+                    ? `Pay ${name} ${money(t.amount)}`
+                    : `${name} owes you ${money(t.amount)}`;
                 return (
                   <tr key={r.id}>
                     <td data-label="Date" className="num whitespace-nowrap">
@@ -134,7 +134,7 @@ export function PayoutsClient({ rows, washerPct }: { rows: PayoutEntry[]; washer
                       {money(r.amount)}
                     </td>
                     <td data-label="Collected" className={r.collected_by === "washer" ? "text-ink" : "text-ink-2"}>
-                      {r.collected_by === "washer" ? "Gabe" : "Me"}
+                      {r.collected_by === "washer" ? name : "Me"}
                     </td>
                     <td data-label="Transfer" className={selfDone && t.amount === 0 ? "text-ink-2" : t.direction === "owner_to_washer" ? "text-bad" : "text-ok"}>
                       {transferText}

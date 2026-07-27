@@ -18,7 +18,7 @@ import {
 } from "@/lib/actions/settings";
 import { createClient } from "@/lib/supabase/client";
 import { fmtDateShort, minToLabel, todayYmd, WEEKDAYS } from "@/lib/time";
-import type { Block, PlanCadence, PlanPricing, Service, ServicePricing, SizeId, WeeklyHours } from "@/lib/types";
+import type { Block, Employee, PlanCadence, PlanPricing, Service, ServicePricing, SizeId, WeeklyHours } from "@/lib/types";
 
 // ponytail: tables fill 100% width; tighter cell padding on mobile so the pricing
 // grids fit a phone without side-scroll. overflow-x-auto stays as a last-resort guard.
@@ -79,6 +79,7 @@ export function SettingsClient({
   hours,
   blocks,
   settings,
+  employees,
   emailFrom,
   userEmail,
 }: {
@@ -88,6 +89,7 @@ export function SettingsClient({
   hours: WeeklyHours[];
   blocks: Block[];
   settings: Record<string, string>;
+  employees: Employee[];
   emailFrom: string;
   userEmail: string;
 }) {
@@ -96,9 +98,11 @@ export function SettingsClient({
       <h1 className="text-xl md:text-2xl font-bold">Settings</h1>
       <PricingSection pricing={pricing} />
       <CeramicSection pricing={pricing} settings={settings} />
+      <BoatSection pricing={pricing} />
       <AddonsSection services={services} pricing={pricing} />
       <PlanPricingSection planPricing={planPricing} settings={settings} />
       <HoursSection hours={hours} settings={settings} />
+      <OnlineBookingSection settings={settings} employees={employees} />
       <SplitSection settings={settings} />
       <BlocksSection blocks={blocks} />
       <EmailSection emailFrom={emailFrom} />
@@ -242,6 +246,44 @@ function CeramicSection({ pricing, settings }: { pricing: ServicePricing[]; sett
               if (!a.ok) return a;
               return saveSettings({ ceramic_lead_days: leadDays, ceramic_deposit_pct: depositPct });
             })
+          }
+        />
+      </div>
+    </Section>
+  );
+}
+
+function BoatSection({ pricing }: { pricing: ServicePricing[] }) {
+  const { state, run } = useSave();
+  const row = pricing.find((p) => p.service_id === "boat-detail" && p.size_id === "per-ft");
+  const [rate, setRate] = useState(String(row?.price ?? 12));
+  const [minutes, setMinutes] = useState(String(row?.minutes ?? 8));
+  const ex = (ft: number) => `${ft} ft ≈ $${Math.round(ft * (Number(rate) || 0))}`;
+  return (
+    <Section
+      title="Boat Detail"
+      note="Priced by the foot — a boat's length × these rates. Dashboard bookings only; every quote is still adjustable per job."
+    >
+      <div className="grid grid-cols-2 gap-3 max-w-sm">
+        <label className="block">
+          <span className="label block mb-1">$ per foot</span>
+          <input type="number" min={0} className="input num" value={rate} onChange={(e) => setRate(e.target.value)} />
+        </label>
+        <label className="block">
+          <span className="label block mb-1">Minutes per foot</span>
+          <input type="number" min={0} className="input num" value={minutes} onChange={(e) => setMinutes(e.target.value)} />
+        </label>
+      </div>
+      <p className="text-[13px] text-ink-2 mt-2 num">
+        {ex(20)} · {ex(30)} · {ex(40)}
+      </p>
+      <div className="mt-3">
+        <SaveButton
+          state={state}
+          onClick={() =>
+            run(() =>
+              saveServicePricing([{ service_id: "boat-detail", size_id: "per-ft", price: Number(rate), minutes: Number(minutes) }])
+            )
           }
         />
       </div>
@@ -600,34 +642,67 @@ function HoursSection({ hours, settings }: { hours: WeeklyHours[]; settings: Rec
   );
 }
 
+/**
+ * Which calendars the public booking site draws its open times from. Nothing
+ * worker-related ever renders on the website — this only changes which slots the
+ * site offers. Unchecked = the whole-business calendar, exactly as before.
+ */
+function OnlineBookingSection({ settings, employees }: { settings: Record<string, string>; employees: Employee[] }) {
+  const { state, run } = useSave();
+  const [ids, setIds] = useState<string[]>(() =>
+    (settings.web_slot_employee_ids ?? "").split(",").filter((id) => employees.some((e) => e.id === id))
+  );
+  const toggle = (id: string) => setIds((cur) => (cur.includes(id) ? cur.filter((i) => i !== id) : [...cur, id]));
+  return (
+    <Section
+      title="Online booking availability"
+      note="Check the workers who can take website jobs and the site only offers times one of them is free (their blocks + assigned jobs). No names show online. Leave everything unchecked to book against the whole business calendar — including your own time."
+    >
+      <div className="flex flex-col gap-1.5">
+        {employees.length === 0 && <p className="text-sm text-faint">No workers yet — add one on the Team page first.</p>}
+        {employees.map((e) => (
+          <label key={e.id} className="flex items-center gap-2.5 text-sm font-medium">
+            <input type="checkbox" checked={ids.includes(e.id)} onChange={() => toggle(e.id)} />
+            {e.name}
+          </label>
+        ))}
+      </div>
+      {ids.length > 0 && (
+        <p className="text-[13px] text-ink-2 mt-2">
+          Website slots now follow {ids.length === 1 ? `${employees.find((e) => e.id === ids[0])?.name}'s` : "these workers'"}{" "}
+          availability — handy while you&apos;re away at school.
+        </p>
+      )}
+      <div className="mt-3">
+        <SaveButton state={state} onClick={() => run(() => saveSettings({ web_slot_employee_ids: ids.join(",") }))} />
+      </div>
+    </Section>
+  );
+}
+
 function SplitSection({ settings }: { settings: Record<string, string> }) {
   const { state, run } = useSave();
-  const [washer, setWasher] = useState(settings.split_washer_pct ?? "60");
   const [ceo, setCeo] = useState(settings.split_ceo_pct ?? "10");
-  const total = Number(washer || 0) + Number(ceo || 0);
   return (
-    <Section title="Payout split" note="Splits apply to money as it's collected — changing them only affects new payments.">
-      <div className="flex gap-3">
-        <label className="block max-w-[160px]">
-          <span className="label block mb-1">Washer (Gabe) %</span>
-          <input type="number" min={0} max={100} className="input num" value={washer} onChange={(e) => setWasher(e.target.value)} />
-        </label>
-        <label className="block max-w-[160px]">
-          <span className="label block mb-1">CEO (Tyler) %</span>
-          <input type="number" min={0} max={100} className="input num" value={ceo} onChange={(e) => setCeo(e.target.value)} />
-        </label>
-      </div>
-      <p className={`text-[13px] mt-2 ${total > 100 ? "text-bad" : "text-ink-2"}`}>
-        {total > 100 ? "Splits can't exceed 100%." : `Company capital keeps the remaining ${100 - total}%.`}
+    <Section
+      title="Payout split"
+      note="Each worker's cut lives on the Team page. Splits apply to money as it's collected — changing them only affects new payments."
+    >
+      <label className="block max-w-[160px]">
+        <span className="label block mb-1">CEO (you) %</span>
+        <input type="number" min={0} max={100} className="input num" value={ceo} onChange={(e) => setCeo(e.target.value)} />
+      </label>
+      <p className="text-[13px] mt-2 text-ink-2">
+        Your personal draw off every payment; the business keeps whatever&apos;s left after the worker split and this.
       </p>
       <div className="mt-3">
         <SaveButton
           state={state}
           onClick={() =>
             run(async () =>
-              total > 100
-                ? { ok: false as const, error: "Splits can't exceed 100%." }
-                : saveSettings({ split_washer_pct: washer, split_ceo_pct: ceo })
+              Number(ceo || 0) > 100
+                ? { ok: false as const, error: "Can't exceed 100%." }
+                : saveSettings({ split_ceo_pct: ceo })
             )
           }
         />
