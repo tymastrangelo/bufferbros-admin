@@ -55,7 +55,11 @@ export function Sheet({
 
 export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return (
-    <label className="block">
+    // ponytail: stays a <label> so plain inputs keep their accessible name. Safari forwards
+    // clicks from nested buttons to the label's first control — which re-fires a picker's own
+    // buttons (tap a customer → the Clear button it just rendered eats the pick). Cancel the
+    // forward when the tap came from a button; bare inputs/checkboxes are untouched.
+    <label className="block" onClick={(e) => (e.target as HTMLElement).closest("button") && e.preventDefault()}>
       <span className="label block mb-1.5">{label}</span>
       {children}
       {hint && <span className="block mt-1 text-xs text-faint">{hint}</span>}
