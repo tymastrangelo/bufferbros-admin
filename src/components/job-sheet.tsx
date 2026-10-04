@@ -2,6 +2,7 @@
 
 // Everything you do to an existing job: complete (finalize price + take payment),
 // reschedule, edit details, cancel, no-show, and linking web bookings to customers.
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
@@ -171,9 +172,9 @@ export function JobSheet({
           </button>
         )}
         {job.customers && (
-          <a href={`/customers/${job.customers.id}`} className="text-[13px] text-brand-deep underline underline-offset-2 self-start">
+          <Link href={`/customers/${job.customers.id}`} className="text-[13px] text-brand-deep underline underline-offset-2 self-start">
             Open customer profile →
-          </a>
+          </Link>
         )}
 
         <ErrorNote>{error}</ErrorNote>

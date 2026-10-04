@@ -22,6 +22,7 @@ import {
   IconUpload,
   IconUsers,
 } from "./icons";
+import { LiveRefresh } from "./live-refresh";
 import { Sheet } from "./ui";
 
 const NAV = [
@@ -124,6 +125,7 @@ export function Shell({
 
   return (
     <div className="min-h-dvh md:pl-[208px]">
+      <LiveRefresh />
       {/* Desktop sidebar — light, with the logo on its ink plate (the artwork is white) */}
       <aside className="hidden md:flex fixed inset-y-0 left-0 w-[208px] flex-col border-r border-line bg-card z-30">
         <Link href="/" className="block px-3 pt-3 pb-3">

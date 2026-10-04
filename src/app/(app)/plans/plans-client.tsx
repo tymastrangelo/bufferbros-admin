@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { IconPlus } from "@/components/icons";
@@ -85,7 +86,12 @@ export function PlansClient({
               <tbody>
                 {[...active, ...rest].map((p) => (
                   <tr key={p.id} onClick={() => router.push(`/plans/${p.id}`)}>
-                    <td data-label="Customer" className="font-medium whitespace-nowrap">{p.customers?.name ?? "—"}</td>
+                    <td data-label="Customer" className="font-medium whitespace-nowrap">
+                      {/* real link so cmd/long-press "open in new tab" works; the row click stays for the big tap target */}
+                      <Link href={`/plans/${p.id}`} className="hover:underline underline-offset-2" onClick={(e) => e.stopPropagation()}>
+                        {p.customers?.name ?? "—"}
+                      </Link>
+                    </td>
                     <td data-label="Cadence" className="capitalize whitespace-nowrap">{cadenceLabel(p)}</td>
                     <td data-label="Per visit" className="num text-right">{money(p.per_visit_price)}</td>
                     <td data-label="Next visit" className="num whitespace-nowrap">

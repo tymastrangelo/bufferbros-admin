@@ -19,6 +19,7 @@ setup + deploy + data migration in [`SETUP.md`](SETUP.md).
 | Money/phone formatting | `src/lib/format.ts` |
 | Resend templates (confirmed / updated / cancelled) | `src/lib/email.ts` |
 | Server actions (all writes) | `src/lib/actions/*` |
+| Live updates (Realtime → `router.refresh()`; tables published in `0020_realtime.sql`) | `src/components/live-refresh.tsx` |
 | Recurring visit generation (action + cron share it) | `src/lib/occurrences.ts` |
 | Weekly cron route | `src/app/api/cron/generate-occurrences/route.ts` |
 | CSV export (payments/charges/expenses) | `src/app/api/export/route.ts` |
