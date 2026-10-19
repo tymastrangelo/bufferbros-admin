@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { LogoFull } from "@/components/brand";
 import { createClient } from "@/lib/supabase/client";
 import { fmtPhone } from "@/lib/format";
@@ -11,19 +11,28 @@ import {
   IconBlock,
   IconBoat,
   IconCalendar,
+  IconCaretUpDown,
+  IconCheck,
+  IconChevronRight,
+  IconEye,
   IconDollar,
+  IconLogout,
   IconMore,
   IconPlus,
   IconRepeat,
   IconSearch,
   IconSettings,
   IconSparkle,
+  IconTeam,
   IconToday,
   IconUpload,
   IconUsers,
 } from "./icons";
 import { LiveRefresh } from "./live-refresh";
-import { Sheet } from "./ui";
+import { Avatar, Sheet } from "./ui";
+import { setViewAs } from "@/lib/actions/view";
+import { AnimatePresence, MotionConfig, motion } from "motion/react";
+import { springSnappy } from "@/lib/motion";
 
 const NAV = [
   { href: "/", label: "Today", icon: IconToday },
@@ -32,7 +41,7 @@ const NAV = [
   { href: "/plans", label: "Plans", icon: IconRepeat },
   { href: "/quote", label: "Quote", icon: IconSparkle },
   { href: "/money", label: "Money", icon: IconDollar },
-  { href: "/team", label: "Team", icon: IconUsers },
+  { href: "/team", label: "Team", icon: IconTeam },
   { href: "/settings", label: "Settings", icon: IconSettings },
 ];
 
@@ -62,14 +71,32 @@ function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
 }
 
+export interface Me {
+  name: string;
+  roleLabel: string;
+}
+interface CrewRef {
+  id: string;
+  name: string;
+}
+
 export function Shell({
   children,
-  userEmail,
   role,
+  me,
+  crew,
+  previewing,
+  larp,
 }: {
   children: React.ReactNode;
-  userEmail: string;
   role: "owner" | "washer";
+  me: Me;
+  /** Owner only: workers they can preview the app as. */
+  crew: CrewRef[];
+  /** Owner currently previewing as this worker (read-only). */
+  previewing: CrewRef | null;
+  /** Demo dataset on — only signalled by a tiny dot on the logo plate. */
+  larp: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -124,158 +151,331 @@ export function Shell({
   }
 
   return (
-    <div className="min-h-dvh md:pl-[208px]">
-      <LiveRefresh />
-      {/* Desktop sidebar — light, with the logo on its ink plate (the artwork is white) */}
-      <aside className="hidden md:flex fixed inset-y-0 left-0 w-[208px] flex-col border-r border-line bg-card z-30">
-        <Link href="/" className="block px-3 pt-3 pb-3">
-          <span className="block bg-pit rounded-lg px-3 py-3.5">
-            <LogoFull className="w-full" />
-          </span>
-        </Link>
-        <div className="px-3 pb-2 flex gap-1.5">
-          <button className="btn btn-primary btn-sm grow" onClick={() => setNewOpen(true)}>
-            <IconPlus width={14} height={14} /> New
-          </button>
-          <button className="btn btn-sm" onClick={() => setSearchOpen(true)} aria-label="Search (⌘K)" title="Search (⌘K)">
-            <IconSearch width={14} height={14} />
-          </button>
-        </div>
-        <nav className="px-3 py-2 flex flex-col gap-0.5">
-          {nav.map(({ href, label, icon: Icon }) => {
-            const active = isActive(pathname, href);
-            return (
-              <Link
-                key={href}
-                href={href}
-                className={`relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors duration-150 ${
-                  active ? "bg-brand-wash text-brand-deep" : "text-ink-2 hover:bg-[#f1f4f9] hover:text-ink"
-                }`}
-              >
-                {active && <span className="absolute left-0 top-1/2 -translate-y-1/2 h-4 w-[3px] rounded-full bg-brand" />}
-                <Icon width={16} height={16} />
-                {label}
-              </Link>
-            );
-          })}
-        </nav>
-        <div className="mt-auto px-4 py-4 border-t border-line">
-          <p className="label mb-1">Signed in</p>
-          <p className="text-xs text-ink-2 truncate" title={userEmail}>
-            {userEmail}
-          </p>
-          <SignOutButton className="mt-1.5 text-xs text-ink-2 hover:text-ink underline underline-offset-2" />
-        </div>
-      </aside>
-
-      {/* Page content */}
-      <main className="pb-24 md:pb-8">{children}</main>
-
-      {/* Mobile bottom tab bar */}
-      <nav className="tabbar md:hidden fixed bottom-0 inset-x-0 z-30 bg-card border-t border-line grid grid-cols-5">
-        {tabs.map(({ href, label, icon: Icon }) => {
-          const active = isActive(pathname, href) && !moreOpen;
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={`flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-[10px] font-semibold transition-colors duration-150 ${
-                active ? "text-brand" : "text-faint"
-              }`}
+    <MotionConfig reducedMotion="user">
+      <div className="min-h-dvh md:pl-[220px]">
+        <LiveRefresh />
+        {/* Desktop sidebar — the logo sits on its ink plate (the artwork is white) */}
+        <aside className="hidden md:flex fixed inset-y-0 left-0 w-[220px] flex-col border-r border-line bg-card z-30">
+          <Link href="/" className="block px-3 pt-3 pb-3">
+            <span className="relative block bg-pit rounded-lg px-3 py-3.5 ring-1 ring-inset ring-pit-line">
+              <LogoFull className="w-full" />
+              {larp && <span className="absolute top-1.5 right-1.5 h-1 w-1 rounded-full bg-brand-glow/80" aria-hidden />}
+            </span>
+          </Link>
+          <div className="px-3 pb-2 flex gap-1.5">
+            <button className="btn btn-primary btn-sm grow" onClick={() => setNewOpen(true)}>
+              <IconPlus width={14} height={14} /> New
+            </button>
+            <button
+              className="btn btn-sm gap-2 text-faint"
+              onClick={() => setSearchOpen(true)}
+              aria-label="Search (⌘K)"
+              title="Search (⌘K)"
             >
-              <Icon width={20} height={20} />
-              {label}
-            </Link>
-          );
-        })}
-        <button
-          onClick={() => setMoreOpen(true)}
-          className={`flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-[10px] font-semibold transition-colors duration-150 ${
-            moreOpen || isActive(pathname, "/plans") || isActive(pathname, "/settings") ? "text-brand" : "text-faint"
-          }`}
+              <IconSearch width={14} height={14} />
+              <kbd className="kbd">⌘K</kbd>
+            </button>
+          </div>
+          <nav className="px-3 py-2 flex flex-col gap-0.5">
+            {nav.map(({ href, label, icon: Icon }) => {
+              const active = isActive(pathname, href);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  aria-current={active ? "page" : undefined}
+                  className={`relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors duration-150 ${
+                    active ? "text-brand-deep" : "text-ink-2 hover:text-ink hover:bg-muted"
+                  }`}
+                >
+                  {active && (
+                    <motion.span
+                      layoutId="nav-active"
+                      className="absolute inset-0 rounded-md bg-brand-wash"
+                      transition={springSnappy}
+                    />
+                  )}
+                  <Icon width={17} height={17} weight={active ? "fill" : "regular"} className="relative" />
+                  <span className="relative">{label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+          <div className="mt-auto px-3 py-3 border-t border-line">
+            <ProfileMenu me={me} crew={crew} previewing={previewing} />
+          </div>
+        </aside>
+
+        {/* Page content */}
+        <main className="pb-[calc(env(safe-area-inset-bottom)+150px)] md:pb-8">
+          {previewing && <PreviewBar name={previewing.name} />}
+          {children}
+        </main>
+
+        {/* Mobile tab bar — a floating glass capsule (iOS 26 style) with search as its own
+            trailing circle; the primary "New" action floats above it, never inside it
+            (HIG: tabs navigate, they don't act). */}
+        <div
+          className="md:hidden fixed inset-x-3 z-30 flex items-end gap-2 pointer-events-none"
+          style={{ bottom: "calc(env(safe-area-inset-bottom) + 10px)" }}
         >
-          <IconMore width={20} height={20} />
-          More
-        </button>
-      </nav>
-
-      {/* Mobile floating Search + New buttons (thumb zone, above tab bar) */}
-      <button
-        onClick={openSearchWithKeyboard}
-        aria-label="Search"
-        className="md:hidden fixed z-30 rounded-full bg-card border border-line text-ink-2 shadow-lg flex items-center justify-center active:scale-95 transition-transform duration-150"
-        style={{ bottom: "calc(env(safe-area-inset-bottom) + 136px)", right: 20, width: 44, height: 44 }}
-      >
-        <IconSearch width={18} height={18} />
-      </button>
-      <button
-        onClick={() => setNewOpen(true)}
-        aria-label="New"
-        className="md:hidden fixed right-4 z-30 w-13 h-13 rounded-full bg-brand text-white shadow-lg shadow-brand/30 flex items-center justify-center active:scale-95 transition-transform duration-150"
-        style={{ bottom: "calc(env(safe-area-inset-bottom) + 72px)", width: 52, height: 52 }}
-      >
-        <IconPlus width={22} height={22} />
-      </button>
-
-      {/* More sheet (mobile) */}
-      <Sheet open={moreOpen} onClose={() => setMoreOpen(false)} title="More">
-        <div className="flex flex-col gap-1 -mx-1">
-          {owner &&
-            [
-              { href: "/plans", label: "Plans", icon: IconRepeat },
-              { href: "/quote", label: "Quote builder", icon: IconSparkle },
-              { href: "/team", label: "Team", icon: IconUsers },
-              { href: "/settings", label: "Settings", icon: IconSettings },
-              { href: "/customers/import", label: "Import contacts", icon: IconUpload },
-            ].map(({ href, label, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                className="flex items-center gap-3 rounded-md px-3 py-3 text-[15px] font-medium hover:bg-[#f1f4f9]"
-              >
-                <Icon width={18} height={18} className="text-ink-2" />
-                {label}
-              </Link>
+          <nav className="pointer-events-auto glass grow flex rounded-full border border-line shadow-[var(--shadow-pop)] p-1">
+            {tabs.map(({ href, label, icon: Icon }) => (
+              <TabItem key={href} href={href} label={label} active={isActive(pathname, href) && !moreOpen}>
+                {(on) => <Icon width={22} height={22} weight={on ? "fill" : "regular"} />}
+              </TabItem>
             ))}
-          <div className="border-t border-line mt-2 pt-2 px-3 pb-1">
-            <p className="text-xs text-faint mb-2">{userEmail}</p>
-            <SignOutButton className="btn btn-sm w-full" />
+            <TabItem
+              label="More"
+              active={moreOpen || ["/plans", "/settings", "/team", "/customers/import"].some((h) => isActive(pathname, h))}
+              onClick={() => setMoreOpen(true)}
+            >
+              {(on) => (
+                <span className="relative block">
+                  <IconMore width={22} height={22} weight={on ? "fill" : "regular"} />
+                  {larp && <span className="absolute -top-0.5 -right-1 h-1 w-1 rounded-full bg-brand-glow" aria-hidden />}
+                </span>
+              )}
+            </TabItem>
+          </nav>
+          <div className="pointer-events-auto flex flex-col items-end gap-2.5">
+            <button
+              onClick={() => setNewOpen(true)}
+              aria-label="New"
+              className="flex h-[52px] w-[52px] items-center justify-center rounded-full bg-brand text-white shadow-lg shadow-brand/30 transition-transform duration-150 active:scale-90"
+            >
+              <IconPlus width={24} height={24} weight="bold" />
+            </button>
+            <button
+              onClick={openSearchWithKeyboard}
+              aria-label="Search"
+              className="glass flex h-[58px] w-[58px] items-center justify-center rounded-full border border-line text-ink shadow-[var(--shadow-pop)] transition-transform duration-150 active:scale-90"
+            >
+              <IconSearch width={22} height={22} />
+            </button>
           </div>
         </div>
-      </Sheet>
 
-      {/* New action sheet */}
-      <Sheet open={newOpen} onClose={() => setNewOpen(false)} title="New">
-        <div className="flex flex-col gap-1 -mx-1">
-          {actions.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className="flex items-center gap-3 rounded-md px-3 py-3 text-[15px] font-medium hover:bg-[#f1f4f9]"
-            >
-              <Icon width={18} height={18} className="text-ink-2" />
-              {label}
-            </Link>
-          ))}
-        </div>
-      </Sheet>
+        {/* More sheet (mobile) */}
+        <Sheet open={moreOpen} onClose={() => setMoreOpen(false)} title="More">
+          <div className="flex flex-col gap-0.5 -mx-1">
+            {owner &&
+              [
+                { href: "/plans", label: "Plans", icon: IconRepeat },
+                { href: "/quote", label: "Quote builder", icon: IconSparkle },
+                { href: "/team", label: "Team", icon: IconTeam },
+                { href: "/settings", label: "Settings", icon: IconSettings },
+                { href: "/customers/import", label: "Import contacts", icon: IconUpload },
+              ].map(({ href, label, icon: Icon }) => <MenuLink key={href} href={href} label={label} icon={Icon} />)}
+            <div className="border-t border-line mt-2 pt-3 px-2 flex flex-col gap-3">
+              <div className="flex items-center gap-3">
+                <Avatar name={me.name} size={34} />
+                <span className="grow min-w-0">
+                  <span className="block text-sm font-semibold truncate">{me.name}</span>
+                  <span className="block text-xs text-faint">{me.roleLabel}</span>
+                </span>
+                <SignOutButton className="btn btn-sm shrink-0" />
+              </div>
+              {crew.length > 0 && <ViewAsList crew={crew} previewing={previewing} me={me} />}
+            </div>
+          </div>
+        </Sheet>
 
-      <CommandK open={searchOpen} onClose={() => setSearchOpen(false)} pages={nav} />
+        {/* New action sheet */}
+        <Sheet open={newOpen} onClose={() => setNewOpen(false)} title="New">
+          <div className="flex flex-col gap-0.5 -mx-1">
+            {actions.map(({ href, label, icon: Icon }) => (
+              <MenuLink key={href} href={href} label={label} icon={Icon} />
+            ))}
+          </div>
+        </Sheet>
+
+        <CommandK open={searchOpen} onClose={() => setSearchOpen(false)} pages={nav} />
+      </div>
+    </MotionConfig>
+  );
+}
+
+/** One tab: filled glyph + label on a highlight that glides between tabs. */
+function TabItem({
+  href,
+  label,
+  active,
+  onClick,
+  children,
+}: {
+  href?: string;
+  label: string;
+  active: boolean;
+  onClick?: () => void;
+  children: (active: boolean) => React.ReactNode;
+}) {
+  const cls = `relative flex-1 flex flex-col items-center justify-center gap-0.5 h-[50px] rounded-full text-micro font-semibold transition-colors duration-150 ${
+    active ? "text-brand-deep" : "text-ink-2"
+  }`;
+  const inner = (
+    <>
+      {active && <motion.span layoutId="tab-active" className="absolute inset-0 rounded-full bg-brand-wash" transition={springSnappy} />}
+      <span className="relative">{children(active)}</span>
+      <span className="relative">{label}</span>
+    </>
+  );
+  return href ? (
+    <Link href={href} aria-current={active ? "page" : undefined} className={cls}>
+      {inner}
+    </Link>
+  ) : (
+    <button type="button" onClick={onClick} aria-expanded={active} className={cls}>
+      {inner}
+    </button>
+  );
+}
+
+function MenuLink({ href, label, icon: Icon }: { href: string; label: string; icon: typeof IconPlus }) {
+  return (
+    <Link
+      href={href}
+      className="group flex items-center gap-3 rounded-md px-3 py-3 text-md font-medium transition-colors hover:bg-muted active:bg-muted"
+    >
+      <span className="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-ink-2 transition-colors group-hover:bg-card">
+        <Icon width={17} height={17} />
+      </span>
+      {label}
+      <IconChevronRight width={16} height={16} className="ml-auto text-faint transition-transform duration-150 group-hover:translate-x-0.5" />
+    </Link>
+  );
+}
+
+/** Desktop footer: name + role; hover (or click) opens the "View as" switcher. */
+function ProfileMenu({ me, crew, previewing }: { me: Me; crew: CrewRef[]; previewing: CrewRef | null }) {
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const show = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    setOpen(true);
+  };
+  const hide = () => {
+    closeTimer.current = setTimeout(() => setOpen(false), 160);
+  };
+  return (
+    <div className="relative" onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget) && hide()}>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            className="absolute bottom-full left-0 right-0 mb-2 z-40 card p-1.5 shadow-[var(--shadow-pop)] origin-bottom-left"
+            initial={{ opacity: 0, scale: 0.96, y: 4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.98, y: 2 }}
+            transition={springSnappy}
+          >
+            {crew.length > 0 && <ViewAsList crew={crew} previewing={previewing} me={me} />}
+            <div className={crew.length > 0 ? "mt-1.5 pt-1.5 border-t border-line" : ""}>
+              <SignOutButton className="w-full flex items-center gap-2 rounded-sm px-2.5 py-2 text-sm text-ink-2 transition-colors hover:bg-muted hover:text-ink" withLabel />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="w-full flex items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-muted"
+      >
+        <Avatar name={previewing?.name ?? me.name} size={30} />
+        <span className="grow min-w-0">
+          <span className="block text-sm font-semibold truncate">{previewing?.name ?? me.name}</span>
+          <span className="block text-xs text-faint truncate">{previewing ? "Viewing as crew" : me.roleLabel}</span>
+        </span>
+        <IconCaretUpDown width={14} height={14} className="text-faint shrink-0" />
+      </button>
     </div>
   );
 }
 
-function SignOutButton({ className }: { className?: string }) {
+/** Owner's switcher: render the app as any worker (read-only), or back to yourself. */
+function ViewAsList({ crew, previewing, me }: { crew: CrewRef[]; previewing: CrewRef | null; me: Me }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const choose = (id: string | null) =>
+    startTransition(async () => {
+      await setViewAs(id);
+      router.push("/");
+      router.refresh();
+    });
+  const items = [{ id: null as string | null, name: me.name, sub: me.roleLabel }, ...crew.map((c) => ({ id: c.id as string | null, name: c.name, sub: "Crew" }))];
+  return (
+    <div role="menu" aria-label="View dashboard as" aria-busy={pending}>
+      <p className="label px-2.5 pt-1 pb-1.5">View as</p>
+      {items.map((it) => {
+        const on = (previewing?.id ?? null) === it.id;
+        return (
+          <button
+            key={it.id ?? "me"}
+            role="menuitemradio"
+            aria-checked={on}
+            disabled={pending}
+            onClick={() => !on && choose(it.id)}
+            className={`w-full flex items-center gap-2.5 rounded-sm px-2.5 py-2 text-left text-sm transition-colors ${on ? "bg-brand-wash text-brand-deep" : "hover:bg-muted"}`}
+          >
+            <Avatar name={it.name} size={24} />
+            <span className="grow min-w-0 truncate font-medium">{it.name}</span>
+            <span className="text-xs text-faint">{it.sub}</span>
+            {on && <IconCheck width={14} height={14} weight="bold" />}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Shown while the owner previews a worker's view. */
+function PreviewBar({ name }: { name: string }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  return (
+    <div className="sticky top-[env(safe-area-inset-top,0px)] z-20 border-b border-brand-line bg-brand-wash/95 backdrop-blur px-4 md:px-8 py-2 flex items-center gap-3 text-dense text-brand-deep">
+      <IconEye width={16} height={16} className="shrink-0" />
+      <span className="grow min-w-0 truncate">
+        Viewing as <span className="font-semibold">{name}</span> — read-only preview
+      </span>
+      <button
+        className="btn btn-sm shrink-0"
+        disabled={pending}
+        onClick={() =>
+          startTransition(async () => {
+            await setViewAs(null);
+            router.refresh();
+          })
+        }
+      >
+        Back to me
+      </button>
+    </div>
+  );
+}
+
+function SignOutButton({ className, icon, withLabel }: { className?: string; icon?: boolean; withLabel?: boolean }) {
   const supabase = createClient();
   return (
     <button
       className={className}
+      aria-label="Sign out"
+      title="Sign out"
       onClick={async () => {
         await supabase.auth.signOut();
         window.location.href = "/login";
       }}
     >
-      Sign out
+      {icon ? (
+        <IconLogout width={15} height={15} />
+      ) : withLabel ? (
+        <>
+          <IconLogout width={15} height={15} /> Sign out
+        </>
+      ) : (
+        "Sign out"
+      )}
     </button>
   );
 }
@@ -355,49 +555,59 @@ function CommandK({ open, onClose, pages: navPages }: { open: boolean; onClose: 
   if (!open) return null;
   return (
     <>
-      <div className="sheet-backdrop" onClick={onClose} />
-      <div
+      <motion.div className="scrim" onClick={onClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }} />
+      <motion.div
         role="dialog"
         aria-modal="true"
         aria-label="Search"
-        className="fixed z-50 inset-x-3 top-[10dvh] md:inset-x-auto md:left-1/2 md:-translate-x-1/2 md:w-[520px] card overflow-hidden shadow-xl"
+        className="fixed z-50 inset-x-3 top-[10dvh] md:inset-x-0 md:mx-auto md:w-[560px] card overflow-hidden shadow-[var(--shadow-pop)] origin-top"
+        initial={{ opacity: 0, scale: 0.97, y: -6 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ ...springSnappy, duration: 0.2 }}
       >
-        <div className="flex items-center gap-2 px-3 border-b border-line">
+        <div className="flex items-center gap-2.5 px-4 border-b border-line">
           <IconSearch width={16} height={16} className="text-faint shrink-0" />
           <input
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search customers, pages…"
-            className="w-full h-12 text-[16px] md:text-[15px] outline-none placeholder:text-faint bg-transparent"
+            className="w-full h-13 text-base md:text-md outline-none placeholder:text-faint bg-transparent"
           />
-          <kbd className="hidden md:block text-[10px] text-faint border border-line rounded px-1.5 py-0.5">esc</kbd>
+          <kbd className="kbd hidden md:block">esc</kbd>
         </div>
-        <div className="max-h-[50dvh] overflow-y-auto py-1.5">
+        <div className="max-h-[50dvh] overflow-y-auto p-1.5">
           {total === 0 && (
-            <p className="px-4 py-6 text-sm text-faint text-center">
+            <p className="px-4 py-8 text-sm text-faint text-center">
               {q.trim() ? "No matches." : "Type a name, phone number, or email."}
             </p>
           )}
+          {shownResults.length > 0 && <p className="label px-2.5 pt-1.5 pb-1">Customers</p>}
           {shownResults.map((c, i) => (
             <button
               key={c.id}
               onClick={() => go(i)}
-              onMouseEnter={() => setSel(i)}
-              className={`w-full text-left px-4 py-2.5 flex items-baseline justify-between gap-3 ${sel === i ? "bg-brand-wash" : ""}`}
+              onMouseMove={() => setSel(i)}
+              className={`w-full text-left px-2.5 py-2.5 rounded-md flex items-center justify-between gap-3 ${sel === i ? "bg-muted" : ""}`}
             >
-              <span className="font-medium text-sm truncate">{c.name}</span>
+              <span className="flex items-center gap-2.5 min-w-0">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-wash text-label font-semibold text-brand-deep">
+                  {c.name.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="font-medium text-sm truncate">{c.name}</span>
+              </span>
               <span className="text-xs text-faint num shrink-0">{fmtPhone(c.phone) || c.email}</span>
             </button>
           ))}
+          {pages.length > 0 && <p className="label px-2.5 pt-2 pb-1">Pages</p>}
           {pages.map((p, j) => {
             const i = shownResults.length + j;
             return (
               <button
                 key={p.href}
                 onClick={() => go(i)}
-                onMouseEnter={() => setSel(i)}
-                className={`w-full text-left px-4 py-2.5 flex items-center gap-2.5 text-sm ${sel === i ? "bg-brand-wash" : ""}`}
+                onMouseMove={() => setSel(i)}
+                className={`w-full text-left px-2.5 py-2.5 rounded-md flex items-center gap-2.5 text-sm ${sel === i ? "bg-muted" : ""}`}
               >
                 <p.icon width={15} height={15} className="text-faint" />
                 Go to {p.label}
@@ -405,7 +615,7 @@ function CommandK({ open, onClose, pages: navPages }: { open: boolean; onClose: 
             );
           })}
         </div>
-      </div>
+      </motion.div>
     </>
   );
 }

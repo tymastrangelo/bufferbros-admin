@@ -62,12 +62,12 @@ export function CustomerPicker({
         onChange={(e) => setQ(e.target.value)}
       />
       {shown.length > 0 && (
-        <div className="absolute z-10 inset-x-0 top-full mt-1 card shadow-lg overflow-hidden max-h-56 overflow-y-auto">
+        <div className="absolute z-10 inset-x-0 top-full mt-1.5 card shadow-[var(--shadow-pop)] overflow-hidden page-in max-h-56 overflow-y-auto">
           {shown.map((c) => (
             <button
               key={c.id}
               type="button"
-              className="w-full text-left px-3 py-2 hover:bg-brand-wash flex items-baseline justify-between gap-2"
+              className="w-full text-left px-3 py-2.5 transition-colors hover:bg-muted flex items-baseline justify-between gap-2"
               onClick={() => {
                 onChange(c);
                 setQ("");

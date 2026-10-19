@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { EmptyState } from "@/components/ui";
+import { EmptyState, PageHeader, Stat } from "@/components/ui";
+import { getMyEmployee } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { money } from "@/lib/format";
 import { fmtDateShort, todayYmd } from "@/lib/time";
@@ -10,6 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function MyPayPage() {
   const db = await createClient();
+  const me = await getMyEmployee();
   const { data } = await db
     .from("company_ledger")
     .select("*")
@@ -25,7 +27,8 @@ export default async function MyPayPage() {
     entries.filter((e) => e.kind === "revenue" && e.ledger_entry_id).map((e) => [e.ledger_entry_id as string, e.amount])
   );
   const rows = entries
-    .filter((e) => e.kind === "payout" && e.employee_id != null)
+    // RLS already scopes a real worker; the explicit filter keeps an owner's "view as" honest.
+    .filter((e) => e.kind === "payout" && e.employee_id != null && (!me || e.employee_id === me.id))
     .map((e) => {
       const keep = -e.amount; // payouts are stored negative
       // Gabe only owes Tyler on cash he physically collected. On Tyler-collected jobs he
@@ -42,20 +45,14 @@ export default async function MyPayPage() {
   const unsettledCount = rows.filter((r) => !r.settled).length;
 
   return (
-    <div className="px-4 md:px-8 py-5 md:py-7 max-w-3xl">
-      <h1 className="text-xl md:text-2xl font-bold">My Pay</h1>
-      <div className="mt-4 grid grid-cols-2 gap-px bg-line border border-line rounded-lg overflow-hidden">
-        <div className="bg-card px-3.5 py-3">
-          <p className="label">You keep — this month</p>
-          <p className="mt-1 text-2xl font-bold num">{money(keepTotal)}</p>
-        </div>
-        <div className="bg-card px-3.5 py-3">
-          <p className="label">Send to Tyler — this month</p>
-          <p className="mt-1 text-2xl font-bold num text-ink-2">{money(sendTotal)}</p>
-        </div>
+    <div className="page max-w-3xl">
+      <PageHeader title="My Pay" />
+      <div className="stat-grid grid-cols-2">
+        <Stat label="You keep — this month" value={<span className="text-2xl">{money(keepTotal)}</span>} tone="ok" />
+        <Stat label="Send to Tyler — this month" value={<span className="text-2xl text-ink-2">{money(sendTotal)}</span>} />
       </div>
       {unsettledCount > 0 && (
-        <p className="mt-3 text-[13px] text-ink-2">
+        <p className="mt-4 text-dense text-ink-2">
           {unsettledCount} payment{unsettledCount === 1 ? "" : "s"} not squared up with Tyler yet.
         </p>
       )}
@@ -90,9 +87,9 @@ export default async function MyPayPage() {
                   </td>
                   <td data-label="Status" className="text-right whitespace-nowrap">
                     {r.settled ? (
-                      <span className="text-ok text-[13px] font-medium">✓ Paid</span>
+                      <span className="chip chip-ok">paid</span>
                     ) : (
-                      <span className="text-faint text-[13px]">Pending</span>
+                      <span className="chip">pending</span>
                     )}
                   </td>
                 </tr>

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { IconUpload } from "@/components/icons";
-import { ErrorNote } from "@/components/ui";
+import { Busy, ErrorNote, PageHeader } from "@/components/ui";
 import { getDedupeKeys, importCustomers } from "@/lib/actions/customers";
 import { parseContactsFile, type ParsedContact } from "@/lib/contacts-parse";
 import { fmtPhone, phoneDigits } from "@/lib/format";
@@ -79,29 +79,28 @@ export function ImportClient() {
   const selectedCount = rows?.filter((r) => r.checked).length ?? 0;
 
   return (
-    <div className="px-4 md:px-8 py-5 md:py-7 max-w-4xl">
-      <nav className="text-[13px] text-faint mb-2">
-        <Link href="/customers" className="hover:text-ink">
-          Customers
-        </Link>{" "}
-        / Import
-      </nav>
-      <h1 className="text-xl md:text-2xl font-bold">Import contacts</h1>
-      <p className="text-sm text-ink-2 mt-1 max-w-xl">
-        Bring your phone&apos;s contacts in as customers. On iPhone: Contacts → select all → Share → save the
-        .vcf here. Or export a vCard from iCloud.com, or a CSV from Google Contacts.
-      </p>
+    <div className="page max-w-4xl">
+      <PageHeader
+        back={{ href: "/customers", label: "Customers" }}
+        title="Import contacts"
+        sub={
+          <p className="max-w-xl">
+            Bring your phone&apos;s contacts in as customers. On iPhone: Contacts → select all → Share → save the
+            .vcf here. Or export a vCard from iCloud.com, or a CSV from Google Contacts.
+          </p>
+        }
+      />
 
       {done != null && (
-        <div className="mt-4 rounded-md border border-[#bbf7d0] bg-ok-wash px-4 py-3 text-sm text-ok">
+        <div className="mb-4 note note-ok px-4 py-3">
           Imported {done} customer{done === 1 ? "" : "s"}.{" "}
           <Link href="/customers" className="font-semibold underline underline-offset-2">
-            See them →
+            See them
           </Link>
         </div>
       )}
 
-      <div className="mt-4">
+      <div>
         <input
           ref={fileRef}
           type="file"
@@ -110,7 +109,7 @@ export function ImportClient() {
           onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
         />
         <button
-          className="w-full card border-dashed border-line-2! px-6 py-10 flex flex-col items-center gap-2 text-ink-2 hover:border-brand hover:text-brand-deep transition-colors duration-150"
+          className="w-full rounded-lg border-2 border-dashed border-line-2 bg-card px-6 py-12 flex flex-col items-center gap-2.5 text-ink-2 transition-[color,border-color,background-color,transform] duration-150 hover:border-brand hover:bg-brand-wash/40 hover:text-brand-deep active:scale-[0.99]"
           onClick={() => fileRef.current?.click()}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
@@ -174,7 +173,7 @@ export function ImportClient() {
                     </td>
                     <td data-label="Name" className="font-medium whitespace-nowrap">
                       {r.name}
-                      {r.duplicate && <span className="chip bg-warn-wash text-warn ml-1.5">exists</span>}
+                      {r.duplicate && <span className="chip chip-warn ml-1.5">exists</span>}
                     </td>
                     <td data-label="Phone" className="num whitespace-nowrap">{fmtPhone(r.phone)}</td>
                     <td data-label="Email" className="truncate max-w-[180px]">{r.email}</td>
@@ -186,7 +185,7 @@ export function ImportClient() {
           </div>
 
           <button className="btn btn-primary h-11 mt-4 w-full md:w-auto" disabled={pending || selectedCount === 0} onClick={submit}>
-            {pending ? "Importing…" : `Import ${selectedCount} customer${selectedCount === 1 ? "" : "s"}`}
+            {pending ? <Busy>Importing…</Busy> : `Import ${selectedCount} customer${selectedCount === 1 ? "" : "s"}`}
           </button>
         </>
       )}

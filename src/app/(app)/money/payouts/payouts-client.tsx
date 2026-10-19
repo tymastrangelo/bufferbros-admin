@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { EmptyState } from "@/components/ui";
+import { IconCheck } from "@/components/icons";
+import { Busy, EmptyState, Segmented } from "@/components/ui";
 import { setPaymentSettled } from "@/lib/actions/money";
 import { money } from "@/lib/format";
 import { netOwed, transfer } from "@/lib/payouts";
@@ -62,26 +63,22 @@ export function PayoutsClient({ rows, washerPct, name }: { rows: PayoutEntry[]; 
           : { text: "Even — nothing to move", cls: "" };
 
   return (
-    <div className="mt-4 flex flex-col gap-4">
-      <div className="card p-3.5">
+    <div className="mt-5 flex flex-col gap-4">
+      <div className="card p-4 md:p-5">
         <p className="label">Net with {name} · unsettled</p>
-        <p className={`mt-1 text-2xl font-bold num ${banner.cls}`}>{banner.text}</p>
-        <p className="mt-1 text-[11px] text-faint">
+        <p key={banner.text} className={`page-in mt-1.5 text-2xl font-bold num tracking-tight ${banner.cls}`}>{banner.text}</p>
+        <p className="mt-1 text-label text-faint">
           {count} unsettled · {name} {washerPct}% / you {100 - washerPct}% · edit their cut on the Team page
         </p>
       </div>
 
-      <div className="flex gap-1.5">
-        {FILTERS.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => setFilter(f.id)}
-            className={`btn btn-sm whitespace-nowrap ${filter === f.id ? "btn-primary" : ""}`}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        label="Filter payouts"
+        className="self-start"
+        value={filter}
+        onChange={setFilter}
+        options={FILTERS.map((f) => ({ value: f.id, label: f.label }))}
+      />
 
       <div className="card overflow-x-auto">
         {shown.length === 0 ? (
@@ -142,12 +139,12 @@ export function PayoutsClient({ rows, washerPct, name }: { rows: PayoutEntry[]; 
                     <td data-label="Settle" className="text-right">
                       {r.settled_on ? (
                         <button
-                          className="text-ok text-[13px] font-medium hover:underline underline-offset-2 disabled:opacity-50"
+                          className="inline-flex items-center gap-1 text-ok text-dense font-medium hover:underline underline-offset-2 disabled:opacity-50"
                           disabled={busy === r.id}
                           onClick={() => toggle(r)}
                           title="Click to undo"
                         >
-                          ✓ {fmtDateShort(r.settled_on)}
+                          <IconCheck width={14} height={14} /> {fmtDateShort(r.settled_on)}
                         </button>
                       ) : (
                         <button
@@ -155,7 +152,7 @@ export function PayoutsClient({ rows, washerPct, name }: { rows: PayoutEntry[]; 
                           disabled={busy === r.id}
                           onClick={() => toggle(r)}
                         >
-                          {busy === r.id ? "…" : "Mark paid"}
+                          {busy === r.id ? <Busy>Saving…</Busy> : "Mark paid"}
                         </button>
                       )}
                     </td>

@@ -1,6 +1,7 @@
 // Server-side data loaders shared across pages.
 import "server-only";
 import type { Catalog } from "./catalog";
+import { getViewAs } from "./auth";
 import { createClient } from "./supabase/server";
 import type { Employee, PlanCadence, ServicePricing, SizeId } from "./types";
 
@@ -121,7 +122,10 @@ export async function getMyEmployee(): Promise<Employee | null> {
     data: { user },
   } = await db.auth.getUser();
   if (!user) return null;
-  const { data } = await db.from("employees").select("*").eq("user_id", user.id).maybeSingle();
+  const viewAs = await getViewAs(); // owner previewing a worker → that worker's row
+  const { data } = viewAs
+    ? await db.from("employees").select("*").eq("id", viewAs).maybeSingle()
+    : await db.from("employees").select("*").eq("user_id", user.id).maybeSingle();
   return data ? ({ ...(data as Employee), split_pct: Number((data as Employee).split_pct) } as Employee) : null;
 }
 

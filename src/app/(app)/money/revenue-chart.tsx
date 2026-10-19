@@ -19,10 +19,10 @@ export interface CashflowBar {
 
 const H_UP = 120;
 const H_DOWN = 72;
-// Categorical trio, CVD-validated (dataviz six-checks, light surface).
-const C_IN = "#2563eb";
-const C_CUT = "#0d9488";
-const C_EXP = "#d97706";
+// Categorical trio, CVD-validated in both themes — tokens live in globals.css (--color-viz-*).
+const C_IN = "var(--color-viz-1)";
+const C_CUT = "var(--color-viz-2)";
+const C_EXP = "var(--color-viz-3)";
 
 export function CashflowChart({ bars }: { bars: CashflowBar[] }) {
   const [hover, setHover] = useState<number | null>(null);
@@ -38,7 +38,7 @@ export function CashflowChart({ bars }: { bars: CashflowBar[] }) {
 
   return (
     <div>
-      <p className="text-[12px] num mb-1" aria-live="polite">
+      <p className="text-xs num mb-1" aria-live="polite">
         <span className="font-semibold text-ink">
           {focusLabel}: kept {money(kept(focus))}
         </span>
@@ -61,8 +61,8 @@ export function CashflowChart({ bars }: { bars: CashflowBar[] }) {
             >
               {b.collected > 0 ? (
                 <span
-                  className={`w-full max-w-[26px] rounded-t-[4px] ${hover != null && hover !== i ? "opacity-40" : ""}`}
-                  style={{ height: Math.max(px(b.collected), 2), background: C_IN }}
+                  className={`bar-up w-full max-w-[26px] rounded-t-[4px] transition-opacity duration-150 ${hover != null && hover !== i ? "opacity-40" : ""}`}
+                  style={{ height: Math.max(px(b.collected), 2), background: C_IN, animationDelay: `${i * 25}ms` }}
                 />
               ) : (
                 <span className="w-full max-w-[26px] h-[2px] bg-line" />
@@ -87,16 +87,16 @@ export function CashflowChart({ bars }: { bars: CashflowBar[] }) {
                 tabIndex={-1}
                 aria-hidden="true"
               >
-                <span className="w-full max-w-[26px] flex flex-col">
+                <span className="bar-down w-full max-w-[26px] flex flex-col" style={{ animationDelay: `${120 + i * 25}ms` }}>
                   {b.workerCut > 0 && (
                     <span
-                      className={`w-full ${expH === 0 ? "rounded-b-[4px]" : ""} ${hover != null && hover !== i ? "opacity-40" : ""}`}
+                      className={`w-full transition-opacity duration-150 ${expH === 0 ? "rounded-b-[4px]" : ""} ${hover != null && hover !== i ? "opacity-40" : ""}`}
                       style={{ height: cutH, background: C_CUT, marginBottom: expH > 0 ? 2 : 0 }}
                     />
                   )}
                   {b.expenses > 0 && (
                     <span
-                      className={`w-full rounded-b-[4px] ${hover != null && hover !== i ? "opacity-40" : ""}`}
+                      className={`w-full rounded-b-[4px] transition-opacity duration-150 ${hover != null && hover !== i ? "opacity-40" : ""}`}
                       style={{ height: expH, background: C_EXP }}
                     />
                   )}
@@ -108,7 +108,7 @@ export function CashflowChart({ bars }: { bars: CashflowBar[] }) {
       </div>
       <div className="flex gap-1 md:gap-1.5 mt-1">
         {bars.map((b, i) => (
-          <span key={b.ym} className={`flex-1 text-center text-[10px] num ${hover === i ? "text-ink font-semibold" : "text-faint"}`}>
+          <span key={b.ym} className={`flex-1 text-center text-micro num ${hover === i ? "text-ink font-semibold" : "text-faint"}`}>
             {b.ym.slice(5) === "01" ? b.ym.slice(0, 4) : fmtMonth(b.ym).slice(0, 3)}
           </span>
         ))}

@@ -10,8 +10,9 @@ import { logOutreach } from "@/lib/actions/relations";
 import { telHref } from "@/lib/format";
 import { fmtDateShort } from "@/lib/time";
 import type { OutreachDue, ReviewAsk } from "@/lib/outreach";
-import { IconPhone } from "./icons";
+import { IconPhone, IconStar } from "./icons";
 import { OutreachSheet } from "./outreach-sheet";
+import { SectionLabel } from "./ui";
 
 const STATUS_LABEL: Record<string, string> = {
   seasonal: "back in season",
@@ -39,10 +40,10 @@ export function OutreachCard({ due, asks }: { due: OutreachDue[]; asks: ReviewAs
     <>
       {due.length > 0 && (
         <section className="mt-8">
-          <h2 className="label mb-2">Reach out — {due.length} client{due.length > 1 ? "s" : ""}</h2>
-          <div className="card divide-y divide-line">
+          <SectionLabel trailing={`${due.length} client${due.length > 1 ? "s" : ""}`}>Reach out</SectionLabel>
+          <div className="stagger card divide-y divide-line overflow-hidden">
             {shown.map((d) => (
-              <div key={d.id} className="px-4 py-3 flex items-center gap-3">
+              <div key={d.id} className="row">
                 <div className="min-w-0 grow">
                   <p className="text-sm font-medium truncate">
                     <Link href={`/customers/${d.id}`} className="hover:underline underline-offset-2">
@@ -58,7 +59,7 @@ export function OutreachCard({ due, asks }: { due: OutreachDue[]; asks: ReviewAs
                   </p>
                 </div>
                 {d.phone && (
-                  <a href={telHref(d.phone)} aria-label={`Call ${d.name}`} className="btn btn-sm shrink-0 px-2.5">
+                  <a href={telHref(d.phone)} aria-label={`Call ${d.name}`} className="btn btn-sm btn-icon shrink-0">
                     <IconPhone width={14} height={14} />
                   </a>
                 )}
@@ -68,7 +69,7 @@ export function OutreachCard({ due, asks }: { due: OutreachDue[]; asks: ReviewAs
               </div>
             ))}
             {due.length > shown.length && (
-              <button className="w-full px-4 py-2.5 text-sm text-brand-deep font-medium hover:bg-[#f8fafd]" onClick={() => setShowAll(true)}>
+              <button className="row-more" onClick={() => setShowAll(true)}>
                 Show all {due.length}
               </button>
             )}
@@ -78,10 +79,10 @@ export function OutreachCard({ due, asks }: { due: OutreachDue[]; asks: ReviewAs
 
       {asks.length > 0 && (
         <section className="mt-8">
-          <h2 className="label mb-2">Ask for a review — {asks.length}</h2>
-          <div className="card divide-y divide-line">
+          <SectionLabel trailing={asks.length}>Ask for a review</SectionLabel>
+          <div className="stagger card divide-y divide-line overflow-hidden">
             {asks.map((a) => (
-              <div key={a.id} className="px-4 py-3 flex items-center gap-3">
+              <div key={a.id} className="row">
                 <div className="min-w-0 grow">
                   <p className="text-sm font-medium truncate">
                     <Link href={`/customers/${a.id}`} className="hover:underline underline-offset-2">
@@ -94,7 +95,7 @@ export function OutreachCard({ due, asks }: { due: OutreachDue[]; asks: ReviewAs
                   Asked
                 </button>
                 <button className="btn btn-sm shrink-0" disabled={busy === a.id} onClick={() => quickReview(a, "left_review")}>
-                  Left ⭐
+                  <IconStar width={14} height={14} weight="fill" className="text-warn" /> Left review
                 </button>
               </div>
             ))}

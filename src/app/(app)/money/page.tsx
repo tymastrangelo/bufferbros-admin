@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { Stat } from "@/components/ui";
 import { getSettingsMap } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { money } from "@/lib/format";
@@ -79,24 +79,24 @@ export default async function MoneyOverview() {
   const coPct = 100 - washerPct - ceoPct;
 
   return (
-    <div className="mt-4 flex flex-col gap-5">
+    <div className="mt-5 flex flex-col gap-6">
       {/* Headline numbers */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-px bg-line border border-line rounded-[10px] overflow-hidden">
+      <div className="stat-grid grid-cols-2 md:grid-cols-3">
         <Stat
           label={`Collected — ${fmtMonth(thisYm)}`}
           value={money(collectedThis)}
-          sub={`${fmtMonth(lastYm)}: ${money(collectedLast)}`}
+          hint={`${fmtMonth(lastYm)}: ${money(collectedLast)}`}
         />
-        <Stat label="Earned this month" value={money(earnedIn(thisYm))} sub={`last: ${money(earnedIn(lastYm))}`} />
-        <Stat label="Net this month" value={money(collectedThis - expensesThisMonth)} sub={`after ${money(expensesThisMonth)} expenses`} />
-        <Stat label="Outstanding owed" value={money(owed)} tone={owed > 0 ? "bad" : undefined} link="/money/balances" />
-        <Stat label="Prepaid credit held" value={money(credit)} link="/money/balances" />
-        <Stat label="Company capital" value={money(capital)} link="/money/capital" />
+        <Stat label="Earned this month" value={money(earnedIn(thisYm))} hint={`last: ${money(earnedIn(lastYm))}`} />
+        <Stat label="Net this month" value={money(collectedThis - expensesThisMonth)} hint={`after ${money(expensesThisMonth)} expenses`} />
+        <Stat label="Outstanding owed" value={money(owed)} tone={owed > 0 ? "bad" : undefined} href="/money/balances" />
+        <Stat label="Prepaid credit held" value={money(credit)} href="/money/balances" />
+        <Stat label="Company capital" value={money(capital)} href="/money/capital" />
         {/* spans the row's leftover cells so the grid never shows empty gray */}
         <Stat
           label={`Split — ${workerName} ${washerPct}% / CEO ${ceoPct}% / Co ${coPct}%`}
           value={`${money((collectedThis * washerPct) / 100)} / ${money((collectedThis * ceoPct) / 100)} / ${money((collectedThis * coPct) / 100)}`}
-          sub="of collected this month · worker cuts live on the Team page"
+          hint="of collected this month · worker cuts live on the Team page"
           className="col-span-2 md:col-span-3"
         />
       </div>
@@ -106,19 +106,19 @@ export default async function MoneyOverview() {
         <div className="flex items-baseline justify-between flex-wrap gap-x-3 gap-y-1">
           <h2 className="label">Cash flow — last 12 months</h2>
           {/* legend */}
-          <div className="flex items-center gap-3 text-[11px] text-ink-2">
+          <div className="flex items-center gap-3 text-label text-ink-2">
             <span className="inline-flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-sm bg-[#2563eb]" /> collected
+              <span className="w-2.5 h-2.5 rounded-sm bg-viz-1" /> collected
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-sm bg-[#0d9488]" /> worker cut
+              <span className="w-2.5 h-2.5 rounded-sm bg-viz-2" /> worker cut
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-sm bg-[#d97706]" /> expenses
+              <span className="w-2.5 h-2.5 rounded-sm bg-viz-3" /> expenses
             </span>
           </div>
         </div>
-        <div className="card mt-1.5 p-4">
+        <div className="card mt-2 p-4 md:p-5">
           {hasChartData ? (
             <CashflowChart bars={bars} />
           ) : (
@@ -129,36 +129,5 @@ export default async function MoneyOverview() {
         </div>
       </section>
     </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  sub,
-  tone,
-  link,
-  className = "",
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  tone?: "bad";
-  link?: string;
-  className?: string;
-}) {
-  const inner = (
-    <>
-      <p className="label">{label}</p>
-      <p className={`mt-1 text-lg font-semibold num leading-none ${tone === "bad" ? "text-bad" : ""}`}>{value}</p>
-      {sub && <p className="mt-1 text-[11px] text-faint num">{sub}</p>}
-    </>
-  );
-  return link ? (
-    <Link href={link} className={`bg-card px-3.5 py-3 hover:bg-[#f8fafd] transition-colors duration-150 ${className}`}>
-      {inner}
-    </Link>
-  ) : (
-    <div className={`bg-card px-3.5 py-3 ${className}`}>{inner}</div>
   );
 }

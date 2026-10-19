@@ -4,6 +4,7 @@
 // logOutreach is the workhorse — one call writes the log row AND moves the
 // customer's status/dates so the Today queue reacts immediately.
 import { revalidatePath } from "next/cache";
+import { customerName, logActivity, usd } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
 import { todayYmd } from "@/lib/time";
 import type { OutreachOutcome, OutreachStatus } from "@/lib/types";
@@ -61,6 +62,12 @@ export async function logOutreach(fields: OutreachFields): Promise<ActionResult>
     const { error: err2 } = await db.from("customers").update(patch).eq("id", fields.customerId);
     if (err2) return { ok: false, error: err2.message };
   }
+  await logActivity(
+    `logged outreach with ${await customerName(fields.customerId)}`,
+    [`Outcome: ${fields.outcome.replace("_", " ")} · ${on}`, resumeOn && `Check back ${resumeOn}`, fields.note?.trim() && `Note: “${fields.note.trim()}”`],
+    `/customers/${fields.customerId}`,
+    { tags: ["telephone_receiver"] }
+  );
   refresh();
   return { ok: true, id: fields.customerId };
 }
@@ -77,6 +84,7 @@ export async function setOutreachStatus(
     .update({ outreach_status: status, resume_on: isYmd(resumeOn) ? resumeOn : null })
     .eq("id", customerId);
   if (error) return { ok: false, error: error.message };
+  await logActivity(`set ${await customerName(customerId)} to “${status.replace(/_/g, " ")}”`, [isYmd(resumeOn) && `Reach out again ${resumeOn}`], `/customers/${customerId}`, { tags: ["telephone_receiver"] });
   refresh();
   return { ok: true, id: customerId };
 }
@@ -86,6 +94,12 @@ export async function setReferredBy(customerId: string, referrerId: string | nul
   const db = await createClient();
   const { error } = await db.from("customers").update({ referred_by: referrerId }).eq("id", customerId);
   if (error) return { ok: false, error: error.message };
+  await logActivity(
+    referrerId ? `marked ${await customerName(customerId)} as referred by ${await customerName(referrerId)}` : `cleared ${await customerName(customerId)}'s referrer`,
+    [],
+    `/customers/${customerId}`,
+    { tags: ["handshake"] }
+  );
   refresh();
   return { ok: true, id: customerId };
 }
@@ -136,6 +150,7 @@ export async function giveReferralCredit(customerId: string): Promise<ActionResu
     .update({ referral_credited_at: new Date().toISOString() })
     .eq("id", cust.id);
   if (markErr) return { ok: false, error: markErr.message };
+  await logActivity(`gave referral credit to ${cust.name} and ${referrer.name}`, [`${usd(amount)} each`], `/customers/${cust.id}`, { tags: ["gift"] });
   refresh();
   return { ok: true, id: cust.id };
 }

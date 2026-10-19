@@ -74,14 +74,14 @@ export function ScheduleSheet({
                 key={p.label}
                 type="button"
                 onClick={() => setUntil(value)}
-                className={`chip cursor-pointer ${until === value ? "bg-ink text-white" : "bg-[#f1f4f9] text-ink-2 hover:bg-line"}`}
+                className="chip" aria-pressed={until === value}
               >
                 {p.label}
               </button>
             );
           })}
         </div>
-        <p className="text-[13px] text-ink-2">
+        <p className="text-dense text-ink-2">
           Already-scheduled dates are skipped, so this never duplicates. Times that collide with another
           job or a block get flagged for manual placement instead of being moved.
         </p>

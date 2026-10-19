@@ -25,11 +25,11 @@ import { createClient } from "@/lib/supabase/client";
 import { fmtDateShort, minToLabel, whenLabel } from "@/lib/time";
 import { setJobAttribution } from "@/lib/actions/appointments";
 import { PAYMENT_METHODS, SIZES, sizeLabel, vehicleLabel, type Appointment, type Customer, type Employee, type PaymentMethod, type SizeId, type Vehicle } from "@/lib/types";
-import { IconMail, IconMessage, IconPhone, IconPin } from "./icons";
+import { IconCheck, IconMail, IconMessage, IconPhone, IconPin, IconPlay } from "./icons";
 import { CustomerPicker, type PickedCustomer } from "./customer-picker";
 import { VehiclePicker } from "./vehicle-picker";
 import { SlotPicker } from "./slot-picker";
-import { ErrorNote, Field, Sheet, StatusChip } from "./ui";
+import { Busy, ErrorNote, Field, Sheet, StatusChip } from "./ui";
 
 export type JobWithCustomer = Appointment & {
   customers: Pick<Customer, "id" | "name" | "phone" | "email" | "stripe_payments"> | null;
@@ -115,14 +115,14 @@ export function JobSheet({
           <div className="flex items-center gap-2 flex-wrap">
             <StatusChip status={job.status} />
             {job.employee_id && employees.some((e) => e.id === job.employee_id) && (
-              <span className="chip bg-[#f1f4f9] text-ink-2">{employees.find((e) => e.id === job.employee_id)!.name}</span>
+              <span className="chip">{employees.find((e) => e.id === job.employee_id)!.name}</span>
             )}
-            {owner && job.self_done && <span className="chip bg-ok-wash text-ok">Your job — kept in full</span>}
-            {job.plan_id && <span className="chip bg-brand-wash text-brand-deep">plan</span>}
-            {job.source === "web" && <span className="chip bg-[#f1f4f9] text-ink-2">web booking</span>}
-            {unlinked && <span className="chip bg-warn-wash text-warn">not linked</span>}
+            {owner && job.self_done && <span className="chip chip-ok">Your job — kept in full</span>}
+            {job.plan_id && <span className="chip chip-brand">plan</span>}
+            {job.source === "web" && <span className="chip">web booking</span>}
+            {unlinked && <span className="chip chip-warn">not linked</span>}
           </div>
-          <p className="mt-2 text-[15px] font-semibold num">{whenLabel(job.date, job.start_min)}</p>
+          <p className="mt-2 text-md font-semibold num">{whenLabel(job.date, job.start_min)}</p>
           <p className="text-sm text-ink-2">
             {job.service_name}
             {job.size_label ? ` · ${job.size_label}` : job.size_id ? ` · ${sizeLabel(job.size_id)}` : ""} · {job.duration_min} min ·{" "}
@@ -131,35 +131,35 @@ export function JobSheet({
           {job.addons.length > 0 && (
             <p className="text-sm text-ink-2 mt-0.5">+ {job.addons.map((a) => a.name).join(", ")}</p>
           )}
-          {job.notes && <p className="mt-2 text-sm bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2">{job.notes}</p>}
+          {job.notes && <p className="mt-2 text-sm note note-warn">{job.notes}</p>}
         </div>
 
         {/* Contact links */}
         <div className="grid grid-cols-4 gap-1.5">
-          <a className={`btn btn-sm flex-col h-14! gap-1 ${phone ? "" : "pointer-events-none opacity-40"}`} href={phone ? telHref(phone) : undefined}>
+          <a className={`btn btn-sm flex-col h-14! gap-1 text-ink-2 hover:text-brand-deep ${phone ? "" : "pointer-events-none opacity-40"}`} href={phone ? telHref(phone) : undefined}>
             <IconPhone width={16} height={16} />
-            <span className="text-[11px]">Call</span>
+            <span className="text-label">Call</span>
           </a>
-          <a className={`btn btn-sm flex-col h-14! gap-1 ${phone ? "" : "pointer-events-none opacity-40"}`} href={phone ? smsHref(phone) : undefined}>
+          <a className={`btn btn-sm flex-col h-14! gap-1 text-ink-2 hover:text-brand-deep ${phone ? "" : "pointer-events-none opacity-40"}`} href={phone ? smsHref(phone) : undefined}>
             <IconMessage width={16} height={16} />
-            <span className="text-[11px]">Text</span>
+            <span className="text-label">Text</span>
           </a>
           <a
-            className={`btn btn-sm flex-col h-14! gap-1 ${job.address ? "" : "pointer-events-none opacity-40"}`}
+            className={`btn btn-sm flex-col h-14! gap-1 text-ink-2 hover:text-brand-deep ${job.address ? "" : "pointer-events-none opacity-40"}`}
             href={job.address ? mapsHref(job.address) : undefined}
             target="_blank"
             rel="noreferrer"
           >
             <IconPin width={16} height={16} />
-            <span className="text-[11px]">Maps</span>
+            <span className="text-label">Maps</span>
           </a>
-          <a className={`btn btn-sm flex-col h-14! gap-1 ${email ? "" : "pointer-events-none opacity-40"}`} href={email ? `mailto:${email}` : undefined}>
+          <a className={`btn btn-sm flex-col h-14! gap-1 text-ink-2 hover:text-brand-deep ${email ? "" : "pointer-events-none opacity-40"}`} href={email ? `mailto:${email}` : undefined}>
             <IconMail width={16} height={16} />
-            <span className="text-[11px]">Email</span>
+            <span className="text-label">Email</span>
           </a>
         </div>
         {(phone || job.address) && (
-          <p className="text-[13px] text-ink-2 -mt-2">
+          <p className="text-dense text-ink-2 -mt-2">
             {phone && <span className="num">{fmtPhone(phone)}</span>}
             {phone && job.address && " · "}
             {job.address}
@@ -172,8 +172,8 @@ export function JobSheet({
           </button>
         )}
         {job.customers && (
-          <Link href={`/customers/${job.customers.id}`} className="text-[13px] text-brand-deep underline underline-offset-2 self-start">
-            Open customer profile →
+          <Link href={`/customers/${job.customers.id}`} className="link text-dense self-start">
+            Open customer profile
           </Link>
         )}
 
@@ -201,11 +201,11 @@ export function JobSheet({
               // Workers punch in so Tyler sees real detail times; the boss doesn't clock himself.
               !owner && (
                 <button className="btn h-11" disabled={pending} onClick={() => run(() => startAppointment(job.id))}>
-                  ▶ Start job — starts the clock
+                  <IconPlay width={14} height={14} weight="fill" /> Start job — starts the clock
                 </button>
               )
             ) : (
-              <p className="text-[13px] font-medium text-ok bg-ok-wash border border-[#bbe7c9] rounded-md px-3 py-2">
+              <p className="text-dense font-medium note note-ok">
                 On the clock since <span className="num">{fmtClock(job.started_at)}</span>
               </p>
             )}
@@ -254,7 +254,7 @@ export function JobSheet({
             </p>
             {job.customer_id && <PaymentStatus job={job} />}
             {job.completed_at && (
-              <p className="text-[13px] bg-surface border border-line rounded-md px-3 py-2 num">
+              <p className="note text-dense num">
                 {job.started_at ? (
                   <>
                     Took{" "}
@@ -269,14 +269,14 @@ export function JobSheet({
               </p>
             )}
             {job.completion_note && (
-              <p className="text-sm bg-surface border border-line rounded-md px-3 py-2">
+              <p className="note text-sm">
                 <span className="label block mb-0.5">Completion note</span>
                 {job.completion_note}
               </p>
             )}
             {owner && (
               <>
-                <p className="text-[13px] bg-surface border border-line rounded-md px-3 py-2">
+                <p className="note text-dense">
                   <span className="label block mb-0.5">Done by</span>
                   {job.employee_id
                     ? employees.find((e) => e.id === job.employee_id)?.name ?? "a worker"
@@ -423,9 +423,7 @@ function WhoPicker({
             key={e.id}
             type="button"
             onClick={() => onChange(e.id, false)}
-            className={`min-h-9 rounded-md border px-1 py-1.5 text-[13px] font-medium transition-colors duration-150 ${
-              value === e.id ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
-            }`}
+            className="choice min-h-9 px-1 py-1.5 text-dense" aria-pressed={value === e.id}
           >
             {e.name}
           </button>
@@ -433,9 +431,7 @@ function WhoPicker({
         <button
           type="button"
           onClick={() => onChange(null, true)}
-          className={`min-h-9 rounded-md border px-1 py-1.5 text-[13px] font-medium transition-colors duration-150 ${
-            value === null ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
-          }`}
+          className="choice min-h-9 px-1 py-1.5 text-dense" aria-pressed={value === null}
         >
           Me
         </button>
@@ -496,7 +492,7 @@ function CompletePanel({
   ];
 
   return (
-    <div className="card p-4 flex flex-col gap-3 bg-surface">
+    <div className="well p-4 flex flex-col gap-3">
       <p className="label">Finalize job</p>
       <Field label="Final price" hint={Number(finalPrice) !== Number(job.price) ? `Quoted ${money(Number(job.price))}` : undefined}>
         <div className="relative">
@@ -523,9 +519,7 @@ function CompletePanel({
                   type="button"
                   disabled={m.disabled}
                   onClick={() => setPayMode(m.id)}
-                  className={`min-h-9 rounded-md border px-1 py-1.5 text-[12px] font-medium leading-tight transition-colors duration-150 ${
-                    payMode === m.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-                  } ${m.disabled ? "opacity-40 pointer-events-none" : ""}`}
+                  className={`choice min-h-9 px-1 py-1.5 text-xs leading-tight ${m.disabled ? "opacity-40 pointer-events-none" : ""}`} aria-pressed={payMode === m.id}
                 >
                   {m.label}
                 </button>
@@ -551,25 +545,25 @@ function CompletePanel({
                 value={memo}
                 onChange={(e) => setMemo(e.target.value)}
               />
-              <p className="col-span-2 text-[12px] text-faint -mt-1">
+              <p className="col-span-2 text-xs text-faint -mt-1">
                 Money already in hand — cash, Zelle, or a card you ran yourself.
               </p>
             </div>
           )}
           {payMode === "stripe" && (
-            <p className="text-[13px] text-ink-2 -mt-1">
+            <p className="text-dense text-ink-2 -mt-1">
               Emails <span className="font-medium num">{email}</span> a secure payment link for the final price. The
               ledger updates itself when they pay, and Tyler gets a push.
             </p>
           )}
           {payMode === "balance" && (
-            <p className="text-[13px] text-ink-2 -mt-1">
+            <p className="text-dense text-ink-2 -mt-1">
               The charge goes on the ledger; the balance shows what they owe. No email goes out.
             </p>
           )}
         </>
       ) : (
-        <p className="text-[13px] text-warn bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2">
+        <p className="text-dense note note-warn">
           Not linked to a customer — completing won&apos;t touch any ledger. Link first to track the money.
         </p>
       )}
@@ -647,21 +641,21 @@ function PaymentStatus({ job }: { job: JobWithCustomer }) {
   if (!state) return null;
   if (state.paid > 0) {
     return (
-      <p className="text-[13px] font-medium text-ok bg-ok-wash border border-[#bbe7c9] rounded-md px-3 py-2">
-        ✓ Paid <span className="num">{money(state.paid)}</span>
+      <p className="text-dense font-medium note note-ok">
+        <IconCheck width={14} height={14} weight="bold" className="inline -mt-0.5" /> Paid <span className="num">{money(state.paid)}</span>
         {state.link === "paid" ? " via Stripe" : state.method ? ` via ${state.method}` : ""}
       </p>
     );
   }
   if (state.link === "pending") {
     return (
-      <p className="text-[13px] font-medium text-warn bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2">
+      <p className="text-dense font-medium note note-warn">
         Stripe link sent — not paid yet
       </p>
     );
   }
   return (
-    <p className="text-[13px] text-ink-2 bg-surface border border-line rounded-md px-3 py-2">
+    <p className="note text-dense">
       Not paid yet — the charge is on their balance.
     </p>
   );
@@ -696,7 +690,7 @@ function WhoPanel({
   const [employeeId, setEmployeeId] = useState<string | null>(job.employee_id);
   const [keepAll, setKeepAll] = useState(job.self_done);
   return (
-    <div className="card p-4 flex flex-col gap-3 bg-surface">
+    <div className="well p-4 flex flex-col gap-3">
       <WhoPicker
         employees={employees}
         value={employeeId}
@@ -707,7 +701,7 @@ function WhoPanel({
           setKeepAll(k);
         }}
       />
-      <p className="text-[12px] text-faint -mt-1">
+      <p className="text-xs text-faint -mt-1">
         {job.status === "completed"
           ? "Changing this re-splits any payments already recorded on this job."
           : "Their calendar picks up the job; picking Me frees the worker's time."}
@@ -717,7 +711,7 @@ function WhoPanel({
           Back
         </button>
         <button className="btn btn-primary" disabled={pending} onClick={() => onSubmit(employeeId, keepAll)}>
-          {pending ? "Saving…" : "Save"}
+          {pending ? <Busy>Saving…</Busy> : "Save"}
         </button>
       </div>
     </div>
@@ -740,7 +734,7 @@ function TimesPanel({
   const [completed, setCompleted] = useState(toLocalInput(job.completed_at));
 
   return (
-    <div className="card p-4 flex flex-col gap-3 bg-surface">
+    <div className="well p-4 flex flex-col gap-3">
       <p className="label">Adjust job times</p>
       <Field label="Started (blank = not recorded)">
         <input type="datetime-local" className="input num" value={started} onChange={(e) => setStarted(e.target.value)} />
@@ -762,7 +756,7 @@ function TimesPanel({
             })
           }
         >
-          {pending ? "Saving…" : "Save times"}
+          {pending ? <Busy>Saving…</Busy> : "Save times"}
         </button>
       </div>
     </div>
@@ -789,7 +783,7 @@ function ApprovePanel({
   const [notify, setNotify] = useState(hasEmail);
 
   return (
-    <div className="card p-4 flex flex-col gap-3 bg-surface">
+    <div className="well p-4 flex flex-col gap-3">
       <p className="label">
         Approve — requested {fmtDateShort(job.date)} at {minToLabel(job.start_min)}
       </p>
@@ -832,7 +826,7 @@ function ApprovePanel({
           disabled={pending || startMin == null}
           onClick={() => startMin != null && onSubmit({ date, startMin, durationMin: duration, price: Number(price) }, notify)}
         >
-          {pending ? "Confirming…" : "Approve & confirm"}
+          {pending ? <Busy>Confirming…</Busy> : "Approve & confirm"}
         </button>
       </div>
     </div>
@@ -858,7 +852,7 @@ function ReschedulePanel({
   const [notify, setNotify] = useState(hasEmail);
 
   return (
-    <div className="card p-4 flex flex-col gap-3 bg-surface">
+    <div className="well p-4 flex flex-col gap-3">
       <p className="label">Reschedule — currently {fmtDateShort(job.date)} at {minToLabel(job.start_min)}</p>
       <div className="grid grid-cols-2 gap-2">
         <Field label="Date">
@@ -893,7 +887,7 @@ function ReschedulePanel({
           disabled={pending || startMin == null}
           onClick={() => startMin != null && onSubmit({ date, startMin, durationMin: duration }, notify)}
         >
-          {pending ? "Saving…" : "Reschedule"}
+          {pending ? <Busy>Saving…</Busy> : "Reschedule"}
         </button>
       </div>
     </div>
@@ -959,7 +953,7 @@ function EditPanel({
       : addonQuote(a, sizeId).price;
 
   return (
-    <div className="card p-4 flex flex-col gap-3 bg-surface">
+    <div className="well p-4 flex flex-col gap-3">
       <p className="label">Edit details</p>
       {job.customer_id && vehiclesLoaded && (
         <Field label={`Vehicles${selVehicles.length > 1 ? ` — ${selVehicles.length} cars this visit` : ""}`}>
@@ -1049,7 +1043,7 @@ function EditPanel({
             )
           }
         >
-          {pending ? "Saving…" : "Save changes"}
+          {pending ? <Busy>Saving…</Busy> : "Save changes"}
         </button>
       </div>
     </div>
@@ -1071,7 +1065,7 @@ function CancelPanel({
 }) {
   const [notify, setNotify] = useState(hasEmail);
   return (
-    <div className="card p-4 flex flex-col gap-3 bg-surface">
+    <div className="well p-4 flex flex-col gap-3">
       <p className="text-sm">{decline ? "Decline this booking request?" : "Cancel this appointment?"}</p>
       {hasEmail && (
         <label className="flex items-center gap-2.5 text-sm">
@@ -1121,7 +1115,7 @@ function LinkPanel({
   }, [job.id, job.contact_phone, job.contact_email, supabase]);
 
   return (
-    <div className="card p-4 flex flex-col gap-3 bg-surface">
+    <div className="well p-4 flex flex-col gap-3">
       <p className="label">Link booking to a customer</p>
       {suggestions.length > 0 && (
         <div className="flex flex-col gap-1.5">

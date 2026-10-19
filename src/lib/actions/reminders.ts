@@ -3,6 +3,7 @@
 // Manual reminders ("call Katy in November"). The morning-digest cron pushes
 // them to Tyler's phone on the due date; they stay on Today until marked done.
 import { revalidatePath } from "next/cache";
+// activity: reminders are Tyler's own notes — owner-only UI; workers have no path here.
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "./appointments";
 
@@ -17,6 +18,7 @@ export interface ReminderFields {
 }
 
 export async function createReminder(fields: ReminderFields): Promise<ActionResult> {
+  // activity: owner-only UI (Today reminders card)
   if (!fields.title.trim()) return { ok: false, error: "Give the reminder a title." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fields.dueOn)) return { ok: false, error: "Pick a date." };
   const db = await createClient();
@@ -37,6 +39,7 @@ export async function createReminder(fields: ReminderFields): Promise<ActionResu
 }
 
 export async function completeReminder(id: string): Promise<ActionResult> {
+  // activity: owner-only UI (Today reminders card)
   const db = await createClient();
   const { error } = await db.from("reminders").update({ done_at: new Date().toISOString() }).eq("id", id);
   if (error) return { ok: false, error: error.message };
@@ -45,6 +48,7 @@ export async function completeReminder(id: string): Promise<ActionResult> {
 }
 
 export async function deleteReminder(id: string): Promise<ActionResult> {
+  // activity: owner-only UI (Today reminders card)
   const db = await createClient();
   const { error } = await db.from("reminders").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };

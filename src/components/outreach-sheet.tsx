@@ -7,7 +7,7 @@ import { useState } from "react";
 import { logOutreach } from "@/lib/actions/relations";
 import { todayYmd } from "@/lib/time";
 import { OUTREACH_OUTCOMES, type OutreachOutcome } from "@/lib/types";
-import { ErrorNote, Field, Sheet } from "./ui";
+import { Busy, ErrorNote, Field, Sheet } from "./ui";
 
 const NEEDS_RESUME: OutreachOutcome[] = ["follow_up", "seasonal", "declined"];
 const RESUME_HINT: Record<string, string> = {
@@ -45,7 +45,8 @@ export function OutreachSheet({
                 key={o.id}
                 type="button"
                 onClick={() => setOutcome(o.id)}
-                className={`btn btn-sm justify-start ${outcome === o.id ? "border-brand bg-brand-wash text-brand-deep" : ""}`}
+                className="choice justify-start text-dense"
+                aria-pressed={outcome === o.id}
               >
                 {o.label}
               </button>
@@ -85,7 +86,7 @@ export function OutreachSheet({
             router.refresh();
           }}
         >
-          {pending ? "Saving…" : "Save touch"}
+          {pending ? <Busy>Saving…</Busy> : "Save touch"}
         </button>
       </div>
     </Sheet>

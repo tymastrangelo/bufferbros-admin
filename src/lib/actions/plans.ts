@@ -5,7 +5,7 @@ import { after } from "next/server";
 import { getRole } from "@/lib/auth";
 import { initialDetailPrice, visitsPerQuarter } from "@/lib/catalog";
 import { syncAppointmentToGcal } from "@/lib/gcal";
-import { notify } from "@/lib/notify";
+import { customerName, logActivity, usd } from "@/lib/notify";
 import { generateOccurrences, type GenerateResult } from "@/lib/occurrences";
 import { getCatalog } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
@@ -82,6 +82,12 @@ export async function createPlan(fields: PlanFields): Promise<ActionResult & { p
   if (error) return { ok: false, error: error.message };
   const vehErr = await setPlanVehicles(db, data.id, fields.vehicleIds ?? []);
   if (vehErr) return { ok: false, error: `Plan saved, but linking vehicles failed: ${vehErr.message}` };
+  await logActivity(
+    `started a ${fields.cadence} plan for ${await customerName(fields.customerId)}`,
+    [`${usd(fields.perVisitPrice)}/visit · ${fields.durationMin} min`, fields.billingNote && `Billing: ${fields.billingNote}`],
+    `/plans/${data.id}`,
+    { tags: ["repeat"] }
+  );
 
   // ponytail: prepay failing after the plan row exists is surfaced, not rolled back —
   // the plan page's "Record prepay" is the retry path.
@@ -101,6 +107,7 @@ export async function updatePlan(
   applyToScheduled = false
 ): Promise<ActionResult & { updatedVisits?: number }> {
   const db = await createClient();
+  const { data: before } = await db.from("plans").select("*").eq("id", id).maybeSingle();
   const { error } = await db.from("plans").update(toRow(fields)).eq("id", id);
   if (error) return { ok: false, error: error.message };
   const vehErr = await setPlanVehicles(db, id, fields.vehicleIds ?? []);
@@ -127,6 +134,17 @@ export async function updatePlan(
     const ids = (data ?? []).map((a) => a.id);
     after(() => Promise.all(ids.map(syncAppointmentToGcal)));
   }
+  await logActivity(
+    `edited ${await customerName(fields.customerId)}'s plan`,
+    [
+      before && Number(before.per_visit_price) !== fields.perVisitPrice && `Price: ${usd(before.per_visit_price)} → ${usd(fields.perVisitPrice)}/visit`,
+      before && before.cadence !== fields.cadence && `Cadence: ${before.cadence} → ${fields.cadence}`,
+      before && before.duration_min !== fields.durationMin && `Length: ${before.duration_min} → ${fields.durationMin} min`,
+      applyToScheduled && `Applied to ${updatedVisits} upcoming visit${updatedVisits === 1 ? "" : "s"}`,
+    ],
+    `/plans/${id}`,
+    { tags: ["pencil2"] }
+  );
   refresh();
   return { ok: true, id, updatedVisits };
 }
@@ -151,6 +169,16 @@ export async function setPlanStatus(id: string, status: PlanStatus): Promise<Act
     if (cancelErr) return { ok: false, error: cancelErr.message };
     const ids = (cancelled ?? []).map((a) => a.id);
     after(() => Promise.all(ids.map(syncAppointmentToGcal)));
+    const { data: p } = await db.from("plans").select("customer_id").eq("id", id).maybeSingle();
+    await logActivity(
+      `${status === "paused" ? "paused" : "ended"} ${await customerName(p?.customer_id)}'s plan`,
+      [`${ids.length} upcoming visit${ids.length === 1 ? "" : "s"} taken off the calendar`],
+      `/plans/${id}`,
+      { tags: ["pause_button"], priority: 4 }
+    );
+  } else {
+    const { data: p } = await db.from("plans").select("customer_id").eq("id", id).maybeSingle();
+    await logActivity(`reactivated ${await customerName(p?.customer_id)}'s plan`, [], `/plans/${id}`, { tags: ["repeat"] });
   }
   refresh();
   return { ok: true, id };
@@ -225,6 +253,15 @@ export async function resumePlan(
       entry = { date: "", price };
     }
   }
+  await logActivity(
+    `resumed ${await customerName(plan.customer_id)}'s plan`,
+    [
+      `${result.created} visit${result.created === 1 ? "" : "s"} scheduled${result.conflicts.length ? `, ${result.conflicts.length} need placing by hand` : ""}`,
+      entry && entry.date && `First visit back ${entry.date} as a re-entry detail at ${usd(entry.price)}`,
+    ],
+    `/plans/${planId}`,
+    { tags: ["repeat"] }
+  );
   refresh();
   return { ok: true, result, entry };
 }
@@ -278,10 +315,15 @@ export async function recordPlanPrepay(
   const { error } = await db.from("ledger_entries").insert(rows);
   if (error) return { ok: false, error: error.message };
 
-  if (role === "washer") {
-    const push = `${plan.customers?.name ?? "Customer"} · $${paid} for ${input.visits} visits${discount ? ` (saved $${discount})` : ""}`;
-    after(() => notify("owner", "Plan prepay collected", push, `/plans/${planId}`));
-  }
+  await logActivity(
+    `collected a plan prepay from ${plan.customers?.name ?? "a customer"}`,
+    [
+      `${usd(paid)} ${input.method} for ${input.visits} visits${discount ? ` (they saved ${usd(discount)})` : ""}`,
+      `Covers visits at ${usd(perVisit)} each`,
+    ],
+    `/plans/${planId}`,
+    { tags: ["moneybag"] }
+  );
   refresh();
   return { ok: true, id: planId, paid, discount };
 }
@@ -302,6 +344,15 @@ export async function schedulePlanVisits(
   const db = await createClient();
   try {
     const result = await generateOccurrences(db, planId, untilYmd);
+    await logActivity(
+      planId ? "scheduled plan visits" : "scheduled visits for every active plan",
+      [
+        `${result.created} visit${result.created === 1 ? "" : "s"} added${untilYmd ? ` through ${untilYmd}` : ""}`,
+        result.conflicts.length > 0 && `${result.conflicts.length} conflict${result.conflicts.length === 1 ? "" : "s"} need placing by hand`,
+      ],
+      planId ? `/plans/${planId}` : "/plans",
+      { tags: ["calendar"] }
+    );
     refresh();
     return { ok: true, result };
   } catch (e) {

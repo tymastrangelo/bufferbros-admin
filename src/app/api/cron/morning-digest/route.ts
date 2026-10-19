@@ -41,13 +41,15 @@ export async function GET(request: Request) {
         (j) =>
           `${minToLabel(j.start_min)} — ${j.customers?.name ?? j.contact_name ?? "Unknown"} · ${j.service_name} · $${j.price}`
       );
-      await notify("both", `Today: ${jobs.length} job${jobs.length === 1 ? "" : "s"}`, lines.join("\n"));
+      await notify("both", `Today: ${jobs.length} job${jobs.length === 1 ? "" : "s"}`, lines.join("\n"), "/", { tags: ["sunrise"] });
     }
     if (pendingQ.count) {
       await notify(
         "owner",
         "Web bookings waiting",
-        `${pendingQ.count} booking${pendingQ.count === 1 ? "" : "s"} still need${pendingQ.count === 1 ? "s" : ""} your approval.`
+        `${pendingQ.count} booking${pendingQ.count === 1 ? "" : "s"} still need${pendingQ.count === 1 ? "s" : ""} your approval — the customer${pendingQ.count === 1 ? " is" : "s are"} waiting on a confirmation.`,
+        "/",
+        { tags: ["bellhop_bell"], priority: 4 }
       );
     }
 
@@ -66,7 +68,8 @@ export async function GET(request: Request) {
         "owner",
         `Unpaid Stripe links: $${total}`,
         `${unpaid.length} link${unpaid.length === 1 ? "" : "s"} outstanding (oldest ${oldestDays}d): ${names}${unpaid.length > 4 ? "…" : ""}`,
-        "/money/payments"
+        "/money/payments",
+        { tags: ["credit_card"] }
       );
     }
     // Manual reminders due today (or missed on a day the cron didn't run). Pushed
@@ -96,7 +99,8 @@ export async function GET(request: Request) {
           "owner",
           `Reminder: ${r.title}`,
           parts.join(" · ") || "You asked to be reminded today.",
-          r.customers ? `/customers/${r.customers.id}` : "/"
+          r.customers ? `/customers/${r.customers.id}` : "/",
+          { tags: ["alarm_clock"], priority: 4 }
         );
       }
       await db
@@ -134,7 +138,8 @@ export async function GET(request: Request) {
         "owner",
         `Reach out: ${outreachDue.length} client${outreachDue.length === 1 ? "" : "s"}`,
         `${names}${outreachDue.length > 4 ? "…" : ""} — the full list is on Today.`,
-        "/"
+        "/",
+        { tags: ["telephone_receiver"] }
       );
     }
 

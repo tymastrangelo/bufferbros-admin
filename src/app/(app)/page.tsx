@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { getRole } from "@/lib/auth";
 import { netOwed, type PayoutRow } from "@/lib/payouts";
 import { computeOutreachDue, computeReviewAsks, type OutreachCustomer } from "@/lib/outreach";
+import { findDuplicates, pairKey } from "@/lib/duplicates";
 import { getCatalog, getSettingsMap } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { addDays, fmtDateLong, todayYmd, weekdayOf } from "@/lib/time";
@@ -63,14 +64,22 @@ export default async function TodayPage() {
   ]);
 
   // Client-relations queue: who's due for a reach-out / a review ask.
-  const [outreachCustQ, lastDoneQ, nextVisitQ] = await Promise.all([
+  const [outreachCustQ, lastDoneQ, nextVisitQ, dismissedQ] = await Promise.all([
     db
       .from("customers")
-      .select("id,name,phone,email,archived,outreach_status,resume_on,last_contacted_on,review_asked_on,review_left_on")
+      .select("id,name,phone,email,archived,created_at,outreach_status,resume_on,last_contacted_on,review_asked_on,review_left_on")
       .eq("archived", false),
     db.from("appointments").select("customer_id,date").eq("status", "completed").not("customer_id", "is", null).order("date", { ascending: false }),
     db.from("appointments").select("customer_id,date").eq("status", "scheduled").gte("date", today).not("customer_id", "is", null),
+    db.from("customer_not_duplicates").select("a,b"),
   ]);
+  // Duplicate customers (same phone / email / name) → one "merge" nudge in Needs attention.
+  const dupGroups = findDuplicates(
+    ((outreachCustQ.data ?? []) as { id: string; name: string; phone: string | null; email: string | null; created_at: string }[]).map(
+      (c) => ({ ...c, addresses: [], tags: [], archived: false, activity: 0 })
+    ),
+    ((dismissedQ.data ?? []) as { a: string; b: string }[]).map((d) => pairKey(d.a, d.b))
+  );
   const lastDetail = new Map<string, string>();
   for (const r of (lastDoneQ.data ?? []) as { customer_id: string; date: string }[]) {
     if (!lastDetail.has(r.customer_id)) lastDetail.set(r.customer_id, r.date);
@@ -145,6 +154,10 @@ export default async function TodayPage() {
     unlinked: (unlinkedQ.data ?? []) as JobWithCustomer[],
     owed: owed.slice(0, 6),
     plansWithoutVisit: plansWithoutVisit.slice(0, 6),
+    duplicates: dupGroups.map((g) => ({
+      name: ((outreachCustQ.data ?? []) as { id: string; name: string }[]).find((c) => c.id === g.ids[0])?.name ?? "Someone",
+      count: g.ids.length,
+    })),
   };
 
   return (

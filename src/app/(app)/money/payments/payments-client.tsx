@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { IconDownload, IconPlus } from "@/components/icons";
 import { LedgerEntrySheet } from "@/components/ledger-entry-sheet";
-import { EmptyState } from "@/components/ui";
+import { EmptyState, SearchInput } from "@/components/ui";
 import { money } from "@/lib/format";
 import { fmtDateShort, todayYmd } from "@/lib/time";
 import { PAYMENT_METHODS, type LedgerEntry } from "@/lib/types";
@@ -42,9 +42,11 @@ export function PaymentsClient({ rows, openNew }: { rows: PaymentRow[]; openNew:
   const total = filtered.reduce((s, r) => s + r.amount, 0);
 
   return (
-    <div className="mt-4">
+    <div className="mt-5">
       <div className="flex flex-wrap items-center gap-2">
-        <input className="input w-auto! grow md:grow-0 md:w-56!" placeholder="Filter by customer or memo…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="grow md:grow-0 md:w-60">
+          <SearchInput placeholder="Filter by customer or memo…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
         <select className="select w-auto!" value={method} onChange={(e) => setMethod(e.target.value)} aria-label="Method filter">
           <option value="">All methods</option>
           {PAYMENT_METHODS.map((m) => (
@@ -63,7 +65,7 @@ export function PaymentsClient({ rows, openNew }: { rows: PaymentRow[]; openNew:
             <IconDownload width={14} height={14} /> CSV
           </a>
           <button className="btn btn-primary btn-sm" onClick={() => setSheet({})}>
-            <IconPlus width={13} height={13} /> Record
+            <IconPlus width={14} height={14} /> Record
           </button>
         </div>
       </div>

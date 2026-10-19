@@ -6,7 +6,7 @@ import { useState } from "react";
 import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { PlanFormSheet } from "@/components/plan-form";
 import { ScheduleSheet } from "@/components/schedule-sheet";
-import { Balance, ErrorNote, Sheet, StatusChip } from "@/components/ui";
+import { Balance, Busy, ErrorNote, PageHeader, Sheet, StatusChip } from "@/components/ui";
 import { recordPlanPrepay, resumePlan, setPlanStatus } from "@/lib/actions/plans";
 import { sendPaymentRequest } from "@/lib/actions/stripe";
 import { initialDetailPrice, visitsPerQuarter, type Catalog } from "@/lib/catalog";
@@ -86,23 +86,20 @@ export function PlanDetail({
   }
 
   return (
-    <div className="px-4 md:px-8 py-5 md:py-7 max-w-4xl">
-      <nav className="text-[13px] text-faint mb-2">
-        <Link href="/plans" className="hover:text-ink">
-          Plans
-        </Link>{" "}
-        / {plan.customers.name}
-      </nav>
-
-      <header className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold flex items-center gap-2">
-            <Link href={`/customers/${plan.customer_id}`} className="hover:underline underline-offset-2">
+    <div className="page max-w-4xl">
+      <PageHeader
+        back={{ href: "/plans", label: "Plans" }}
+        title={
+          <span className="flex items-center gap-2.5 flex-wrap">
+            <Link href={`/customers/${plan.customer_id}`} className="hover:underline underline-offset-4 decoration-line-2">
               {plan.customers.name}
             </Link>
             <StatusChip status={plan.status} />
-          </h1>
-          <p className="text-sm text-ink-2 mt-1 capitalize">
+          </span>
+        }
+        sub={
+        <>
+          <p className="capitalize">
             {plan.cadence === "custom" ? `Every ${plan.interval_days} days` : plan.cadence} ·{" "}
             <span className="num">{money(plan.per_visit_price)}</span>/visit · {plan.duration_min} min
             {plan.preferred_dow != null && ` · ${WEEKDAYS[plan.preferred_dow]}s`}
@@ -115,8 +112,10 @@ export function PlanDetail({
             </p>
           )}
           {plan.billing_note && <p className="text-sm text-warn mt-0.5">{plan.billing_note}</p>}
-        </div>
-        <div className="flex gap-1.5 shrink-0">
+        </>
+        }
+        actions={
+        <>
           <button className="btn btn-sm" onClick={() => setEditOpen(true)}>
             Edit
           </button>
@@ -130,11 +129,12 @@ export function PlanDetail({
               Schedule visits…
             </button>
           )}
-        </div>
-      </header>
+        </>
+        }
+      />
 
       {!hasInitialDetail && plan.status === "active" && !plan.skip_entry && (
-        <div className="mt-3 rounded-md border border-[#fde68a] bg-warn-wash px-4 py-3 text-sm">
+        <div className="mb-4 note note-warn px-4 py-3 text-sm">
           <p className="font-medium text-warn">No completed detail on record yet.</p>
           <p className="text-warn mt-0.5">
             New maintenance clients start with a full Standard Detail at {catalog.rules.planInitialDiscountPct}% off (
@@ -145,7 +145,7 @@ export function PlanDetail({
       )}
 
       {/* Economics */}
-      <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-px bg-line border border-line rounded-[10px] overflow-hidden">
+      <div className="stat-grid grid-cols-2 md:grid-cols-4">
         <Econ label="Visits completed" value={String(completed.length)} />
         <Econ label="Revenue to date" value={money(revenue)} />
         <Econ label="Customer balance" value={<Balance amount={balance} />} />
@@ -158,7 +158,7 @@ export function PlanDetail({
       <ErrorNote>{error}</ErrorNote>
       {genMsg && <p className="mt-3 text-sm text-ok">{genMsg}</p>}
       {conflicts.length > 0 && (
-        <div className="mt-3 rounded-md border border-[#fde68a] bg-warn-wash px-4 py-3">
+        <div className="mt-3 note note-warn px-4 py-3">
           <p className="text-sm font-medium text-warn">Needs manual placement:</p>
           <ul className="mt-1 text-sm text-warn max-h-40 overflow-y-auto">
             {conflicts.map((c) => (
@@ -168,7 +168,7 @@ export function PlanDetail({
             ))}
           </ul>
           <Link href={`/calendar?view=week&d=${conflicts[0].date}`} className="text-sm font-semibold text-warn underline underline-offset-2">
-            Open calendar to place them →
+            Open calendar to place them
           </Link>
         </div>
       )}
@@ -202,7 +202,7 @@ export function PlanDetail({
         )}
       </div>
       {plan.status === "active" && (
-        <p className="mt-1.5 text-[12px] text-faint">
+        <p className="mt-2 text-xs text-faint max-w-xl">
           Pausing takes every upcoming visit off the calendar but keeps the plan (and its rate) on file — for
           snowbirds and season breaks. Ending does the same, permanently.
         </p>
@@ -383,11 +383,11 @@ function ResumeSheet({
             disabled={pending != null}
             onClick={() => go(o.mode)}
           >
-            <p className="text-[15px] font-semibold flex items-center gap-2">
-              {pending === o.mode ? "Resuming…" : o.title}
-              {o.recommended && <span className="chip bg-brand-wash text-brand-deep">recommended</span>}
+            <p className="text-md font-semibold flex items-center gap-2">
+              {pending === o.mode ? <Busy>Resuming…</Busy> : o.title}
+              {o.recommended && <span className="chip chip-brand">recommended</span>}
             </p>
-            <p className="text-[13px] text-ink-2 mt-1">{o.desc}</p>
+            <p className="text-dense text-ink-2 mt-1">{o.desc}</p>
           </button>
         ))}
         <ErrorNote>{error}</ErrorNote>
@@ -473,7 +473,7 @@ function PrepaySheet({
                 key={b.label}
                 type="button"
                 onClick={() => setVisits(String(bn))}
-                className={`chip cursor-pointer num ${n === bn ? "bg-ink text-white" : "bg-[#f1f4f9] text-ink-2 hover:bg-line"}`}
+                className="chip num" aria-pressed={n === bn}
               >
                 {b.label} · {bn}v · {money(total)}
               </button>
@@ -497,7 +497,7 @@ function PrepaySheet({
           </label>
         </div>
         {n > 0 && !qualifies && (
-          <p className="text-[13px] text-warn bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2">
+          <p className="text-dense note note-warn">
             Fewer than {minVisits} visits — no discount, but the credit still goes on their balance.
           </p>
         )}
@@ -522,12 +522,12 @@ function PrepaySheet({
         </div>
         <ErrorNote>{error}</ErrorNote>
         <button className="btn btn-primary h-11" disabled={pending || n < 1} onClick={submit}>
-          {pending ? "Working…" : `Record ${money(due)} prepay`}
+          {pending ? <Busy>Working…</Busy> : `Record ${money(due)} prepay`}
         </button>
         <button className="btn" disabled={pending || n < 1 || !plan.customers.email} onClick={submitStripe}>
           Email a Stripe link for {money(due)} instead
         </button>
-        {!plan.customers.email && <p className="text-[12px] text-faint -mt-2">Stripe link needs an email on the customer.</p>}
+        {!plan.customers.email && <p className="text-xs text-faint -mt-2">Stripe link needs an email on the customer.</p>}
       </div>
     </Sheet>
   );
@@ -550,14 +550,14 @@ function VisitSection({
   const hidden = jobs.length - shown.length;
   return (
     <section className="mt-6">
-      <h2 className="label mb-1.5">{title}</h2>
+      <h2 className="label mb-2">{title}</h2>
       <div className="card divide-y divide-line">
         {jobs.length === 0 && <p className="px-4 py-3 text-sm text-faint">{empty}</p>}
         {shown.map((j) => (
           <VisitRow key={j.id} j={j} onOpen={() => onOpen(j)} />
         ))}
         {hidden > 0 && (
-          <button className="w-full px-4 py-2.5 text-sm font-medium text-brand-deep hover:bg-[#f8fafd]" onClick={onShowAll}>
+          <button className="row-more" onClick={onShowAll}>
             Show all {jobs.length}
           </button>
         )}
@@ -568,7 +568,7 @@ function VisitSection({
 
 function VisitRow({ j, onOpen }: { j: JobWithCustomer; onOpen: () => void }) {
   return (
-    <button className="w-full text-left px-4 py-2.5 hover:bg-[#f8fafd] flex items-center gap-3" onClick={onOpen}>
+    <button className="row row-link py-2.5" onClick={onOpen}>
       <p className="text-sm font-medium num grow">
         {fmtDateShort(j.date)} at {minToLabel(j.start_min)}
       </p>
@@ -580,9 +580,9 @@ function VisitRow({ j, onOpen }: { j: JobWithCustomer; onOpen: () => void }) {
 
 function Econ({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="bg-card px-3.5 py-3">
+    <div>
       <p className="label">{label}</p>
-      <p className="mt-1 text-lg font-semibold num leading-none">{value}</p>
+      <p className="mt-1.5 text-xl font-semibold num leading-none tracking-tight">{value}</p>
     </div>
   );
 }

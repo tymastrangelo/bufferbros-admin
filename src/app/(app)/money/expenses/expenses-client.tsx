@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { IconDownload } from "@/components/icons";
-import { EmptyState, ErrorNote, Field, Sheet } from "@/components/ui";
+import { Busy, EmptyState, ErrorNote, Field, Sheet } from "@/components/ui";
 import { deleteExpense, deleteRecurring, saveExpense, saveRecurring } from "@/lib/actions/money";
 import { money } from "@/lib/format";
 import { fmtDateShort, todayYmd } from "@/lib/time";
@@ -44,17 +44,17 @@ export function ExpensesClient({
   }
 
   return (
-    <div className="mt-4">
+    <div className="mt-5">
       {/* Recurring bills due — tap to confirm the real amount */}
       {due.length > 0 && (
-        <div className="card p-3.5 mb-4 border-brand/40">
+        <div className="card p-4 mb-4 border-brand-line!">
           <p className="label mb-2">Due this {due.some((d) => d.cadence === "yearly") ? "period" : "month"}</p>
           <div className="flex flex-col gap-1.5">
             {due.map((r) => (
               <button
                 key={r.id}
                 onClick={() => setConfirm(r)}
-                className="flex items-center justify-between rounded-md px-3 py-2.5 bg-[#f8fafd] hover:bg-brand-wash text-left"
+                className="flex items-center justify-between rounded-md px-3 py-2.5 bg-subtle text-left transition-colors hover:bg-brand-wash active:scale-[0.99]"
               >
                 <span className="text-sm font-medium">{r.name}</span>
                 <span className="text-sm num text-ink-2">
@@ -67,8 +67,8 @@ export function ExpensesClient({
       )}
 
       {/* Quick add — thumb-first, no sheet needed */}
-      <div className="card p-3.5">
-        <p className="label mb-2">Quick add</p>
+      <div className="card p-4">
+        <p className="label mb-2.5">Quick add</p>
         <div className="grid grid-cols-2 md:grid-cols-[120px_1fr_140px_150px_auto] gap-2">
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-faint">$</span>
@@ -84,7 +84,7 @@ export function ExpensesClient({
           </select>
           <input type="date" className="input num col-span-2 md:col-span-1" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Date" />
           <button className="btn btn-primary col-span-2 md:col-span-1" disabled={pending || !amount} onClick={quickAdd}>
-            {pending ? "Adding…" : "Add"}
+            {pending ? <Busy>Adding…</Busy> : "Add"}
           </button>
         </div>
         <div className="mt-2">
@@ -181,7 +181,7 @@ function ConfirmDueSheet({ item, onClose }: { item: RecurringExpense; onClose: (
             router.refresh();
           }}
         >
-          {pending ? "Posting…" : "Post expense"}
+          {pending ? <Busy>Posting…</Busy> : "Post expense"}
         </button>
       </div>
     </Sheet>
@@ -202,13 +202,13 @@ function RecurringSheet({ items, onClose }: { items: RecurringExpense[]; onClose
         <button className="btn btn-primary" onClick={() => setMode("new")}>
           Add recurring
         </button>
-        <div className="flex flex-col divide-y divide-line border border-line rounded-md overflow-hidden">
-          {items.length === 0 && <p className="px-3 py-3 text-sm text-faint bg-card">Nothing recurring yet — add the Supabase bill.</p>}
+        <div className="card flex flex-col divide-y divide-line overflow-hidden">
+          {items.length === 0 && <p className="px-4 py-3 text-sm text-faint">Nothing recurring yet — add the Supabase bill.</p>}
           {items.map((r) => (
             <button
               key={r.id}
               onClick={() => setMode(r)}
-              className={`flex items-center justify-between gap-3 px-3 py-2.5 bg-card text-left hover:bg-[#f8fafd] ${r.active ? "" : "opacity-50"}`}
+              className={`row row-link justify-between py-2.5 ${r.active ? "" : "opacity-50"}`}
             >
               <span className="text-sm font-medium">
                 {r.name}
@@ -318,7 +318,7 @@ function RecurringForm({ item, onBack, onClose }: { item: RecurringExpense | nul
             router.refresh();
           }}
         >
-          {pending ? "Saving…" : "Save"}
+          {pending ? <Busy>Saving…</Busy> : "Save"}
         </button>
         <div className="flex gap-2">
           <button className="btn grow" disabled={pending} onClick={onBack}>
@@ -393,7 +393,7 @@ function ExpenseEditSheet({ expense, onClose }: { expense: Expense; onClose: () 
             router.refresh();
           }}
         >
-          {pending ? "Saving…" : "Save"}
+          {pending ? <Busy>Saving…</Busy> : "Save"}
         </button>
         <button
           className="btn btn-danger"

@@ -262,7 +262,7 @@ export function PlanFormSheet({
                     <p className="text-sm font-semibold">
                       Entry detail first — <span className="num">{money(entryPrice)}</span>
                     </p>
-                    <p className="text-[12px] text-ink-2 mt-0.5">
+                    <p className="text-xs text-ink-2 mt-0.5">
                       Full Standard Detail at {catalog.rules.planInitialDiscountPct}% off to get the car to maintenance
                       shape — book it as a one-time job before visits start.
                     </p>
@@ -273,7 +273,7 @@ export function PlanFormSheet({
                     className={`card p-3 text-left transition-colors duration-150 ${skipEntry ? "border-brand" : "hover:border-brand"}`}
                   >
                     <p className="text-sm font-semibold">Straight to maintenance</p>
-                    <p className="text-[12px] text-ink-2 mt-0.5">
+                    <p className="text-xs text-ink-2 mt-0.5">
                       Skip the entry detail — the car&apos;s already in shape, visits start at the plan rate.
                     </p>
                   </button>
@@ -292,9 +292,7 @@ export function PlanFormSheet({
                   setCadence(c.id);
                   suggestPrice(c.id, vehicleIds);
                 }}
-                className={`h-9 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
-                  cadence === c.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-                }`}
+                className="choice h-9 text-dense" aria-pressed={cadence === c.id}
               >
                 {c.label}
               </button>
@@ -332,9 +330,7 @@ export function PlanFormSheet({
                     setPrepay(o.v);
                     if (o.v && !prepayVisits) setPrepayVisits(String(visitsPerQuarter(cadence, Number(intervalDays) || null)));
                   }}
-                  className={`h-9 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
-                    prepay === o.v ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-                  }`}
+                  className="choice h-9 text-dense" aria-pressed={prepay === o.v}
                 >
                   {o.label}
                 </button>
@@ -366,7 +362,7 @@ export function PlanFormSheet({
                         key={b.label}
                         type="button"
                         onClick={() => setPrepayVisits(String(bn))}
-                        className={`chip cursor-pointer num ${n === bn ? "bg-ink text-white" : "bg-[#f1f4f9] text-ink-2 hover:bg-line"}`}
+                        className="chip num" aria-pressed={n === bn}
                       >
                         {b.label} · {bn}v{per > 0 ? ` · ${money(total)}` : ""}
                       </button>
@@ -394,7 +390,7 @@ export function PlanFormSheet({
                   </Field>
                 </div>
                 {n > 0 && per > 0 && (
-                  <p className="text-[13px] text-ink-2 num">
+                  <p className="text-dense text-ink-2 num">
                     {n} × {money(per)}
                     {discount > 0 ? ` − ${catalog.rules.prepayDiscountPct}%` : ""} ={" "}
                     <span className="font-semibold text-ink">{money(due)}</span> onto their balance when you save
@@ -410,7 +406,7 @@ export function PlanFormSheet({
             const q = visitsPerQuarter(cadence, Number(intervalDays) || null);
             const block = (n: number) => money(Math.round(Number(price) * n * (1 - catalog.rules.prepayDiscountPct / 100)));
             return (
-              <p className="text-[13px] text-ink-2 -mt-1.5 num">
+              <p className="text-dense text-ink-2 -mt-1.5 num">
                 Paying upfront saves {catalog.rules.prepayDiscountPct}%: quarter ({q}v) {block(q)} · half year {block(q * 2)} · full
                 year {block(q * 4)}
                 {plan ? " — record it from the plan page." : " — switch Billing to “Pays upfront” to record it now."}
@@ -460,7 +456,7 @@ export function PlanFormSheet({
 
         <ErrorNote>{error}</ErrorNote>
         {confirmApply ? (
-          <div className="card p-4 flex flex-col gap-3 bg-surface">
+          <div className="well p-4 flex flex-col gap-3">
             <p className="text-sm">
               This plan already has{" "}
               <span className="font-semibold">

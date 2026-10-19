@@ -7,8 +7,14 @@ export const metadata: Metadata = { title: "Sign in" };
 
 export default function LoginPage() {
   return (
-    <div className="min-h-dvh bg-pit flex flex-col items-center justify-center px-4 py-10">
-      <main className="w-full max-w-[380px]">
+    <div className="relative min-h-dvh bg-pit flex flex-col items-center justify-center px-4 py-10 overflow-hidden">
+      {/* soft brand glow behind the logo */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute left-1/2 top-[18%] h-[420px] w-[620px] -translate-x-1/2 rounded-full opacity-40 blur-3xl"
+        style={{ background: "radial-gradient(closest-side, rgb(37 99 235 / 0.55), transparent)" }}
+      />
+      <main className="stagger relative w-full max-w-[380px]">
         <LogoFull className="w-[min(78vw,320px)] mx-auto mb-3" />
         <p className="label text-center text-pit-text/70! mb-8">Operations dashboard</p>
         <Suspense>

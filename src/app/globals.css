@@ -1,43 +1,131 @@
 @import "tailwindcss";
 
+/* ───────────────────────────────────────────────────────────────────────────
+   Buffer Bros design tokens — DESIGN.md is the guide; this file is the law.
+   Every color is light-dark(): ONE definition per token, both themes. The
+   theme always follows the OS — no in-app switch (HIG dark-mode.md).
+   Never hard-code a hex in a component — if a color is missing, add a token.
+   ─────────────────────────────────────────────────────────────────────────── */
 @theme {
-  --color-ink: #0a0e14;
-  --color-ink-2: #46505e;
-  --color-faint: #8b93a1;
-  --color-surface: #f6f8fb;
-  --color-card: #ffffff;
-  --color-line: #e5e7eb;
-  --color-line-2: #d3d9e2;
-  --color-brand: #2563eb;
-  --color-brand-deep: #1d4ed8;
-  --color-brand-wash: #eff4ff;
-  --color-ok: #15803d;
-  --color-ok-wash: #ecfdf3;
-  --color-bad: #dc2626;
-  --color-bad-wash: #fef2f2;
-  --color-warn: #b45309;
-  --color-warn-wash: #fffbeb;
-  /* dark "pit lane" surfaces — where the white logo lives */
+  /* text */
+  --color-ink: light-dark(#0a0e14, #e8edf4);
+  --color-ink-2: light-dark(#46505e, #a3adbb);
+  --color-faint: light-dark(#656e7c, #8590a0); /* ≥4.5:1 on card/surface/muted, both themes */
+  --color-on-ink: light-dark(#ffffff, #0a0e14); /* text sitting on a bg-ink fill */
+
+  /* surfaces, back to front */
+  --color-surface: light-dark(#f5f7fa, #0a0d12); /* page */
+  --color-card: light-dark(#ffffff, #12161d); /* cards, sheets, inputs */
+  --color-subtle: light-dark(#fafbfd, #0f1318); /* rails, table heads, inset wells */
+  --color-muted: light-dark(#f0f3f7, #1a2029); /* hover fills, neutral chips */
+  --color-line: light-dark(#e4e8ee, #20262f); /* hairlines */
+  --color-line-2: light-dark(#d3d9e2, #2c3440); /* control borders */
+
+  /* brand */
+  --color-brand: light-dark(#2563eb, #2f6be0); /* fills, focus — white text 5.2:1 / 4.9:1 */
+  --color-brand-strong: light-dark(#1d4ed8, #2a5fcc); /* primary hover */
+  --color-brand-deep: light-dark(#1d4ed8, #8db8ff); /* brand-colored TEXT */
+  --color-brand-wash: light-dark(#eff4ff, #13203a);
+  --color-brand-line: light-dark(#c7d7fe, #23406f);
+
+  /* status — text / wash (fill) / line (border) */
+  --color-ok: light-dark(#13773a, #4ccb7f);
+  --color-ok-wash: light-dark(#ecfdf3, #0e2318);
+  --color-ok-line: light-dark(#bbe7c9, #1d4a31);
+  --color-warn: light-dark(#b45309, #f0ae4c);
+  --color-warn-wash: light-dark(#fffbeb, #261c0c);
+  --color-warn-line: light-dark(#fde68a, #4f3b15);
+  --color-bad: light-dark(#c81e1e, #f47a7a);
+  --color-bad-wash: light-dark(#fef2f2, #2a1214);
+  --color-bad-line: light-dark(#fecaca, #5c2226);
+
+  /* data viz — categorical, CVD-checked in both themes */
+  --color-viz-1: light-dark(#2563eb, #5b93f5);
+  --color-viz-2: light-dark(#0d9488, #2bb3a6);
+  --color-viz-3: light-dark(#d97706, #e6a03c);
+
+  /* "pit lane" — always dark, theme-independent: where the white logo lives */
   --color-pit: #0a0e14;
   --color-pit-2: #111826;
   --color-pit-line: #1d2634;
   --color-pit-text: #98a4b5;
   --color-pit-bright: #e8edf4;
   --color-brand-glow: #7fb0ff;
+
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 10px;
+
+  /* type scale — use these names, never text-[Npx]. rem, so text follows the
+     person's size setting (iOS Dynamic Type via -apple-system-body below).
+     Floor is 11px: HIG minimum (accessibility.md). Sizes at a 16px root: */
+  --text-micro: 0.6875rem; /* 11 — tab-bar labels, rail badges */
+  --text-micro--line-height: 1.2;
+  --text-label: 0.6875rem; /* 11 — .label, chips */
+  --text-label--line-height: 1.35;
+  --text-xs: 0.75rem; /* 12 — captions, hints */
+  --text-xs--line-height: 1.45;
+  --text-dense: 0.8125rem; /* 13 — secondary lines in dense rows */
+  --text-dense--line-height: 1.45;
+  --text-sm: 0.875rem; /* 14 — body default */
+  --text-sm--line-height: 1.5;
+  --text-md: 0.9375rem; /* 15 — row titles, sheet titles */
+  --text-md--line-height: 1.4;
+
+  --radius-sm: 6px; /* chips-in-rows, small buttons */
+  --radius-md: 8px; /* buttons, inputs, list rows */
+  --radius-lg: 12px; /* cards */
+  --radius-xl: 16px; /* sheets, dialogs */
+
+  /* elevation — shadows in light, hairlines carry it in dark */
+  --shadow-card: 0 1px 2px var(--sh-1), 0 1px 1px var(--sh-2);
+  --shadow-raise: 0 2px 6px var(--sh-1), 0 1px 2px var(--sh-2);
+  --shadow-pop: 0 12px 32px -6px var(--sh-3), 0 4px 10px -4px var(--sh-1);
+
+  /* motion — CSS twins of src/lib/motion.ts */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+:root {
+  color-scheme: light dark;
+  --sh-1: light-dark(rgb(16 24 40 / 0.06), rgb(0 0 0 / 0.3));
+  --sh-2: light-dark(rgb(16 24 40 / 0.04), rgb(0 0 0 / 0.2));
+  --sh-3: light-dark(rgb(16 24 40 / 0.16), rgb(0 0 0 / 0.6));
+  --dur-fast: 120ms; /* hover, press, color */
+  --dur-base: 200ms; /* enter, reveal */
+}
+:root { interpolate-size: allow-keywords; } /* lets <details> animate to height:auto where supported */
+
+/* iPhone/iPad: the root size IS the person's Dynamic Type body size (17pt at the
+   default setting), so every rem — text and spacing — scales with it. Desktop keeps
+   the browser's own size + zoom. */
+@supports (font: -apple-system-body) {
+  @media (pointer: coarse) {
+    html { font: -apple-system-body; }
+  }
+}
+
+/* Increase Contrast: secondary text steps up a level, hairlines get visible. */
+@media (prefers-contrast: more) {
+  :root {
+    --color-faint: light-dark(#4a5361, #b4bdca);
+    --color-ink-2: light-dark(#2b333f, #d3d9e2);
+    --color-line: light-dark(#b9c1cd, #3d4757);
+    --color-line-2: light-dark(#8e98a6, #5a6576);
+    --color-brand-deep: light-dark(#1a3fb0, #b3d0ff);
+  }
 }
 
 @layer base {
   html {
     -webkit-tap-highlight-color: transparent;
+    accent-color: var(--color-brand);
   }
   body {
     background: var(--color-surface);
     color: var(--color-ink);
     font-variant-numeric: tabular-nums;
+    font-feature-settings: "cv11";
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
   }
@@ -47,34 +135,170 @@
   input, select, textarea, button {
     font: inherit;
   }
+  ::selection { background: var(--color-brand-wash); color: var(--color-brand-deep); }
   :focus-visible {
     outline: 2px solid var(--color-brand);
-    outline-offset: 1px;
+    outline-offset: 2px;
+    border-radius: 4px;
   }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
       animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
     }
   }
 }
 
 @layer components {
+  /* ── Typography ─────────────────────────────────────────────────────── */
   /* 11px uppercase metadata label — the workhorse of the whole design */
   .label {
-    font-size: 11px;
+    font-size: var(--text-label);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--color-faint);
   }
+  .h-page { font-size: 1.375rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.025em; }
+  @media (min-width: 768px) { .h-page { font-size: 1.625rem; } }
+  .h-card { font-size: var(--text-md); line-height: 1.35; font-weight: 600; letter-spacing: -0.01em; }
+  .link {
+    color: var(--color-brand-deep);
+    font-weight: 500;
+    text-underline-offset: 3px;
+    transition: color var(--dur-fast) ease;
+  }
+  .link:hover { text-decoration: underline; }
+  /* Inline "+ Add thing" action beside a section label */
+  .add-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: -3px -7px;
+    padding: 3px 7px;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-dense);
+    font-weight: 500;
+    color: var(--color-brand-deep);
+    transition: background-color var(--dur-fast) ease;
+  }
+  .add-link:hover { background: var(--color-brand-wash); }
+  .num { font-variant-numeric: tabular-nums; }
+  .kbd {
+    font-size: var(--text-micro);
+    color: var(--color-faint);
+    border: 1px solid var(--color-line);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
 
+  /* ── Layout ─────────────────────────────────────────────────────────── */
+  .page { padding: 20px 16px 24px; max-width: 64rem; }
+  .page-wide { max-width: 72rem; }
+  .page-narrow { max-width: 48rem; }
+  @media (min-width: 768px) { .page { padding: 28px 32px 32px; } }
+
+  /* ── Surfaces ───────────────────────────────────────────────────────── */
   .card {
     background: var(--color-card);
     border: 1px solid var(--color-line);
     border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+  }
+  /* A whole card that's a tap target: lifts on hover, sinks on press */
+  .card-link {
+    transition: box-shadow var(--dur-fast) ease, border-color var(--dur-fast) ease, transform var(--dur-fast) var(--ease-out);
+  }
+  .card-link:hover { box-shadow: var(--shadow-raise); border-color: var(--color-line-2); }
+  .card-link:active { transform: scale(0.995); }
+
+  /* Divided list rows inside a .card — one hover treatment everywhere */
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    width: 100%;
+    text-align: left;
+    transition: background-color var(--dur-fast) ease;
+  }
+  .row-link { cursor: pointer; }
+  /* "Show all N" footer row of a list card */
+  .row-more {
+    display: block;
+    width: 100%;
+    padding: 10px 16px;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--color-brand-deep);
+    transition: background-color var(--dur-fast) ease;
+  }
+  .row-more:hover { background: var(--color-brand-wash); }
+  /* hover fills follow the card's rounded corners without overflow:hidden
+     (which would clip dropdowns living inside a card) */
+  .card.divide-y > .row-link:first-child, .card.divide-y > :first-child > .row-link { border-top-left-radius: calc(var(--radius-lg) - 1px); border-top-right-radius: calc(var(--radius-lg) - 1px); }
+  .card.divide-y > .row-link:last-child, .card.divide-y > :last-child > .row-link, .card.divide-y > .row-more:last-child { border-bottom-left-radius: calc(var(--radius-lg) - 1px); border-bottom-right-radius: calc(var(--radius-lg) - 1px); }
+  .row-link:hover { background: var(--color-subtle); }
+  .row-link:active { background: var(--color-muted); }
+
+  /* An EmptyState rendered inside a card sheds its own frame */
+  .card .empty { border: 0; box-shadow: none; background: transparent; }
+
+  /* KPI strip: hairline-divided stat tiles */
+  .stat-grid {
+    display: grid;
+    gap: 1px;
+    background: var(--color-line);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+  }
+  .stat-grid > * { background: var(--color-card); padding: 12px 14px; }
+  .stat-grid > a { transition: background-color var(--dur-fast) ease; }
+  .stat-grid > a:hover { background: var(--color-subtle); }
+
+  /* Inset panel inside a sheet or card: a sub-form, a step, a detail block */
+  .well {
+    background: var(--color-subtle);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-lg);
   }
 
+  /* <details class="disclose">: content eases open (Chromium today; instant elsewhere) */
+  @media (prefers-reduced-motion: no-preference) {
+    .disclose::details-content {
+      block-size: 0;
+      overflow: clip;
+      opacity: 0;
+      transition: block-size 280ms var(--ease-out), opacity 200ms ease, content-visibility 280ms allow-discrete;
+    }
+    .disclose[open]::details-content { block-size: auto; opacity: 1; }
+  }
+
+  /* Diagonal hatch = closed / unavailable time */
+  .hatch {
+    background: repeating-linear-gradient(45deg, var(--color-muted) 0 3px, var(--color-subtle) 3px 6px);
+  }
+
+  /* Callouts: tone set by modifier */
+  .note {
+    border: 1px solid var(--color-line);
+    background: var(--color-subtle);
+    border-radius: var(--radius-md);
+    padding: 8px 12px;
+    font-size: var(--text-sm);
+    color: var(--color-ink-2);
+  }
+  .note-warn { border-color: var(--color-warn-line); background: var(--color-warn-wash); color: var(--color-warn); }
+  .note-ok { border-color: var(--color-ok-line); background: var(--color-ok-wash); color: var(--color-ok); }
+  .note-bad { border-color: var(--color-bad-line); background: var(--color-bad-wash); color: var(--color-bad); }
+  .note-brand { border-color: var(--color-brand-line); background: var(--color-brand-wash); color: var(--color-brand-deep); }
+
+  /* ── Buttons ────────────────────────────────────────────────────────── */
   .btn {
     display: inline-flex;
     align-items: center;
@@ -86,50 +310,112 @@
     border: 1px solid var(--color-line-2);
     background: var(--color-card);
     color: var(--color-ink);
-    font-size: 14px;
+    font-size: var(--text-sm);
     font-weight: 500;
     white-space: nowrap;
     cursor: pointer;
-    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
     user-select: none;
+    box-shadow: 0 1px 1px var(--sh-2);
+    transition:
+      background-color var(--dur-fast) ease,
+      border-color var(--dur-fast) ease,
+      color var(--dur-fast) ease,
+      box-shadow var(--dur-fast) ease,
+      transform 160ms var(--ease-out);
   }
-  .btn:hover { background: #f1f4f9; }
+  .btn:hover { background: var(--color-muted); }
+  .btn:active { transform: scale(0.97); }
   .btn:disabled { opacity: 0.5; pointer-events: none; }
   .btn-primary {
     background: var(--color-brand);
     border-color: var(--color-brand);
     color: #fff;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14), 0 1px 2px rgb(37 99 235 / 0.25);
   }
-  .btn-primary:hover { background: var(--color-brand-deep); border-color: var(--color-brand-deep); }
+  .btn-primary:hover { background: var(--color-brand-strong); border-color: var(--color-brand-strong); }
   .btn-danger { color: var(--color-bad); }
-  .btn-danger:hover { background: var(--color-bad-wash); border-color: #fecaca; }
-  .btn-ghost { border-color: transparent; background: transparent; }
-  .btn-ghost:hover { background: #eef1f6; }
-  .btn-sm { height: 30px; padding: 0 10px; font-size: 13px; border-radius: var(--radius-sm); }
+  .btn-danger:hover { background: var(--color-bad-wash); border-color: var(--color-bad-line); }
+  .btn-ghost { border-color: transparent; background: transparent; box-shadow: none; }
+  .btn-ghost:hover { background: var(--color-muted); }
+  .btn-sm { height: 30px; padding: 0 10px; font-size: var(--text-dense); border-radius: var(--radius-sm); }
+  .btn-icon { width: 36px; padding: 0; }
+  .btn-sm.btn-icon { width: 30px; }
+  /* Fingers need room: touch screens get taller controls */
+  @media (pointer: coarse) {
+    .btn { height: 40px; }
+    .btn-sm { height: 34px; }
+    .btn-icon { width: 40px; }
+    .btn-sm.btn-icon { width: 34px; }
+  }
 
+  /* Option pills (pick one / pick many). Toggle with aria-pressed or data-on. */
+  .choice {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 6px 10px;
+    text-align: center;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-line-2);
+    background: var(--color-card);
+    color: var(--color-ink);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+    transition:
+      background-color var(--dur-fast) ease,
+      border-color var(--dur-fast) ease,
+      color var(--dur-fast) ease,
+      transform 160ms var(--ease-out);
+  }
+  .choice:hover { border-color: var(--color-faint); }
+  .choice:active { transform: scale(0.97); }
+  /* Selected: soft brand wash + a 2px-feel brand edge (inset ring keeps size fixed) */
+  .choice[aria-pressed="true"], .choice[data-on="true"] {
+    background: var(--color-brand-wash);
+    border-color: var(--color-brand);
+    color: var(--color-brand-deep);
+    box-shadow: inset 0 0 0 1px var(--color-brand);
+  }
+  .choice:disabled { opacity: 0.45; pointer-events: none; }
+  /* HIG: 44pt default / 28pt floor on touch — never let a pill drop below ~38px */
+  @media (pointer: coarse) {
+    .choice { min-height: 38px; }
+    button.chip, a.chip { height: 32px; padding: 0 12px; }
+  }
+
+  /* ── Form controls ──────────────────────────────────────────────────── */
   .input, .select, .textarea {
     width: 100%;
     min-width: 0; /* let full-width inputs shrink inside grid/flex parents; else date/number controls overflow */
     height: 38px;
-    padding: 0 10px;
+    padding: 0 11px;
     border: 1px solid var(--color-line-2);
     border-radius: var(--radius-md);
     background: var(--color-card);
-    font-size: 15px;
+    font-size: var(--text-md);
     color: var(--color-ink);
-    transition: border-color 150ms ease;
+    box-shadow: 0 1px 1px var(--sh-2);
+    transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
   }
-  .textarea { height: auto; padding: 8px 10px; min-height: 72px; resize: vertical; }
+  .textarea { height: auto; padding: 8px 11px; min-height: 76px; resize: vertical; }
   .input::placeholder, .textarea::placeholder { color: var(--color-faint); }
+  .input[type="search"] { -webkit-appearance: none; appearance: none; }
+  .input:hover, .select:hover, .textarea:hover { border-color: var(--color-faint); }
   .input:focus, .select:focus, .textarea:focus {
     outline: none;
     border-color: var(--color-brand);
-    box-shadow: 0 0 0 3px rgb(37 99 235 / 0.12);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-brand) 18%, transparent);
   }
+  .input:disabled, .select:disabled, .textarea:disabled { opacity: 0.6; }
   /* iOS Safari auto-zooms the whole page when a focused control is under 16px —
      keep every form control at 16px on touch devices so the layout never jumps. */
   @media (pointer: coarse) {
-    .input, .select, .textarea { font-size: 16px; }
+    .input, .select, .textarea { font-size: max(16px, 1rem); height: 2.75rem; }
+    .textarea { height: auto; }
   }
   .select {
     appearance: none;
@@ -139,6 +425,7 @@
     padding-right: 30px;
   }
 
+  /* ── Chips ──────────────────────────────────────────────────────────── */
   .chip {
     display: inline-flex;
     align-items: center;
@@ -146,35 +433,52 @@
     height: 20px;
     padding: 0 7px;
     border-radius: 999px;
-    font-size: 11px;
+    font-size: var(--text-label);
     font-weight: 600;
     letter-spacing: 0.02em;
+    white-space: nowrap;
+    background: var(--color-muted);
+    color: var(--color-ink-2);
   }
+  .chip-brand { background: var(--color-brand-wash); color: var(--color-brand-deep); }
+  .chip-ok { background: var(--color-ok-wash); color: var(--color-ok); }
+  .chip-warn { background: var(--color-warn-wash); color: var(--color-warn); }
+  .chip-bad { background: var(--color-bad-wash); color: var(--color-bad); }
+  /* Filter chips: tappable, toggle with aria-pressed */
+  button.chip, a.chip {
+    cursor: pointer;
+    height: 26px;
+    padding: 0 10px;
+    transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease, transform 160ms var(--ease-out);
+  }
+  button.chip:not([aria-pressed="true"]):hover, a.chip:hover { background: var(--color-line); color: var(--color-ink); }
+  button.chip:active, a.chip:active { transform: scale(0.96); }
+  .chip[aria-pressed="true"] { background: var(--color-ink); color: var(--color-on-ink); }
 
+  /* ── Tables ─────────────────────────────────────────────────────────── */
   /* Dense data table — Linear/Stripe density, hairline rows */
-  .tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .tbl { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
   .tbl th {
     text-align: left;
-    font-size: 11px;
+    font-size: var(--text-label);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--color-faint);
-    padding: 8px 12px;
+    padding: 9px 12px;
+    background: var(--color-subtle);
     border-bottom: 1px solid var(--color-line);
     white-space: nowrap;
   }
   .tbl td {
-    padding: 10px 12px;
+    padding: 11px 12px;
     border-bottom: 1px solid var(--color-line);
     vertical-align: middle;
     line-height: 1.45;
   }
   .tbl tr:last-child td { border-bottom: none; }
-  .tbl-link tbody tr { cursor: pointer; transition: background-color 150ms ease; }
-  .tbl-link tbody tr:hover { background: #f8fafd; }
-
-  .num { font-variant-numeric: tabular-nums; }
+  .tbl-link tbody tr { cursor: pointer; transition: background-color var(--dur-fast) ease; }
+  .tbl-link tbody tr:hover { background: var(--color-subtle); }
 
   /* Responsive: on phones, .tbl-stack turns each row into a labeled card
      (label from each cell's data-label) so wide tables never side-scroll. */
@@ -200,7 +504,7 @@
       content: attr(data-label);
       display: block;
       margin-bottom: 1px;
-      font-size: 11px;
+      font-size: var(--text-label);
       font-weight: 600;
       letter-spacing: 0.06em;
       text-transform: uppercase;
@@ -208,56 +512,65 @@
     }
   }
 
-  /* Skeleton shimmer */
+  /* ── Feedback ───────────────────────────────────────────────────────── */
   .skeleton {
-    background: linear-gradient(90deg, #eef1f6 25%, #f6f8fb 50%, #eef1f6 75%);
+    background: linear-gradient(90deg, var(--color-muted) 25%, var(--color-subtle) 50%, var(--color-muted) 75%);
     background-size: 200% 100%;
-    animation: shimmer 1.4s ease infinite;
+    animation: shimmer 1.4s linear infinite;
     border-radius: var(--radius-sm);
   }
   @keyframes shimmer {
     to { background-position: -200% 0; }
   }
 
-  /* Bottom sheet (mobile) / side panel (desktop) */
-  .sheet-backdrop {
+  /* Overlay scrim shared by sheets, dialogs, command palette */
+  .scrim {
     position: fixed;
     inset: 0;
-    background: rgb(10 14 20 / 0.4);
     z-index: 40;
-    animation: fade-in 150ms ease;
+    background: rgb(5 8 12 / 0.42);
   }
+  @media (prefers-color-scheme: dark) { .scrim { background: rgb(0 0 0 / 0.6); } }
+
+  /* Bottom sheet (mobile) / side panel (desktop). Motion animates transform;
+     this owns geometry. */
   .sheet {
     position: fixed;
     z-index: 50;
     background: var(--color-card);
     inset-inline: 0;
     bottom: 0;
-    max-height: calc(100dvh - 48px);
-    border-radius: 14px 14px 0 0;
+    max-height: calc(100dvh - 40px);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     border-top: 1px solid var(--color-line);
+    box-shadow: var(--shadow-pop);
     display: flex;
     flex-direction: column;
-    animation: sheet-up 200ms cubic-bezier(0.32, 0.72, 0, 1);
     padding-bottom: env(safe-area-inset-bottom);
   }
   @media (min-width: 768px) {
     .sheet {
-      inset: 0 0 0 auto;
-      width: 420px;
+      inset: 8px 8px 8px auto;
+      width: 440px;
       max-height: none;
-      border-radius: 0;
-      border-top: none;
-      border-left: 1px solid var(--color-line);
-      animation: sheet-in 200ms cubic-bezier(0.32, 0.72, 0, 1);
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--color-line);
+      padding-bottom: 0;
     }
   }
-  @keyframes fade-in { from { opacity: 0; } }
-  @keyframes sheet-up { from { transform: translateY(24px); opacity: 0.6; } }
-  @keyframes sheet-in { from { transform: translateX(24px); opacity: 0.6; } }
 
   /* Safe areas for the mobile tab bar */
   .tabbar { padding-bottom: env(safe-area-inset-bottom); }
+  /* Glass = the floating functional layer only (tab bar, floating buttons) — never
+     content (HIG materials.md). Reduce Transparency gets a solid surface. */
+  .glass {
+    background: color-mix(in oklab, var(--color-card) 72%, transparent);
+    backdrop-filter: saturate(1.8) blur(20px);
+    -webkit-backdrop-filter: saturate(1.8) blur(20px);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .glass { background: var(--color-card); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  }
 
   /* The rim spins; the tire doesn't. */
   .wheel-spin {
@@ -286,14 +599,37 @@
     to { opacity: 0; visibility: hidden; pointer-events: none; }
   }
 
-  /* Page transitions: every route's root (and its skeleton) slides in on mount */
+  /* ── Entrances ──────────────────────────────────────────────────────── */
+  /* Every route's root (and its skeleton) settles in on mount — short, because
+     navigation is frequent. */
   @media (prefers-reduced-motion: no-preference) {
     main > *, .page-in {
-      animation: page-in 180ms ease;
+      animation: page-in 220ms var(--ease-out);
     }
+    /* First paint of a list: children rise in, 30ms apart, capped at 8 so
+       long lists never feel slow. Keyed rows don't replay on live refresh. */
+    .stagger > * { animation: rise 280ms var(--ease-out) backwards; }
+    /* sub-panels (a sheet's "complete job" step, etc.) settle in as they swap */
+    .well { animation: rise 240ms var(--ease-out); }
+    .stagger > :nth-child(2) { animation-delay: 30ms; }
+    .stagger > :nth-child(3) { animation-delay: 60ms; }
+    .stagger > :nth-child(4) { animation-delay: 90ms; }
+    .stagger > :nth-child(5) { animation-delay: 120ms; }
+    .stagger > :nth-child(6) { animation-delay: 150ms; }
+    .stagger > :nth-child(7) { animation-delay: 180ms; }
+    .stagger > :nth-child(n + 8) { animation-delay: 210ms; }
   }
+  /* Chart bars grow from the baseline once, on first paint */
+  @media (prefers-reduced-motion: no-preference) {
+    .bar-up { transform-origin: bottom; animation: bar-grow 520ms var(--ease-out) backwards; }
+    .bar-down { transform-origin: top; animation: bar-grow 520ms var(--ease-out) backwards; }
+  }
+  @keyframes bar-grow { from { transform: scaleY(0); } }
   @keyframes page-in {
-    from { opacity: 0; transform: translateY(4px); }
+    from { opacity: 0; transform: translateY(6px); }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); filter: blur(2px); }
   }
 }
 

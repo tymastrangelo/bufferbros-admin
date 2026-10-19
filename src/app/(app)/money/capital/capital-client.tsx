@@ -2,7 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { EmptyState, ErrorNote, Field, Sheet } from "@/components/ui";
+import { Busy, EmptyState, ErrorNote, Field, Segmented, Sheet } from "@/components/ui";
+import { IconPlus } from "@/components/icons";
 import { addCapital, deleteCompanyEntry, updateCompanyEntry } from "@/lib/actions/money";
 import { money } from "@/lib/format";
 import { fmtDateShort, todayYmd } from "@/lib/time";
@@ -38,27 +39,24 @@ export function CapitalClient({ rows, balance }: { rows: CompanyLedgerEntry[]; b
   });
 
   return (
-    <div className="mt-4 flex flex-col gap-4">
-      <div className="card p-3.5 flex items-center justify-between gap-3">
+    <div className="mt-5 flex flex-col gap-4">
+      <div className="card p-4 md:p-5 flex items-center justify-between gap-3">
         <div>
           <p className="label">Company capital</p>
-          <p className={`mt-1 text-2xl font-bold num ${balance < 0 ? "text-bad" : ""}`}>{money(balance)}</p>
+          <p className={`mt-1.5 text-2xl font-bold num tracking-tight ${balance < 0 ? "text-bad" : ""}`}>{money(balance)}</p>
         </div>
         <button className="btn btn-primary" onClick={() => setAddOpen(true)}>
-          Add money
+          <IconPlus width={14} height={14} /> Add money
         </button>
       </div>
 
-      <div className="flex gap-1.5 overflow-x-auto">
-        {FILTERS.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => setFilter(f.id)}
-            className={`btn btn-sm whitespace-nowrap ${filter === f.id ? "btn-primary" : ""}`}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="overflow-x-auto [scrollbar-width:none] -mx-1 px-1">
+        <Segmented
+          label="Filter entries"
+          value={filter}
+          onChange={setFilter}
+          options={FILTERS.map((f) => ({ value: f.id, label: <span className="whitespace-nowrap">{f.label}</span> }))}
+        />
       </div>
 
       <div className="card overflow-x-auto">
@@ -140,7 +138,7 @@ function AddMoneySheet({ onClose }: { onClose: () => void }) {
             router.refresh();
           }}
         >
-          {pending ? "Adding…" : "Add to capital"}
+          {pending ? <Busy>Adding…</Busy> : "Add to capital"}
         </button>
       </div>
     </Sheet>
@@ -187,7 +185,7 @@ function EditEntrySheet({ entry, onClose }: { entry: CompanyLedgerEntry; onClose
             router.refresh();
           }}
         >
-          {pending ? "Saving…" : "Save"}
+          {pending ? <Busy>Saving…</Busy> : "Save"}
         </button>
         <button
           className="btn btn-danger"

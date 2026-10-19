@@ -76,7 +76,7 @@ export const OUTREACH_OUTCOMES: { id: OutreachOutcome; label: string }[] = [
   { id: "declined", label: "Not interested" },
   { id: "no_answer", label: "No answer" },
   { id: "asked_review", label: "Asked for a review" },
-  { id: "left_review", label: "Left a review ⭐" },
+  { id: "left_review", label: "Left a review" },
   { id: "note", label: "Just a note" },
 ];
 

@@ -10,7 +10,8 @@ export function useOwner(): boolean {
   useEffect(() => {
     createClient()
       .auth.getSession()
-      .then(({ data }) => setOwner(data.session?.user?.app_metadata?.role === "owner"));
+      // A previewing owner ("view as Gabe") sees the worker UI.
+      .then(({ data }) => setOwner(data.session?.user?.app_metadata?.role === "owner" && !document.cookie.includes("bb_view_as=")));
   }, []);
   return owner;
 }

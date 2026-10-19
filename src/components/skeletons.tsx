@@ -7,7 +7,7 @@ function Bar({ w, h = 16, className = "" }: { w: number | string; h?: number; cl
 
 function PageShell({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
   return (
-    <div className={`px-4 md:px-8 py-5 md:py-7 ${wide ? "max-w-6xl" : "max-w-5xl"}`} aria-busy="true" aria-label="Loading">
+    <div className={`page ${wide ? "max-w-6xl" : "max-w-5xl"}`} aria-busy="true" aria-label="Loading">
       {children}
     </div>
   );
@@ -15,7 +15,7 @@ function PageShell({ children, wide }: { children: React.ReactNode; wide?: boole
 
 function StatRow({ n }: { n: number }) {
   return (
-    <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-px bg-line border border-line rounded-[10px] overflow-hidden">
+    <div className="mt-4 stat-grid grid-cols-2 md:grid-cols-5">
       {Array.from({ length: n }, (_, i) => (
         <div key={i} className="bg-card px-3.5 py-3">
           <Bar w={90} h={9} />
@@ -36,7 +36,7 @@ export function TodaySkeleton() {
       <div className="mt-2 flex flex-col gap-2">
         {Array.from({ length: 3 }, (_, i) => (
           <div key={i} className="card flex overflow-hidden">
-            <div className="w-[74px] shrink-0 px-3 py-3 border-r border-line bg-[#fafbfd]">
+            <div className="w-[74px] shrink-0 px-3 py-3 border-r border-line bg-subtle">
               <Bar w={44} h={16} />
               <Bar w={28} h={10} className="mt-1.5" />
             </div>
@@ -61,7 +61,7 @@ export function CalendarSkeleton() {
         <Bar w={150} h={30} />
       </div>
       <div className="card mt-6 overflow-hidden">
-        <div className="border-b border-line bg-[#fafbfd] h-8" />
+        <div className="border-b border-line bg-subtle h-8" />
         <div className="grid grid-cols-7">
           {Array.from({ length: 35 }, (_, i) => (
             <div key={i} className={`min-h-[72px] md:min-h-24 p-1.5 border-line ${i % 7 !== 0 ? "border-l" : ""} ${i >= 7 ? "border-t" : ""}`}>
@@ -136,7 +136,7 @@ export function PlansSkeleton() {
         <Bar w={100} h={30} />
       </div>
       <div className="mt-4 card overflow-hidden">
-        <div className="border-b border-line bg-[#fafbfd] h-8" />
+        <div className="border-b border-line bg-subtle h-8" />
         <div className="divide-y divide-line">
           {Array.from({ length: 5 }, (_, i) => (
             <div key={i} className="px-4 py-3.5 flex items-center gap-6">
@@ -155,7 +155,7 @@ export function PlansSkeleton() {
 export function MoneySkeleton() {
   return (
     <div className="mt-4" aria-busy="true" aria-label="Loading">
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-px bg-line border border-line rounded-[10px] overflow-hidden">
+      <div className="stat-grid grid-cols-2 md:grid-cols-3">
         {Array.from({ length: 6 }, (_, i) => (
           <div key={i} className="bg-card px-3.5 py-3">
             <Bar w={110} h={9} />
@@ -177,7 +177,7 @@ export function MoneySkeleton() {
 
 export function SettingsSkeleton() {
   return (
-    <div className="px-4 md:px-8 py-5 md:py-7 max-w-3xl flex flex-col gap-4" aria-busy="true" aria-label="Loading">
+    <div className="page max-w-3xl flex flex-col gap-4" aria-busy="true" aria-label="Loading">
       <Bar w={110} h={26} />
       {Array.from({ length: 3 }, (_, i) => (
         <div key={i} className="card p-5">

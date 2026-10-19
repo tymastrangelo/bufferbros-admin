@@ -4,13 +4,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AppointmentSheet } from "@/components/appointment-sheet";
-import { IconMail, IconMessage, IconPhone, IconPin, IconPlus } from "@/components/icons";
+import { IconMail, IconMessage, IconPhone, IconPin, IconPlus, IconX } from "@/components/icons";
 import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { LedgerEntrySheet } from "@/components/ledger-entry-sheet";
 import { RelationsCard } from "@/components/relations-card";
-import type { PickedCustomer } from "@/components/customer-picker";
-import { Balance, ErrorNote, Field, Sheet, StatusChip } from "@/components/ui";
-import { deleteVehicle, saveVehicle, setCustomerArchived, updateCustomer } from "@/lib/actions/customers";
+import { CustomerPicker, type PickedCustomer } from "@/components/customer-picker";
+import { Avatar, Balance, Busy, CopyButton, ErrorNote, Field, PageHeader, Sheet, StatusChip, Tabs } from "@/components/ui";
+import { motion } from "motion/react";
+import { springSnappy } from "@/lib/motion";
+import { deleteVehicle, mergeCustomers, saveVehicle, setCustomerArchived, updateCustomer } from "@/lib/actions/customers";
 import { cancelPaymentRequest, sendPaymentRequest } from "@/lib/actions/stripe";
 import { boatQuote, type Catalog } from "@/lib/catalog";
 import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
@@ -56,6 +58,7 @@ export function CustomerProfile({
   const [newAppt, setNewAppt] = useState<false | "car" | "boat">(false);
   const [bookMenu, setBookMenu] = useState(false);
   const [stripeSheet, setStripeSheet] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
   const [ledgerSheet, setLedgerSheet] = useState<{ entry?: LedgerEntry; kind?: EntryKind } | null>(null);
 
   const balance = ledger.reduce((s, e) => s + e.amount, 0);
@@ -66,29 +69,29 @@ export function CustomerProfile({
   const boats = vehicles.filter((v) => v.kind === "boat");
 
   return (
-    <div className="px-4 md:px-8 py-5 md:py-7 max-w-4xl">
-      <nav className="text-[13px] text-faint mb-2">
-        <Link href="/customers" className="hover:text-ink">
-          Customers
-        </Link>{" "}
-        / {customer.name}
-      </nav>
-
-      <header className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-xl md:text-2xl font-bold flex items-center gap-2 flex-wrap">
+    <div className="page max-w-4xl">
+      <PageHeader
+        back={{ href: "/customers", label: "Customers" }}
+        title={
+          <span className="flex items-center gap-3 flex-wrap">
+            <Avatar name={customer.name} size={40} className="hidden sm:inline-flex" />
             {customer.name}
-            {customer.archived && <span className="chip bg-[#f1f4f9] text-faint">archived</span>}
-          </h1>
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            {customer.tags.map((t) => (
-              <span key={t} className="chip bg-[#f1f4f9] text-ink-2">
-                {t}
-              </span>
-            ))}
-            {balance !== 0 && <Balance amount={balance} />}
-          </div>
-        </div>
+            {customer.archived && <span className="chip">archived</span>}
+          </span>
+        }
+        sub={
+          (customer.tags.length > 0 || balance !== 0) && (
+            <span className="flex items-center gap-1.5 flex-wrap">
+              {customer.tags.map((t) => (
+                <span key={t} className="chip">
+                  {t}
+                </span>
+              ))}
+              {balance !== 0 && <Balance amount={balance} />}
+            </span>
+          )
+        }
+        actions={
         <div className="flex gap-1.5 shrink-0">
           <button className="btn btn-sm" onClick={() => setEditOpen(true)}>
             Edit
@@ -98,17 +101,22 @@ export function CustomerProfile({
               className="btn btn-primary btn-sm"
               onClick={() => (boats.length ? setBookMenu((v) => !v) : setNewAppt("car"))}
             >
-              <IconPlus width={13} height={13} /> Book
+              <IconPlus width={14} height={14} /> Book
             </button>
             {bookMenu && (
-              <div className="absolute right-0 top-full mt-1 z-20 card p-1 w-40 flex flex-col shadow-lg">
+              <motion.div
+                className="absolute right-0 top-full mt-1.5 z-20 card p-1 w-44 flex flex-col shadow-[var(--shadow-pop)] origin-top-right"
+                initial={{ opacity: 0, scale: 0.96, y: -4 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                transition={springSnappy}
+              >
                 {[
                   { kind: "car" as const, label: "Vehicle detail" },
                   { kind: "boat" as const, label: "Boat detail" },
                 ].map((o) => (
                   <button
                     key={o.kind}
-                    className="text-left text-sm font-medium px-3 py-2 rounded-md hover:bg-brand-wash"
+                    className="text-left text-sm font-medium px-3 py-2 rounded-sm transition-colors hover:bg-muted"
                     onClick={() => {
                       setBookMenu(false);
                       setNewAppt(o.kind);
@@ -117,14 +125,15 @@ export function CustomerProfile({
                     {o.label}
                   </button>
                 ))}
-              </div>
+              </motion.div>
             )}
           </div>
         </div>
-      </header>
+        }
+      />
 
       {/* Contact actions */}
-      <div className="mt-4 grid grid-cols-4 gap-1.5 max-w-sm">
+      <div className="grid grid-cols-4 gap-2 max-w-sm">
         <ContactBtn href={customer.phone ? telHref(customer.phone) : null} icon={<IconPhone width={16} height={16} />} label="Call" />
         <ContactBtn href={customer.phone ? smsHref(customer.phone) : null} icon={<IconMessage width={16} height={16} />} label="Text" />
         <ContactBtn href={customer.email ? `mailto:${customer.email}` : null} icon={<IconMail width={16} height={16} />} label="Email" />
@@ -137,27 +146,28 @@ export function CustomerProfile({
       </div>
 
       {/* Tabs */}
-      <div className="mt-5 flex border-b border-line" role="tablist">
-        {(["overview", "visits", "ledger"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            role="tab"
-            aria-selected={tab === t}
-            onClick={() => setTab(t)}
-            className={`px-3.5 py-2 text-sm font-medium capitalize border-b-2 -mb-px transition-colors duration-150 ${
-              tab === t ? "border-brand text-brand-deep" : "border-transparent text-faint hover:text-ink"
-            }`}
-          >
-            {t}
-            {t === "visits" && appointments.length > 0 && <span className="ml-1 text-faint num">{appointments.length}</span>}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        className="mt-6"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { value: "overview", label: "Overview" },
+          {
+            value: "visits",
+            label: (
+              <>
+                Visits{appointments.length > 0 && <span className="ml-1.5 text-faint num">{appointments.length}</span>}
+              </>
+            ),
+          },
+          { value: "ledger", label: "Ledger" },
+        ]}
+      />
 
       {tab === "overview" && (
-        <div className="mt-4 flex flex-col gap-5">
+        <div key="overview" className="page-in mt-5 flex flex-col gap-6">
           <section>
-            <h2 className="label mb-1.5">Contact</h2>
+            <h2 className="label mb-2">Contact</h2>
             <div className="card divide-y divide-line text-sm">
               <Row k="Phone" v={fmtPhone(customer.phone) || "—"} mono />
               <Row k="Email" v={customer.email || "—"} />
@@ -178,16 +188,17 @@ export function CustomerProfile({
           />
 
           <section>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center justify-between mb-2">
               <h2 className="label">Vehicles</h2>
-              <button className="text-[13px] text-brand-deep font-medium" onClick={() => setVehicleEdit("new")}>
-                + Add vehicle
+              <button className="add-link" onClick={() => setVehicleEdit("new")}>
+                <IconPlus width={13} height={13} />
+                Add vehicle
               </button>
             </div>
             <div className="card divide-y divide-line">
               {cars.length === 0 && <p className="px-4 py-3 text-sm text-faint">No vehicles yet — size drives pricing.</p>}
               {cars.map((v) => (
-                <button key={v.id} className="w-full text-left px-4 py-3 hover:bg-[#f8fafd] flex items-center justify-between gap-2" onClick={() => setVehicleEdit(v)}>
+                <button key={v.id} className="row row-link justify-between" onClick={() => setVehicleEdit(v)}>
                   <div>
                     <p className="text-sm font-medium">
                       {[v.year, v.color, v.make, v.model].filter(Boolean).join(" ") || sizeLabel(v.size_id)}
@@ -206,10 +217,11 @@ export function CustomerProfile({
           </section>
 
           <section>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center justify-between mb-2">
               <h2 className="label">Boats</h2>
-              <button className="text-[13px] text-brand-deep font-medium" onClick={() => setVehicleEdit("new-boat")}>
-                + Add boat
+              <button className="add-link" onClick={() => setVehicleEdit("new-boat")}>
+                <IconPlus width={13} height={13} />
+                Add boat
               </button>
             </div>
             <div className="card divide-y divide-line">
@@ -217,7 +229,7 @@ export function CustomerProfile({
               {boats.map((v) => {
                 const q = boatQuote(catalog, v.length_ft);
                 return (
-                  <button key={v.id} className="w-full text-left px-4 py-3 hover:bg-[#f8fafd] flex items-center justify-between gap-2" onClick={() => setVehicleEdit(v)}>
+                  <button key={v.id} className="row row-link justify-between" onClick={() => setVehicleEdit(v)}>
                     <div>
                       <p className="text-sm font-medium">
                         {[v.year, v.color, v.make, v.model].filter(Boolean).join(" ") || "Boat"}
@@ -232,16 +244,17 @@ export function CustomerProfile({
           </section>
 
           <section>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center justify-between mb-2">
               <h2 className="label">Plans</h2>
-              <Link href={`/plans?new=1&customer=${customer.id}`} className="text-[13px] text-brand-deep font-medium">
-                + New plan
+              <Link href={`/plans?new=1&customer=${customer.id}`} className="add-link">
+                <IconPlus width={13} height={13} />
+                New plan
               </Link>
             </div>
             <div className="card divide-y divide-line">
               {plans.length === 0 && <p className="px-4 py-3 text-sm text-faint">No recurring plan.</p>}
               {plans.map((p) => (
-                <Link key={p.id} href={`/plans/${p.id}`} className="flex items-center justify-between gap-2 px-4 py-3 hover:bg-[#f8fafd]">
+                <Link key={p.id} href={`/plans/${p.id}`} className="row row-link justify-between">
                   <div>
                     <p className="text-sm font-medium capitalize">
                       {p.cadence === "custom" ? `Every ${p.interval_days} days` : p.cadence} · {money(Number(p.per_visit_price))}/visit
@@ -256,32 +269,37 @@ export function CustomerProfile({
 
           {customer.notes && (
             <section>
-              <h2 className="label mb-1.5">Notes</h2>
+              <h2 className="label mb-2">Notes</h2>
               <div className="card px-4 py-3 text-sm whitespace-pre-wrap">{customer.notes}</div>
             </section>
           )}
 
-          <button
-            className="btn btn-ghost btn-sm self-start text-faint"
-            onClick={async () => {
-              await setCustomerArchived(customer.id, !customer.archived);
-              window.location.reload();
-            }}
-          >
-            {customer.archived ? "Unarchive customer" : "Archive customer"}
-          </button>
+          <div className="flex flex-wrap gap-1.5">
+            <button className="btn btn-ghost btn-sm text-faint" onClick={() => setMergeOpen(true)}>
+              Merge a duplicate into this customer…
+            </button>
+            <button
+              className="btn btn-ghost btn-sm text-faint"
+              onClick={async () => {
+                await setCustomerArchived(customer.id, !customer.archived);
+                window.location.reload();
+              }}
+            >
+              {customer.archived ? "Unarchive customer" : "Archive customer"}
+            </button>
+          </div>
         </div>
       )}
 
       {tab === "visits" && (
-        <div className="mt-4 flex flex-col gap-5">
+        <div key="visits" className="page-in mt-5 flex flex-col gap-6">
           <VisitList title={`Upcoming — ${upcoming.length}`} jobs={upcoming} onOpen={setJob} empty="Nothing booked." />
           <VisitList title={`Past — ${past.length}`} jobs={past} onOpen={setJob} empty="No visits yet." />
         </div>
       )}
 
       {tab === "ledger" && (
-        <div className="mt-4">
+        <div key="ledger" className="page-in mt-5">
           <div className="flex flex-wrap gap-1.5 mb-3">
             <button className="btn btn-primary btn-sm" onClick={() => setLedgerSheet({ kind: "payment" })}>
               Record payment
@@ -313,6 +331,7 @@ export function CustomerProfile({
       )}
 
       {/* Sheets */}
+      {mergeOpen && <MergeSheet customer={customer} onClose={() => setMergeOpen(false)} />}
       {stripeSheet && (
         <StripeRequestSheet customer={customer} balance={balance} onClose={() => setStripeSheet(false)} />
       )}
@@ -349,10 +368,10 @@ function ContactBtn({ href, icon, label, newTab }: { href: string | null; icon: 
       href={href ?? undefined}
       target={newTab ? "_blank" : undefined}
       rel={newTab ? "noreferrer" : undefined}
-      className={`btn flex-col h-14! gap-1 ${href ? "" : "pointer-events-none opacity-40"}`}
+      className={`btn flex-col h-14! gap-1 text-ink-2 hover:text-brand-deep ${href ? "" : "pointer-events-none opacity-40"}`}
     >
       {icon}
-      <span className="text-[11px]">{label}</span>
+      <span className="text-label">{label}</span>
     </a>
   );
 }
@@ -379,11 +398,11 @@ function VisitList({
 }) {
   return (
     <section>
-      <h2 className="label mb-1.5">{title}</h2>
+      <h2 className="label mb-2">{title}</h2>
       <div className="card divide-y divide-line">
         {jobs.length === 0 && <p className="px-4 py-3 text-sm text-faint">{empty}</p>}
         {jobs.map((j) => (
-          <button key={j.id} className="w-full text-left px-4 py-2.5 hover:bg-[#f8fafd] flex items-center gap-3" onClick={() => onOpen(j)}>
+          <button key={j.id} className="row row-link py-2.5" onClick={() => onOpen(j)}>
             <div className="min-w-0 grow">
               <p className="text-sm font-medium num">
                 {fmtDateShort(j.date)} at {minToLabel(j.start_min)}
@@ -493,10 +512,10 @@ function LedgerTable({ ledger, onEdit }: { ledger: LedgerEntry[]; onEdit: (e: Le
 }
 
 const REQUEST_STATUS_TONE: Record<PaymentRequest["status"], string> = {
-  pending: "bg-warn-wash text-warn",
-  paid: "bg-ok-wash text-ok",
-  canceled: "bg-[#f1f4f9] text-faint",
-  expired: "bg-[#f1f4f9] text-faint",
+  pending: "chip-warn",
+  paid: "chip-ok",
+  canceled: "",
+  expired: "",
 };
 
 function PaymentRequestList({ requests }: { requests: PaymentRequest[] }) {
@@ -506,18 +525,16 @@ function PaymentRequestList({ requests }: { requests: PaymentRequest[] }) {
   if (shown.length === 0) return null;
   return (
     <div className="card mb-3 divide-y divide-line">
-      <p className="label px-3.5 pt-2.5 pb-1.5">Stripe payment links</p>
+      <p className="label px-4 pt-3 pb-2">Stripe payment links</p>
       {shown.map((r) => (
-        <div key={r.id} className="flex items-center gap-2.5 px-3.5 py-2 text-sm">
+        <div key={r.id} className="flex items-center gap-2.5 px-4 py-2.5 text-sm">
           <span className={`chip ${REQUEST_STATUS_TONE[r.status]}`}>{r.status}</span>
           <span className="num font-semibold">{money(r.amount)}</span>
           <span className="text-ink-2 truncate grow">
             {r.memo || (r.kind === "prepay" ? `${r.visits} visits prepaid` : r.kind)} · sent {fmtDateShort(r.created_at.slice(0, 10))}
           </span>
           {r.status === "pending" && r.url && (
-            <button className="btn btn-sm" onClick={() => navigator.clipboard.writeText(r.url!)}>
-              Copy link
-            </button>
+            <CopyButton text={r.url} label="Copy link" />
           )}
           {r.status === "pending" && (
             <button
@@ -536,6 +553,73 @@ function PaymentRequestList({ requests }: { requests: PaymentRequest[] }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/** Manual merge — for duplicates the detector can't see ("Janet" vs "Janet Smith"). */
+function MergeSheet({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+  const router = useRouter();
+  const [picked, setPicked] = useState<PickedCustomer[]>([]);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <Sheet open onClose={onClose} title={`Merge into ${customer.name}`}>
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-ink-2">
+          Pick the duplicate records. Their visits, payments, cars, plans, and contact info move onto{" "}
+          <span className="font-medium text-ink">{customer.name}</span>; the duplicates are then removed. Blank fields here
+          fill from theirs — nothing on this record is overwritten.
+        </p>
+        <Field label="Duplicate to merge in">
+          <CustomerPicker
+            key={picked.length}
+            value={null}
+            autoFocus
+            onChange={(c) => {
+              if (!c || c.id === customer.id || picked.some((p) => p.id === c.id)) return;
+              setPicked([...picked, c]);
+            }}
+          />
+        </Field>
+        {picked.length > 0 && (
+          <div className="card divide-y divide-line">
+            {picked.map((c) => (
+              <div key={c.id} className="row page-in py-2.5">
+                <Avatar name={c.name} size={28} />
+                <span className="grow min-w-0">
+                  <span className="block text-sm font-medium truncate">{c.name}</span>
+                  <span className="block text-xs text-faint truncate num">{fmtPhone(c.phone) || c.email || "no contact info"}</span>
+                </span>
+                <button
+                  className="btn btn-ghost btn-sm btn-icon text-faint"
+                  aria-label={`Remove ${c.name}`}
+                  onClick={() => setPicked(picked.filter((p) => p.id !== c.id))}
+                >
+                  <IconX width={14} height={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <ErrorNote>{error}</ErrorNote>
+        <button
+          className="btn btn-primary h-11"
+          disabled={pending || picked.length === 0}
+          onClick={async () => {
+            setError(null);
+            setPending(true);
+            const res = await mergeCustomers(customer.id, picked.map((p) => p.id));
+            setPending(false);
+            if (!res.ok) return setError(res.error);
+            onClose();
+            router.refresh();
+          }}
+        >
+          {pending ? <Busy>Merging…</Busy> : picked.length ? `Merge ${picked.length} into ${customer.name}` : "Pick a duplicate"}
+        </button>
+      </div>
+    </Sheet>
   );
 }
 
@@ -592,7 +676,7 @@ function StripeRequestSheet({
             router.refresh();
           }}
         >
-          {pending ? "Sending…" : `Email link for ${money(Number(amount) || 0)}`}
+          {pending ? <Busy>Sending…</Busy> : `Email link for ${money(Number(amount) || 0)}`}
         </button>
       </div>
     </Sheet>
@@ -646,10 +730,11 @@ function EditCustomerSheet({ open, onClose, customer }: { open: boolean; onClose
             ))}
             <button
               type="button"
-              className="self-start text-[13px] text-brand-deep font-medium"
+              className="self-start add-link"
               onClick={() => setAddresses([...addresses, { label: "Work", address: "" }])}
             >
-              + Add another address
+              <IconPlus width={13} height={13} />
+              Add another address
             </button>
           </div>
         </Field>
@@ -663,7 +748,7 @@ function EditCustomerSheet({ open, onClose, customer }: { open: boolean; onClose
           <input type="checkbox" checked={stripePay} onChange={(e) => setStripePay(e.target.checked)} />
           <span>
             Pays through Stripe
-            <span className="block text-[12px] text-faint">
+            <span className="block text-xs text-faint">
               Completing their jobs defaults to “Email Stripe link” instead of collecting on site.
             </span>
           </span>
@@ -690,7 +775,7 @@ function EditCustomerSheet({ open, onClose, customer }: { open: boolean; onClose
             router.refresh();
           }}
         >
-          {pending ? "Saving…" : "Save changes"}
+          {pending ? <Busy>Saving…</Busy> : "Save changes"}
         </button>
       </div>
     </Sheet>
@@ -790,7 +875,7 @@ function VehicleSheet({
             router.refresh();
           }}
         >
-          {pending ? "Saving…" : boat ? "Save boat" : "Save vehicle"}
+          {pending ? <Busy>Saving…</Busy> : boat ? "Save boat" : "Save vehicle"}
         </button>
         {vehicle && (
           <button

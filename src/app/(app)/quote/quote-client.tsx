@@ -21,6 +21,7 @@ import { createClient } from "@/lib/supabase/client";
 import { addDays, fmtDateShort, minToLabel, todayYmd, weekdayOf, WEEKDAYS, WEEKDAYS_SHORT } from "@/lib/time";
 import { SIZES, sizeLabel, type PlanCadence, type SizeId } from "@/lib/types";
 import { IconCalendar, IconPlus, IconSparkle, IconX } from "@/components/icons";
+import { PageHeader } from "@/components/ui";
 
 type Mode = "once" | "plan";
 
@@ -145,12 +146,11 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
   }
 
   return (
-    <div className="px-4 md:px-8 py-5 md:py-7 max-w-2xl">
-      <h1 className="text-xl md:text-2xl font-bold">Quote builder</h1>
-      <p className="mt-1 text-sm text-ink-2">Live prices from Settings. Build it, then hit generate.</p>
+    <div className="page max-w-2xl">
+      <PageHeader title="Quote builder" sub="Live prices from Settings. Build it, then hit generate." />
 
       {/* One-time vs plan */}
-      <div className="mt-4 grid grid-cols-2 gap-1.5">
+      <div className="grid grid-cols-2 gap-1.5">
         {(
           [
             { id: "once", label: "One-time detail" },
@@ -161,24 +161,20 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
             key={m.id}
             type="button"
             onClick={() => setMode(m.id)}
-            className={`h-10 rounded-md border text-sm font-medium transition-colors duration-150 ${
-              mode === m.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-            }`}
+            className="choice h-10 text-sm" aria-pressed={mode === m.id}
           >
             {m.label}
           </button>
         ))}
       </div>
       {mode === "plan" && (
-        <div className="mt-2 grid grid-cols-3 gap-1.5">
+        <div className="page-in mt-2 grid grid-cols-3 gap-1.5">
           {CADENCES.map((c) => (
             <button
               key={c.id}
               type="button"
               onClick={() => setCadence(c.id)}
-              className={`h-9 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
-                cadence === c.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-              }`}
+              className="choice h-9 text-dense" aria-pressed={cadence === c.id}
             >
               {c.label}
             </button>
@@ -186,7 +182,7 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
         </div>
       )}
       {mode === "once" && catalog.ceramic && (
-        <div className="mt-2 grid grid-cols-2 gap-1.5">
+        <div className="page-in mt-2 grid grid-cols-2 gap-1.5">
           {(
             [
               { id: "standard", label: "The Standard Detail" },
@@ -197,9 +193,7 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
               key={s.id}
               type="button"
               onClick={() => setService(s.id)}
-              className={`h-9 rounded-md border px-1 text-[13px] font-medium transition-colors duration-150 ${
-                service === s.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-              }`}
+              className="choice h-9 px-1 text-dense" aria-pressed={service === s.id}
             >
               {s.label}
             </button>
@@ -207,7 +201,7 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
         </div>
       )}
       {activeService === "ceramic" && (
-        <div className="mt-2 text-[13px] bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2.5">
+        <div className="page-in mt-2 text-dense note note-warn">
           <p className="font-semibold">Ceramic coating — what the client signs up for</p>
           <ul className="mt-1 list-disc pl-4 flex flex-col gap-0.5">
             <li>Full in-and-out Standard Detail is included — the paint has to be spotless first.</li>
@@ -267,9 +261,9 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
                   value={v.lengthFt}
                   onChange={(e) => patch(v.key, { lengthFt: e.target.value })}
                 />
-                {!catalog.boat && <p className="text-[12px] text-bad">No boat pricing set — add it in Settings.</p>}
+                {!catalog.boat && <p className="text-xs text-bad">No boat pricing set — add it in Settings.</p>}
                 {catalog.boat && mode === "plan" && (
-                  <p className="text-[12px] text-faint num">
+                  <p className="text-xs text-faint num">
                     Maintenance wash — {money(catalog.boat.components.find((c) => c.id === BOAT_MAINTENANCE_ID)?.ratePerFt ?? 0)}/ft per
                     visit (scaled by size, condition &amp; dock below)
                   </p>
@@ -289,11 +283,9 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
                                 boatServices: on ? v.boatServices.filter((x) => x !== c.id) : [...v.boatServices, c.id],
                               })
                             }
-                            className={`rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors duration-150 ${
-                              on ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-                            }`}
+                            className="choice rounded-full px-2.5 py-1 text-xs" aria-pressed={on}
                           >
-                            {c.name} <span className={`num ${on ? "text-white/80" : "text-faint"}`}>{money(c.ratePerFt)}/ft</span>
+                            {c.name} <span className={`num ${on ? "opacity-70" : "text-faint"}`}>{money(c.ratePerFt)}/ft</span>
                           </button>
                         );
                       })}
@@ -310,9 +302,7 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
                             key={l.label}
                             type="button"
                             onClick={() => patch(v.key, { levelIdx: li })}
-                            className={`rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors duration-150 ${
-                              v.levelIdx === li ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
-                            }`}
+                            className="choice rounded-full px-2.5 py-1 text-xs" aria-pressed={v.levelIdx === li}
                           >
                             {l.label}
                           </button>
@@ -330,9 +320,7 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
                             key={o.label}
                             type="button"
                             onClick={() => patch(v.key, { trailer: o.trailer })}
-                            className={`rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors duration-150 ${
-                              v.trailer === o.trailer ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
-                            }`}
+                            className="choice rounded-full px-2.5 py-1 text-xs" aria-pressed={v.trailer === o.trailer}
                           >
                             {o.label}
                           </button>
@@ -349,7 +337,7 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
                     key={s.id}
                     type="button"
                     onClick={() => patch(v.key, { size: s.id })}
-                    className={`min-h-9 rounded-md border px-1 py-1.5 text-[12px] font-medium leading-tight transition-colors duration-150 ${
+                    className={`min-h-9 rounded-md border px-1 py-1.5 text-xs font-medium leading-tight transition-colors duration-150 ${
                       v.size === s.id ? "bg-brand-wash border-brand text-brand-deep" : "bg-card border-line-2 hover:border-brand"
                     }`}
                   >
@@ -372,11 +360,9 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
                         onClick={() =>
                           patch(v.key, { addons: on ? v.addons.filter((x) => x !== a.id) : [...v.addons, a.id] })
                         }
-                        className={`rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors duration-150 ${
-                          on ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-                        }`}
+                        className="choice rounded-full px-2.5 py-1 text-xs" aria-pressed={on}
                       >
-                        {a.name} <span className={`num ${on ? "text-white/80" : "text-faint"}`}>+{money(addonQuote(a, v.size).price)}</span>
+                        {a.name} <span className={`num ${on ? "opacity-70" : "text-faint"}`}>+{money(addonQuote(a, v.size).price)}</span>
                       </button>
                     );
                   })}
@@ -407,9 +393,7 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
                   key={d}
                   type="button"
                   onClick={() => setDiscountOverride(d)}
-                  className={`h-8 min-w-11 rounded-md border px-2 text-[13px] font-medium num transition-colors duration-150 ${
-                    discountPct === d ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-                  }`}
+                  className="choice h-8 min-w-11 px-2 text-dense num" aria-pressed={discountPct === d}
                 >
                   {d}%
                 </button>
@@ -437,7 +421,7 @@ export function QuoteClient({ catalog, owner }: { catalog: Catalog; owner: boole
             <span className="num font-semibold text-ok">−{money(discountAmt)}</span>
           </div>
         )}
-        <button type="button" onClick={() => setRevealed(true)} className="btn btn-primary w-full mt-3 h-12 text-[15px]">
+        <button type="button" onClick={() => setRevealed(true)} className="btn btn-primary w-full mt-3 h-12 text-md">
           <IconSparkle width={17} height={17} /> Generate quote
         </button>
       </div>
@@ -484,7 +468,7 @@ function QuoteResult({
   const minutes = quotes.reduce((s, q) => s + q.minutes, 0);
 
   return (
-    <div className="px-4 md:px-8 py-5 md:py-7 max-w-2xl">
+    <div className="page max-w-2xl">
       <div className="card p-6 text-center overflow-hidden">
         <p className="label">
           {mode === "plan"
@@ -557,7 +541,7 @@ function QuoteResult({
       )}
 
       {mode === "once" && service === "ceramic" && (
-        <div className="mt-3 card p-4 text-[13px]">
+        <div className="mt-3 card p-4 text-dense">
           <p className="font-semibold text-sm">Before they book</p>
           <ul className="mt-1.5 list-disc pl-4 flex flex-col gap-1 text-ink-2">
             <li>
@@ -572,7 +556,7 @@ function QuoteResult({
       )}
       {mode === "plan" && (
         <>
-          <div className="mt-3 card p-4 text-[13px]">
+          <div className="mt-3 card p-4 text-dense">
             <div className="flex items-baseline justify-between gap-3">
               <p className="font-semibold text-sm">First visit — full Standard Detail ({catalog.rules.planInitialDiscountPct}% off)</p>
               <p className="font-bold num">
@@ -584,7 +568,7 @@ function QuoteResult({
               the regular price when they commit to the plan.
             </p>
           </div>
-          <div className="mt-3 card p-4 text-[13px]">
+          <div className="mt-3 card p-4 text-dense">
             {(() => {
               const visits = visitsPerQuarter(cadence);
               const fullBlock = total * visits;
@@ -667,9 +651,7 @@ function OneTimeFinder({ durationMin, startOffsetDays = 1 }: { durationMin: numb
               setDate(d);
               setSelMin(null);
             }}
-            className={`shrink-0 rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-colors duration-150 ${
-              date === d ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-            }`}
+            className="choice shrink-0 px-2.5 py-1.5 text-xs" aria-pressed={date === d}
           >
             {fmtDateShort(d)}
           </button>
@@ -677,7 +659,7 @@ function OneTimeFinder({ durationMin, startOffsetDays = 1 }: { durationMin: numb
       </div>
       <div className="mt-2.5">
         {slots === undefined ? (
-          <div className="flex items-center gap-2.5 py-1 text-[13px] text-faint">
+          <div className="flex items-center gap-2.5 py-1 text-dense text-faint">
             <Wheel size={22} /> Checking the schedule…
           </div>
         ) : slots.length === 0 ? (
@@ -689,9 +671,7 @@ function OneTimeFinder({ durationMin, startOffsetDays = 1 }: { durationMin: numb
                 key={s}
                 type="button"
                 onClick={() => setSelMin(s)}
-                className={`h-8 px-2.5 rounded-md border text-[13px] font-medium num transition-colors duration-150 ${
-                  selMin === s ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-                }`}
+                className="choice h-8 px-2.5 text-dense num" aria-pressed={selMin === s}
               >
                 {minToLabel(s)}
               </button>
@@ -700,7 +680,7 @@ function OneTimeFinder({ durationMin, startOffsetDays = 1 }: { durationMin: numb
         )}
       </div>
       {selMin != null && (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-md bg-ok-wash border border-[#bbe7c9] px-3 py-2.5">
+        <div className="mt-3 flex items-center justify-between gap-3 note note-ok px-3 py-2.5">
           <p className="text-sm font-medium text-ok">
             {fmtDateShort(date)} at {minToLabel(selMin)} is open
           </p>
@@ -788,12 +768,10 @@ function PlanFinder({ durationMin, cadence, owner }: { durationMin: number; cade
               setPart(p.id);
               setResults(null);
             }}
-            className={`min-h-9 rounded-md border px-1 py-1 text-[12px] font-medium leading-tight transition-colors duration-150 ${
-              part === p.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-            }`}
+            className="choice flex-col gap-0 min-h-9 px-1 py-1 text-xs leading-tight" aria-pressed={part === p.id}
           >
             {p.label}
-            {p.hint && <span className={`block text-[10px] font-normal ${part === p.id ? "text-white/75" : "text-faint"}`}>{p.hint}</span>}
+            {p.hint && <span className={`block text-micro font-normal ${part === p.id ? "opacity-70" : "text-faint"}`}>{p.hint}</span>}
           </button>
         ))}
       </div>
@@ -805,9 +783,7 @@ function PlanFinder({ durationMin, cadence, owner }: { durationMin: number; cade
             key={d}
             type="button"
             onClick={() => toggleDay(d)}
-            className={`h-9 rounded-md border text-[12px] font-medium transition-colors duration-150 ${
-              days.includes(d) ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-            }`}
+            className="choice h-9 text-xs" aria-pressed={days.includes(d)}
           >
             {label}
           </button>
@@ -825,21 +801,21 @@ function PlanFinder({ durationMin, cadence, owner }: { durationMin: number; cade
       </button>
 
       {results && results.length === 0 && (
-        <p className="mt-3 text-sm text-warn bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2">
+        <p className="mt-3 text-sm note note-warn">
           Nothing fits {fmtHours(durationMin)} in that window — try a different time of day or more days.
         </p>
       )}
       {results && results.length > 0 && (
         <div className="mt-3 flex flex-col gap-2">
           {best && (
-            <p className="text-sm font-medium text-ok bg-ok-wash border border-[#bbe7c9] rounded-md px-3 py-2">
+            <p className="text-sm font-medium note note-ok">
               Best bet: {WEEKDAYS[best.dow]}s at {minToLabel(best.slots[0].min)} — open for all {VISITS_CHECKED} upcoming
               visits (starting {fmtDateShort(best.firstDate)}).
             </p>
           )}
           {results.map((r) => (
             <div key={r.dow} className="rounded-md border border-line px-3 py-2.5">
-              <p className="text-[13px] font-semibold">{WEEKDAYS[r.dow]}s</p>
+              <p className="text-dense font-semibold">{WEEKDAYS[r.dow]}s</p>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {r.slots.map((s) => (
                   <span
@@ -848,10 +824,10 @@ function PlanFinder({ durationMin, cadence, owner }: { durationMin: number; cade
                       s.count === VISITS_CHECKED ? "bg-brand-wash border-brand/40" : "bg-card border-line-2"
                     }`}
                   >
-                    <span className={`text-[13px] font-semibold num ${s.count === VISITS_CHECKED ? "text-brand-deep" : "text-ink-2"}`}>
+                    <span className={`text-dense font-semibold num ${s.count === VISITS_CHECKED ? "text-brand-deep" : "text-ink-2"}`}>
                       {minToLabel(s.min)}
                     </span>
-                    <span className={`text-[10px] font-medium uppercase tracking-wide ${s.count === VISITS_CHECKED ? "text-ok" : "text-faint"}`}>
+                    <span className={`text-micro font-medium uppercase tracking-wide ${s.count === VISITS_CHECKED ? "text-ok" : "text-faint"}`}>
                       {s.count === VISITS_CHECKED ? "every visit" : `${s.count} of ${VISITS_CHECKED}`}
                     </span>
                   </span>

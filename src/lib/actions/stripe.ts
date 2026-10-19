@@ -4,9 +4,8 @@
 // webhook (src/app/api/stripe/webhook) books the money on the ledger.
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
-import { getRole } from "@/lib/auth";
 import { paymentRequestEmail, sendEmail } from "@/lib/email";
-import { notify } from "@/lib/notify";
+import { logActivity, usd } from "@/lib/notify";
 import { createPaymentLink, deactivatePaymentLink, stripeConfigured } from "@/lib/stripe";
 import { createClient } from "@/lib/supabase/server";
 import type { PaymentRequestKind } from "@/lib/types";
@@ -78,16 +77,20 @@ export async function sendPaymentRequest(fields: PaymentRequestFields): Promise<
   });
   const to = customer.email;
   after(() => sendEmail(to, subject, html));
-  if ((await getRole()) === "washer") {
-    after(() => notify("owner", "Payment link sent", `${customer.name} · $${fields.amount} · ${fields.what}`, `/customers/${fields.customerId}`));
-  }
+  // A job's own link is already in the "completed" push — don't double up.
+  if (!(fields.kind === "job" && fields.appointmentId)) await logActivity(
+    `emailed ${customer.name} a Stripe link`,
+    [`${usd(fields.amount)} · ${fields.what}`, `Sent to ${customer.email}`, fields.kind === "prepay" && !!fields.visits && `Prepay for ${fields.visits} visits`],
+    `/customers/${fields.customerId}`,
+    { tags: ["credit_card"] }
+  );
   refresh();
   return { ok: true, id: request.id, url: link.url };
 }
 
 export async function cancelPaymentRequest(id: string): Promise<ActionResult> {
   const db = await createClient();
-  const { data: request } = await db.from("payment_requests").select("stripe_session_id,status").eq("id", id).single();
+  const { data: request } = await db.from("payment_requests").select("stripe_session_id,status,amount,customers(name)").eq("id", id).single();
   if (!request) return { ok: false, error: "Request not found." };
   if (request.status !== "pending") return { ok: false, error: "Only pending requests can be canceled." };
   if (request.stripe_session_id) {
@@ -99,6 +102,8 @@ export async function cancelPaymentRequest(id: string): Promise<ActionResult> {
   }
   const { error } = await db.from("payment_requests").update({ status: "canceled" }).eq("id", id).eq("status", "pending");
   if (error) return { ok: false, error: error.message };
+  const custName = (request.customers as unknown as { name: string } | null)?.name ?? "a customer";
+  await logActivity(`canceled a Stripe link for ${custName}`, [`${usd(request.amount)} link is dead now`], "/money/payments", { tags: ["credit_card"], priority: 4 });
   refresh();
   return { ok: true, id };
 }

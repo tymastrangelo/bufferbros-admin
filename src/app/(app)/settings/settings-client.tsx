@@ -1,9 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { BlockSheet } from "@/components/block-sheet";
-import { ErrorNote } from "@/components/ui";
+import { setLarp } from "@/lib/actions/view";
+import { IconCheck, IconChevronRight } from "@/components/icons";
+import { Busy, ErrorNote, PageHeader, SectionLabel } from "@/components/ui";
 import {
   type AddonInput,
   changePassword,
@@ -54,9 +56,13 @@ function SaveButton({ state, onClick }: { state: string; onClick: () => void }) 
   return (
     <div className="flex items-center gap-2">
       <button className="btn btn-primary btn-sm" onClick={onClick} disabled={state === "saving"}>
-        {state === "saving" ? "Saving…" : "Save"}
+        {state === "saving" ? <Busy>Saving…</Busy> : "Save"}
       </button>
-      {state === "saved" && <span className="text-sm text-ok">Saved.</span>}
+      {state === "saved" && (
+        <span className="page-in inline-flex items-center gap-1 text-sm font-medium text-ok">
+          <IconCheck width={15} height={15} /> Saved
+        </span>
+      )}
       {state !== "idle" && state !== "saving" && state !== "saved" && <span className="text-sm text-bad">{state}</span>}
     </div>
   );
@@ -68,16 +74,25 @@ function SaveButton({ state, onClick }: { state: string; onClick: () => void }) 
 // they only surface as a hover tooltip on the title, keeping the page clean.
 function Section({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
   return (
-    <details className="card group">
+    <details className="disclose card group">
       <summary
         title={note}
-        className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden px-4 md:px-5 py-3.5 flex items-center gap-3"
+        className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden px-4 md:px-5 py-3.5 flex items-center gap-3 rounded-[inherit] transition-colors hover:bg-subtle"
       >
-        <h2 className="text-[15px] font-semibold grow">{title}</h2>
-        <span className="text-faint text-xs transition-transform duration-150 group-open:rotate-90">▸</span>
+        <h2 className="h-card grow">{title}</h2>
+        <IconChevronRight width={16} height={16} className="text-faint transition-transform duration-200 group-open:rotate-90" />
       </summary>
       <div className="px-4 md:px-5 pb-4 md:pb-5">{children}</div>
     </details>
+  );
+}
+
+function SettingsGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <SectionLabel>{label}</SectionLabel>
+      <div className="flex flex-col gap-2">{children}</div>
+    </section>
   );
 }
 
@@ -91,6 +106,7 @@ export function SettingsClient({
   employees,
   emailFrom,
   userEmail,
+  larp,
 }: {
   services: Service[];
   pricing: ServicePricing[];
@@ -101,22 +117,33 @@ export function SettingsClient({
   employees: Employee[];
   emailFrom: string;
   userEmail: string;
+  larp: boolean;
 }) {
   return (
-    <div className="px-4 md:px-8 py-5 md:py-7 max-w-3xl flex flex-col gap-4">
-      <h1 className="text-xl md:text-2xl font-bold">Settings</h1>
-      <PricingSection pricing={pricing} />
-      <CeramicSection pricing={pricing} settings={settings} />
-      <BoatSection pricing={pricing} settings={settings} />
-      <AddonsSection services={services} pricing={pricing} />
-      <PlanPricingSection planPricing={planPricing} settings={settings} />
-      <HoursSection hours={hours} settings={settings} />
-      <OutreachSection settings={settings} />
-      <OnlineBookingSection settings={settings} employees={employees} />
-      <SplitSection settings={settings} />
-      <BlocksSection blocks={blocks} />
-      <EmailSection emailFrom={emailFrom} />
-      <AccountSection userEmail={userEmail} />
+    <div className="page max-w-3xl">
+      <PageHeader title="Settings" sub="Everything here saves to the database and drives the booking site live." />
+      <div className="flex flex-col gap-7">
+        <SettingsGroup label="Pricing">
+          <PricingSection pricing={pricing} />
+          <CeramicSection pricing={pricing} settings={settings} />
+          <BoatSection pricing={pricing} settings={settings} />
+          <AddonsSection services={services} pricing={pricing} />
+          <PlanPricingSection planPricing={planPricing} settings={settings} />
+        </SettingsGroup>
+        <SettingsGroup label="Schedule & booking">
+          <HoursSection hours={hours} settings={settings} />
+          <OnlineBookingSection settings={settings} employees={employees} />
+          <BlocksSection blocks={blocks} />
+        </SettingsGroup>
+        <SettingsGroup label="Clients & money">
+          <OutreachSection settings={settings} />
+          <SplitSection settings={settings} />
+        </SettingsGroup>
+        <SettingsGroup label="System">
+          <EmailSection emailFrom={emailFrom} />
+          <AccountSection userEmail={userEmail} larp={larp} />
+        </SettingsGroup>
+      </div>
     </div>
   );
 }
@@ -369,11 +396,11 @@ function BoatSection({ pricing, settings }: { pricing: ServicePricing[]; setting
         {numField("Neglected / oxidized", level3Pct, setLevel3Pct, "%")}
         {numField("In-water base", dockPct, setDockPct, "+%")}
       </div>
-      <p className="text-[12px] text-faint mt-1.5">
+      <p className="text-xs text-faint mt-1.5">
         Quotes assume the boat is in the water (base price includes this %) — a boat on a trailer shows it as a discount.
       </p>
 
-      <p className="text-[13px] text-ink-2 mt-3 num">
+      <p className="text-dense text-ink-2 mt-3 num">
         Deluxe wash &amp; wax, maintained, in the water: {ex(20)} · {ex(35)} · {ex(60)}
       </p>
       <div className="mt-3">
@@ -506,7 +533,7 @@ function AddonsSection({ services, pricing }: { services: Service[]; pricing: Se
               aria-expanded={open === i}
             >
               <span className="text-sm font-medium grow truncate">{d.name || "New add-on"}</span>
-              <span className="text-[13px] text-faint num shrink-0">{priceSummary(d)}</span>
+              <span className="text-dense text-faint num shrink-0">{priceSummary(d)}</span>
               <span className={`text-faint text-xs transition-transform ${open === i ? "rotate-90" : ""}`}>▸</span>
             </button>
             {open === i && (
@@ -523,7 +550,7 @@ function AddonsSection({ services, pricing }: { services: Service[]; pricing: Se
                   value={d.note}
                   onChange={(e) => patch(i, { note: e.target.value })}
                 />
-                <label className="flex items-center gap-2 text-[13px]">
+                <label className="flex items-center gap-2 text-dense">
                   <input
                     type="checkbox"
                     checked={d.perSize}
@@ -540,21 +567,21 @@ function AddonsSection({ services, pricing }: { services: Service[]; pricing: Se
                 </label>
                 {d.perSize ? (
                   <div className="flex flex-col gap-1.5">
-                    <div className="grid grid-cols-[70px_1fr_1fr] gap-2 items-center text-[12px] text-faint">
+                    <div className="grid grid-cols-[70px_1fr_1fr] gap-2 items-center text-xs text-faint">
                       <span />
                       <span>Price</span>
                       <span>Extra min</span>
                     </div>
                     {SIZE_IDS.map((s) => (
                       <div key={s} className="grid grid-cols-[70px_1fr_1fr] gap-2 items-center">
-                        <span className="text-[13px] font-medium">{SIZE_SHORT[s]}</span>
+                        <span className="text-dense font-medium">{SIZE_SHORT[s]}</span>
                         {numInput(d.sizes[s].price, (v) => patch(i, { sizes: { ...d.sizes, [s]: { ...d.sizes[s], price: v } } }), `${d.name} ${s} price`)}
                         {numInput(d.sizes[s].minutes, (v) => patch(i, { sizes: { ...d.sizes, [s]: { ...d.sizes[s], minutes: v } } }), `${d.name} ${s} minutes`, 15)}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2 text-[13px]">
+                  <div className="flex items-center gap-2 text-dense">
                     <span className="text-faint">Price</span>
                     {numInput(d.flat.price, (v) => patch(i, { flat: { ...d.flat, price: v } }), `${d.name} price`)}
                     <span className="text-faint ml-2">Extra min</span>
@@ -650,7 +677,7 @@ function PlanPricingSection({ planPricing, settings }: { planPricing: PlanPricin
           <input type="number" min={0} max={100} className="input num" value={multiCarPct} onChange={(e) => setMultiCarPct(e.target.value)} />
         </label>
       </div>
-      <p className="text-[13px] text-ink-2 mt-1.5">
+      <p className="text-dense text-ink-2 mt-1.5">
         Initial detail: every new plan client starts with a full Standard Detail at this discount. Prepay: applies when a
         client pays a quarter (or more) of visits up front. Multi-car: off the suggested per-visit price when a plan
         covers 2+ cars cleaned in the same visit.
@@ -700,7 +727,7 @@ function OutreachSection({ settings }: { settings: Record<string, string> }) {
           <input type="number" min={0} className="input num" value={refCredit} onChange={(e) => setRefCredit(e.target.value)} />
         </label>
       </div>
-      <p className="text-[13px] text-ink-2 mt-1.5">
+      <p className="text-dense text-ink-2 mt-1.5">
         Active clients surface on Today once their last detail and last touch are both older than the reach-out window
         and nothing is booked. Fresh details stay in the review-ask list this many days. Referral credit lands on both
         ledgers when you tap “Credit both” on the new client&apos;s profile.
@@ -822,7 +849,7 @@ function OnlineBookingSection({ settings, employees }: { settings: Record<string
         ))}
       </div>
       {ids.length > 0 && (
-        <p className="text-[13px] text-ink-2 mt-2">
+        <p className="text-dense text-ink-2 mt-2">
           Website slots now follow {ids.length === 1 ? `${employees.find((e) => e.id === ids[0])?.name}'s` : "these workers'"}{" "}
           availability — handy while you&apos;re away at school.
         </p>
@@ -846,7 +873,7 @@ function SplitSection({ settings }: { settings: Record<string, string> }) {
         <span className="label block mb-1">CEO (you) %</span>
         <input type="number" min={0} max={100} className="input num" value={ceo} onChange={(e) => setCeo(e.target.value)} />
       </label>
-      <p className="text-[13px] mt-2 text-ink-2">
+      <p className="text-dense mt-2 text-ink-2">
         Your personal draw off every payment; the business keeps whatever&apos;s left after the worker split and this.
       </p>
       <div className="mt-3">
@@ -929,7 +956,34 @@ function EmailSection({ emailFrom }: { emailFrom: string }) {
   );
 }
 
-function AccountSection({ userEmail }: { userEmail: string }) {
+/** LARP: swap every number for the demo dataset (read-only) — for showing the app off. */
+function LarpSwitch({ on }: { on: boolean }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  return (
+    <label className="mt-4 flex items-center justify-between gap-3 cursor-pointer select-none" title="">
+      <span className="text-sm font-medium">LARP</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label="LARP"
+        disabled={pending}
+        onClick={() =>
+          startTransition(async () => {
+            await setLarp(!on);
+            router.refresh();
+          })
+        }
+        className={`relative inline-flex h-[31px] w-[51px] shrink-0 items-center rounded-full transition-colors duration-200 ${on ? "bg-ok" : "bg-line-2"}`}
+      >
+        <span className={`h-[27px] w-[27px] rounded-full bg-white shadow-[0_2px_4px_rgb(0_0_0/0.2)] transition-transform duration-200 ease-[var(--ease-out)] ${on ? "translate-x-[22px]" : "translate-x-[2px]"}`} />
+      </button>
+    </label>
+  );
+}
+
+function AccountSection({ userEmail, larp }: { userEmail: string; larp: boolean }) {
   const supabase = createClient();
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
@@ -972,7 +1026,7 @@ function AccountSection({ userEmail }: { userEmail: string }) {
             }
           }}
         >
-          {state === "saving" ? "Updating…" : "Change password"}
+          {state === "saving" ? <Busy>Updating…</Busy> : "Change password"}
         </button>
         {state === "saved" && <span className="text-sm text-ok">Password updated.</span>}
         {state !== "idle" && state !== "saving" && state !== "saved" && <ErrorNote>{state}</ErrorNote>}
@@ -986,6 +1040,7 @@ function AccountSection({ userEmail }: { userEmail: string }) {
       >
         Sign out
       </button>
+      <LarpSwitch on={larp} />
     </Section>
   );
 }

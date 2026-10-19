@@ -1,18 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { AppointmentSheet } from "@/components/appointment-sheet";
 import { BlockSheet } from "@/components/block-sheet";
-import { IconChevronLeft, IconChevronRight, IconPlus } from "@/components/icons";
+import { IconBlock, IconChevronLeft, IconChevronRight, IconPlus } from "@/components/icons";
 import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
-import { Sheet } from "@/components/ui";
+import { Busy, Segmented, Sheet } from "@/components/ui";
 import { deleteBlock } from "@/lib/actions/settings";
 import { saveMyCalendarFeed, syncCalendarNow } from "@/lib/actions/employees";
 import type { Catalog } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import type { ProjectedVisit } from "@/lib/plan-projection";
-import { addDays, addMonths, fmtDateLong, fmtDateShort, fmtMonth, minToLabel, monthGridStart, weekdayOf, WEEKDAYS_SHORT, ymOf } from "@/lib/time";
+import { addDays, addMonths, fmtDateLong, fmtDateShort, fmtMonth, minToLabel, monthGridStart, nowMinutes, weekdayOf, WEEKDAYS_SHORT, ymOf } from "@/lib/time";
 import type { Block, Employee, WeeklyHours } from "@/lib/types";
 
 export type CalView = "month" | "week" | "day";
@@ -107,44 +107,39 @@ export function CalendarClient({
   );
 
   return (
-    <div className="px-3 md:px-8 py-5 md:py-7 max-w-6xl">
-      <header className="flex flex-wrap items-center gap-2">
-        <h1 className="text-xl md:text-2xl font-bold mr-auto">{label}</h1>
-        <div className="flex items-center gap-1">
-          <button className="btn btn-sm" onClick={() => step(-1)} aria-label="Previous">
-            <IconChevronLeft width={15} height={15} />
+    <div className="page page-wide">
+      <header className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-3">
+        <div className="flex items-center gap-1 mr-auto min-w-0">
+          <button className="btn btn-ghost btn-sm btn-icon" onClick={() => step(-1)} aria-label="Previous">
+            <IconChevronLeft width={16} height={16} />
           </button>
-          <button className="btn btn-sm" onClick={() => nav(view, today)}>
-            Today
+          <button className="btn btn-ghost btn-sm btn-icon" onClick={() => step(1)} aria-label="Next">
+            <IconChevronRight width={16} height={16} />
           </button>
-          <button className="btn btn-sm" onClick={() => step(1)} aria-label="Next">
-            <IconChevronRight width={15} height={15} />
-          </button>
+          <h1 key={label} className="h-page truncate ml-1 page-in">{label}</h1>
         </div>
-        <div className="flex rounded-md border border-line-2 overflow-hidden" role="tablist" aria-label="Calendar view">
-          {(["month", "week", "day"] as const).map((v) => (
-            <button
-              key={v}
-              role="tab"
-              aria-selected={view === v}
-              onClick={() => nav(v, anchor)}
-              className={`h-[30px] px-3 text-[13px] font-medium capitalize ${
-                view === v ? "bg-ink text-white" : "bg-card text-ink-2 hover:bg-[#f1f4f9]"
-              }`}
-            >
-              {v}
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-1.5">
+        <button className="btn btn-sm" onClick={() => nav(view, today)} disabled={anchor === today && view !== "month"}>
+          Today
+        </button>
+        <Segmented
+          label="Calendar view"
+          value={view}
+          onChange={(v) => nav(v, anchor)}
+          options={[
+            { value: "month", label: "Month" },
+            { value: "week", label: "Week" },
+            { value: "day", label: "Day" },
+          ]}
+        />
+        <div className="flex flex-wrap gap-1.5">
           {projected.length > 0 && (
             <button
-              className="btn btn-sm"
+              className="choice h-[30px] text-dense"
               aria-pressed={showProjected}
               onClick={() => setShowProjected((v) => !v)}
               title="Standing plan slots that aren't booked as visits yet"
             >
-              Plans ahead: {showProjected ? "on" : "off"}
+              Plans ahead
             </button>
           )}
           {myEmployee && (
@@ -156,13 +151,13 @@ export function CalendarClient({
             Block time
           </button>
           <button className="btn btn-primary btn-sm" onClick={() => setNewSheet({ date: view === "month" ? today : anchor })}>
-            <IconPlus width={13} height={13} /> New
+            <IconPlus width={14} height={14} /> New
           </button>
         </div>
       </header>
 
       {/* Legend */}
-      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-faint">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-label text-faint">
         <LegendDot className="bg-brand" label="scheduled" />
         <LegendDot className="bg-ok" label="completed" />
         <LegendDot className="bg-brand-wash border border-brand" label="recurring" />
@@ -170,10 +165,10 @@ export function CalendarClient({
           <LegendDot className="bg-card border border-dashed border-brand" label="plan slot (held, not booked)" />
         )}
         <LegendDot className="bg-line-2" label="blocked" />
-        <LegendDot className="bg-[repeating-linear-gradient(45deg,#e5e7eb_0_3px,#f6f8fb_3px_6px)]" label="closed" />
+        <LegendDot className="hatch border border-line-2" label="closed" />
       </div>
 
-      <div className="mt-3">
+      <div key={view} className="mt-3 page-in">
         {view === "month" && (
           <MonthGrid
             anchor={anchor}
@@ -275,7 +270,7 @@ function MonthGrid({
 
   return (
     <div className="card overflow-hidden">
-      <div className="grid grid-cols-7 border-b border-line bg-[#fafbfd]">
+      <div className="grid grid-cols-7 border-b border-line bg-subtle">
         {WEEKDAYS_SHORT.map((d) => (
           <div key={d} className="label text-center py-1.5">
             {d}
@@ -295,12 +290,12 @@ function MonthGrid({
               key={d}
               onClick={() => onDay(d)}
               className={`relative text-left align-top min-h-[72px] md:min-h-[96px] p-1 md:p-1.5 border-line ${i % 7 !== 0 ? "border-l" : ""} ${i >= 7 ? "border-t" : ""} ${
-                closed ? "bg-[repeating-linear-gradient(45deg,#eef1f6_0_3px,#f6f8fb_3px_6px)]" : inMonth ? "bg-card" : "bg-[#fafbfd]"
+                closed ? "hatch" : inMonth ? "bg-card" : "bg-subtle"
               } hover:bg-brand-wash/40 transition-colors duration-150`}
             >
               <span
-                className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[12px] num font-medium ${
-                  isToday ? "bg-brand text-white font-bold" : inMonth ? "text-ink" : "text-faint"
+                className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs num font-medium ${
+                  isToday ? "bg-brand text-white font-bold shadow-sm shadow-brand/30" : inMonth ? "text-ink" : "text-faint"
                 }`}
               >
                 {parseInt(d.slice(8), 10)}
@@ -334,7 +329,7 @@ function MonthGrid({
                     {minToLabel(p.start_min).replace(":00", "").replace(" ", "").toLowerCase()}·{p.customer_name.split(" ")[0]}
                   </span>
                 ))}
-                {dayJobs.length > 3 && <span className="text-[10px] text-faint pl-1">+{dayJobs.length - 3} more</span>}
+                {dayJobs.length > 3 && <span className="text-micro text-faint pl-1">+{dayJobs.length - 3} more</span>}
               </span>
               <span className="md:hidden flex flex-wrap gap-0.5 mt-1">
                 {dayBlocks.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-line-2" />}
@@ -347,7 +342,7 @@ function MonthGrid({
                 {dayProj.slice(0, Math.max(0, 4 - dayJobs.length)).map((p, i) => (
                   <span key={`${p.plan_id}-${i}`} className="w-1.5 h-1.5 rounded-full border border-brand bg-transparent" />
                 ))}
-                {dayJobs.length > 4 && <span className="text-[9px] text-faint leading-none">+{dayJobs.length - 4}</span>}
+                {dayJobs.length > 4 && <span className="text-micro text-faint leading-none">+{dayJobs.length - 4}</span>}
               </span>
             </button>
           );
@@ -413,6 +408,15 @@ function TimeGrid({
   start = Math.floor(start / 60) * 60;
   end = Math.ceil(end / 60) * 60;
   const totalH = ((end - start) / 60) * HOUR_PX;
+  // "Now" line — null on the server (hydration-safe), ticks every minute on the client.
+  const now = useSyncExternalStore(
+    (onTick) => {
+      const t = setInterval(onTick, 60_000);
+      return () => clearInterval(t);
+    },
+    () => nowMinutes(),
+    () => null
+  );
   const y = (min: number) => ((min - start) / 60) * HOUR_PX;
 
   return (
@@ -420,7 +424,7 @@ function TimeGrid({
       <div className="min-w-full" style={{ minWidth: dates.length > 1 ? 640 : undefined }}>
         {/* headers */}
         {dates.length > 1 && (
-          <div className="grid border-b border-line bg-[#fafbfd]" style={{ gridTemplateColumns: `48px repeat(${dates.length}, 1fr)` }}>
+          <div className="grid border-b border-line bg-subtle" style={{ gridTemplateColumns: `48px repeat(${dates.length}, 1fr)` }}>
             <div />
             {dates.map((d) => (
               <button
@@ -429,7 +433,7 @@ function TimeGrid({
                 className={`py-1.5 text-center border-l border-line ${d === today ? "text-brand-deep" : "text-ink-2"}`}
               >
                 <span className="label block">{WEEKDAYS_SHORT[weekdayOf(d)]}</span>
-                <span className={`text-[15px] font-semibold num ${d === today ? "text-brand-deep" : ""}`}>
+                <span className={`text-md font-semibold num ${d === today ? "text-brand-deep" : ""}`}>
                   {parseInt(d.slice(8), 10)}
                 </span>
               </button>
@@ -442,7 +446,7 @@ function TimeGrid({
             {Array.from({ length: (end - start) / 60 }, (_, i) => (
               <span
                 key={i}
-                className="absolute right-1.5 text-[10px] text-faint num -translate-y-1/2"
+                className="absolute right-1.5 text-micro text-faint num -translate-y-1/2"
                 style={{ top: i * HOUR_PX }}
               >
                 {i === 0 ? "" : minToLabel(start + i * 60).replace(":00 ", "").toLowerCase()}
@@ -458,7 +462,7 @@ function TimeGrid({
             return (
               <div
                 key={d}
-                className={`relative border-l border-line ${closed ? "bg-[repeating-linear-gradient(45deg,#eef1f6_0_3px,#f6f8fb_3px_6px)]" : ""}`}
+                className={`relative border-l border-line ${closed ? "hatch" : ""}`}
                 style={{ height: totalH }}
                 onClick={(e) => {
                   if ((e.target as HTMLElement).closest("[data-item]")) return;
@@ -467,6 +471,12 @@ function TimeGrid({
                   onEmpty(d, Math.round(min / 30) * 30);
                 }}
               >
+                {d === today && now != null && now >= start && now <= end && (
+                  <span className="pointer-events-none absolute inset-x-0 z-20 flex items-center" style={{ top: y(now) }} aria-hidden>
+                    <span className="-ml-1 h-2 w-2 rounded-full bg-bad" />
+                    <span className="grow h-px bg-bad" />
+                  </span>
+                )}
                 {/* hour lines + off-hours shading */}
                 {Array.from({ length: (end - start) / 60 }, (_, i) => (
                   <span key={i} className="absolute inset-x-0 border-t border-line/70" style={{ top: i * HOUR_PX }} />
@@ -474,10 +484,10 @@ function TimeGrid({
                 {!closed && h && (
                   <>
                     {h.open_min > start && (
-                      <span className="absolute inset-x-0 bg-[#fafbfd]" style={{ top: 0, height: y(h.open_min) }} />
+                      <span className="absolute inset-x-0 bg-subtle" style={{ top: 0, height: y(h.open_min) }} />
                     )}
                     {h.close_min < end && (
-                      <span className="absolute inset-x-0 bg-[#fafbfd]" style={{ top: y(h.close_min), height: totalH - y(h.close_min) }} />
+                      <span className="absolute inset-x-0 bg-subtle" style={{ top: y(h.close_min), height: totalH - y(h.close_min) }} />
                     )}
                   </>
                 )}
@@ -492,8 +502,9 @@ function TimeGrid({
                       className="absolute inset-x-0.5 rounded-sm bg-line-2/80 border border-line-2 px-1.5 py-0.5 text-left overflow-hidden"
                       style={{ top: y(bs), height: Math.max(y(be) - y(bs), 18) }}
                     >
-                      <span className="text-[11px] font-medium text-ink-2 truncate block">
-                        ⃠ {b.reason || "Blocked"}
+                      <span className="flex items-center gap-1 text-label font-medium text-ink-2 min-w-0">
+                        <IconBlock width={11} height={11} className="shrink-0" />
+                        <span className="truncate">{b.reason || "Blocked"}</span>
                       </span>
                     </button>
                   );
@@ -507,11 +518,11 @@ function TimeGrid({
                     className="absolute rounded-md border border-dashed border-brand/60 bg-brand-wash/40 px-1.5 py-1 text-left overflow-hidden hover:bg-brand-wash transition-colors duration-150"
                     style={{ top: y(p.start_min) + 1, height: Math.max((p.duration_min / 60) * HOUR_PX - 2, 22), left: 2, right: 2 }}
                   >
-                    <span className="text-[11px] font-semibold truncate block leading-tight text-brand-deep">
+                    <span className="text-label font-semibold truncate block leading-tight text-brand-deep">
                       {p.customer_name.split(" ")[0]}
                       {owner ? ` · ${money(p.price)}` : ""}
                     </span>
-                    <span className="text-[10px] num block leading-tight text-ink-2">{minToLabel(p.start_min)} · plan slot</span>
+                    <span className="text-micro num block leading-tight text-ink-2">{minToLabel(p.start_min)} · plan slot</span>
                   </button>
                 ))}
                 {dayJobs.map((j) => (
@@ -519,7 +530,7 @@ function TimeGrid({
                     key={j.id}
                     data-item
                     onClick={() => onJob(j)}
-                    className={`absolute rounded-md border px-1.5 py-1 text-left overflow-hidden transition-colors duration-150 ${
+                    className={`absolute rounded-md border px-1.5 py-1 text-left overflow-hidden transition-[box-shadow,transform] duration-150 hover:z-10 hover:shadow-[var(--shadow-raise)] active:scale-[0.98] ${
                       j.status === "completed"
                         ? "bg-ok-wash border-ok/40"
                         : j.status === "no_show"
@@ -530,11 +541,11 @@ function TimeGrid({
                     }`}
                     style={{ top: y(j.start_min) + 1, height: Math.max((j.duration_min / 60) * HOUR_PX - 2, 22), left: 2, right: 2 }}
                   >
-                    <span className="text-[11px] font-semibold truncate block leading-tight">
+                    <span className="text-label font-semibold truncate block leading-tight">
                       {(j.customers?.name ?? j.contact_name ?? "?").split(" ")[0]}
                       {owner ? ` · ${money(Number(j.price))}` : ""}
                     </span>
-                    <span className={`text-[10px] num block leading-tight ${j.status === "scheduled" && !j.plan_id ? "text-white/80" : "text-ink-2"}`}>
+                    <span className={`text-micro num block leading-tight ${j.status === "scheduled" && !j.plan_id ? "text-white/80" : "text-ink-2"}`}>
                       {minToLabel(j.start_min)} · {j.duration_min}m
                     </span>
                   </button>
@@ -566,7 +577,7 @@ function BlockDetailSheet({
     <Sheet open onClose={onClose} title="Blocked time">
       <div className="flex flex-col gap-4">
         <div>
-          <p className="text-[15px] font-semibold">{fmtDateLong(block.date)}</p>
+          <p className="text-md font-semibold">{fmtDateLong(block.date)}</p>
           <p className="text-sm text-ink-2 num">
             {block.start_min === 0 && block.end_min === 1440
               ? "All day"
@@ -574,13 +585,13 @@ function BlockDetailSheet({
           </p>
           {block.reason && <p className="text-sm mt-1">{block.reason}</p>}
           {who && (
-            <p className="text-[13px] text-faint mt-1">
+            <p className="text-dense text-faint mt-1">
               {block.source === "ical" ? `Synced from ${who}'s calendar` : `${who}'s time off`}
             </p>
           )}
         </div>
         {block.source === "ical" ? (
-          <p className="text-[13px] text-ink-2 bg-surface border border-line rounded-md px-3 py-2">
+          <p className="note text-dense">
             This comes from a synced calendar — deleting it here would just bring it back on the next sync. Remove the
             event on that calendar instead.
           </p>
@@ -595,7 +606,7 @@ function BlockDetailSheet({
               router.refresh();
             }}
           >
-            {pending ? "Removing…" : "Remove block"}
+            {pending ? <Busy>Removing…</Busy> : "Remove block"}
           </button>
         )}
       </div>
@@ -636,7 +647,7 @@ function FeedSheet({ employee, onClose }: { employee: Employee; onClose: () => v
           onChange={(e) => setUrl(e.target.value)}
         />
         {employee.ical_synced_at && (
-          <p className="text-[12px] text-faint -mt-2">
+          <p className="text-xs text-faint -mt-2">
             Last synced{" "}
             {new Date(employee.ical_synced_at).toLocaleString("en-US", {
               month: "short",

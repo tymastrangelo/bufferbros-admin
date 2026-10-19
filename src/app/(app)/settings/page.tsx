@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
+import { LARP_COOKIE } from "@/lib/larp/client";
 import { requireOwner } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getSettingsMap } from "@/lib/queries";
@@ -34,6 +36,7 @@ export default async function SettingsPage() {
       employees={(employeesQ.data ?? []) as Employee[]}
       emailFrom={process.env.EMAIL_FROM ?? "not configured"}
       userEmail={userQ.data.user?.email ?? ""}
+      larp={(await cookies()).get(LARP_COOKIE)?.value === "1"}
     />
   );
 }

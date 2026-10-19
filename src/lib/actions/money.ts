@@ -1,9 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { after } from "next/server";
 import { getRole } from "@/lib/auth";
-import { notify } from "@/lib/notify";
+import { change, customerName, logActivity, usd } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
 import { todayYmd } from "@/lib/time";
 import type { EntryKind, PaymentMethod } from "@/lib/types";
@@ -56,11 +55,16 @@ export async function addLedgerEntry(fields: LedgerFields): Promise<ActionResult
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
-  if (fields.kind === "payment" && role === "washer") {
-    const { data: cust } = await db.from("customers").select("name").eq("id", fields.customerId).single();
-    const push = `${cust?.name ?? "Customer"} · $${Math.abs(fields.amount)} ${fields.method ?? ""}`.trimEnd();
-    after(() => notify("owner", "Payment recorded", push, "/money/payments"));
-  }
+  await logActivity(
+    `recorded a ${fields.kind} for ${await customerName(fields.customerId)}`,
+    [
+      `${usd(Math.abs(fields.amount))}${fields.method ? ` ${fields.method}` : ""} · ${fields.occurredOn}`,
+      isCashIn(fields.kind) && `Collected by ${collectedBy === "washer" ? "them" : "you"}`,
+      fields.memo?.trim() && `Memo: ${fields.memo.trim()}`,
+    ],
+    `/customers/${fields.customerId}`,
+    { tags: ["moneybag"] }
+  );
   refresh();
   return { ok: true, id: data.id };
 }
@@ -71,6 +75,7 @@ export async function updateLedgerEntry(
 ): Promise<ActionResult> {
   if (!fields.amount || fields.amount <= 0) return { ok: false, error: "Enter an amount greater than zero." };
   const db = await createClient();
+  const { data: before } = await db.from("ledger_entries").select("*").eq("id", id).maybeSingle();
   const { error } = await db
     .from("ledger_entries")
     .update({
@@ -83,6 +88,20 @@ export async function updateLedgerEntry(
     })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
+  if (before) {
+    await logActivity(
+      `edited a ${before.kind} for ${await customerName(before.customer_id)}`,
+      [
+        change("Type", before.kind, fields.kind),
+        change("Amount", Math.abs(Number(before.amount)), Math.abs(fields.amount), (v) => usd(v as number)),
+        change("Method", before.method, fields.method ?? null),
+        change("Date", before.occurred_on, fields.occurredOn),
+        change("Memo", before.memo, fields.memo?.trim() || null),
+      ],
+      `/customers/${before.customer_id}`,
+      { tags: ["pencil2"], priority: 4 }
+    );
+  }
   refresh();
   return { ok: true, id };
 }
@@ -90,6 +109,7 @@ export async function updateLedgerEntry(
 // Owner-only: mark a payment squared-up with Gabe (or undo). ledger_entries RLS is still
 // open to all authenticated users, so the role guard lives here, not the DB.
 export async function setPaymentSettled(ledgerEntryId: string, settled: boolean): Promise<ActionResult> {
+  // activity: owner-only (returns early for workers)
   if ((await getRole()) !== "owner") return { ok: false, error: "Only the owner can settle payouts." };
   const db = await createClient();
   const { error } = await db
@@ -103,8 +123,17 @@ export async function setPaymentSettled(ledgerEntryId: string, settled: boolean)
 
 export async function deleteLedgerEntry(id: string): Promise<ActionResult> {
   const db = await createClient();
+  const { data: before } = await db.from("ledger_entries").select("*").eq("id", id).maybeSingle();
   const { error } = await db.from("ledger_entries").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
+  if (before) {
+    await logActivity(
+      `deleted a ${before.kind} from ${await customerName(before.customer_id)}`,
+      [`${usd(Math.abs(Number(before.amount)))}${before.method ? ` ${before.method}` : ""} · ${before.occurred_on}`, before.memo && `Memo: ${before.memo}`],
+      `/customers/${before.customer_id}`,
+      { tags: ["wastebasket"], priority: 4 }
+    );
+  }
   refresh();
   return { ok: true };
 }
@@ -130,14 +159,17 @@ export async function saveExpense(fields: ExpenseFields, id?: string | null): Pr
   };
   const { error } = id ? await db.from("expenses").update(row).eq("id", id) : await db.from("expenses").insert(row);
   if (error) return { ok: false, error: error.message };
+  await logActivity(`${id ? "edited" : "logged"} an expense`, [`${usd(row.amount)} · ${row.category} · ${row.occurred_on}`, row.memo], "/money/expenses", { tags: ["receipt"] });
   refresh();
   return { ok: true };
 }
 
 export async function deleteExpense(id: string): Promise<ActionResult> {
   const db = await createClient();
+  const { data: before } = await db.from("expenses").select("*").eq("id", id).maybeSingle();
   const { error } = await db.from("expenses").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
+  await logActivity("deleted an expense", [before && `${usd(before.amount)} · ${before.category} · ${before.occurred_on}`, before?.memo], "/money/expenses", { tags: ["wastebasket"], priority: 4 });
   refresh();
   return { ok: true };
 }
@@ -158,6 +190,7 @@ export async function addCapital(fields: CapitalFields): Promise<ActionResult> {
     memo: fields.memo?.trim() || null,
   });
   if (error) return { ok: false, error: error.message };
+  await logActivity("added company capital", [`${usd(fields.amount)} · ${fields.occurredOn}`, fields.memo?.trim()], "/money/capital", { tags: ["bank"] });
   refresh();
   return { ok: true };
 }
@@ -179,14 +212,17 @@ export async function updateCompanyEntry(
     .eq("id", id)
     .in("kind", ["capital", "payout"]);
   if (error) return { ok: false, error: error.message };
+  await logActivity(`edited a company ${fields.kind} entry`, [`${usd(fields.amount)} · ${fields.occurredOn}`, fields.memo?.trim()], "/money/capital", { tags: ["pencil2"], priority: 4 });
   refresh();
   return { ok: true };
 }
 
 export async function deleteCompanyEntry(id: string): Promise<ActionResult> {
   const db = await createClient();
+  const { data: before } = await db.from("company_ledger").select("*").eq("id", id).maybeSingle();
   const { error } = await db.from("company_ledger").delete().eq("id", id).in("kind", ["capital", "payout"]);
   if (error) return { ok: false, error: error.message };
+  await logActivity("deleted a company ledger entry", [before && `${before.kind} · ${usd(Math.abs(Number(before.amount)))} · ${before.occurred_on}`, before?.memo], "/money/capital", { tags: ["wastebasket"], priority: 4 });
   refresh();
   return { ok: true };
 }
@@ -217,14 +253,17 @@ export async function saveRecurring(fields: RecurringFields, id?: string | null)
     ? await db.from("recurring_expenses").update(row).eq("id", id)
     : await db.from("recurring_expenses").insert(row);
   if (error) return { ok: false, error: error.message };
+  await logActivity(`${id ? "edited" : "added"} recurring expense “${row.name}”`, [`~${usd(row.expected_amount)} ${row.cadence}, due day ${row.due_day}`, !row.active && "Paused"], "/money/expenses", { tags: ["receipt"] });
   refresh();
   return { ok: true };
 }
 
 export async function deleteRecurring(id: string): Promise<ActionResult> {
   const db = await createClient();
+  const { data: before } = await db.from("recurring_expenses").select("name").eq("id", id).maybeSingle();
   const { error } = await db.from("recurring_expenses").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
+  await logActivity(`deleted recurring expense “${before?.name ?? "?"}”`, [], "/money/expenses", { tags: ["wastebasket"], priority: 4 });
   refresh();
   return { ok: true };
 }

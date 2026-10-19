@@ -63,11 +63,11 @@ export function SlotPicker({
   return (
     <div>
       {slots === null ? (
-        <div className="flex items-center gap-2.5 py-1 text-[13px] text-faint">
+        <div className="flex items-center gap-2.5 py-1 text-dense text-faint">
           <Wheel size={22} /> Checking the schedule…
         </div>
       ) : slots.length === 0 && !custom ? (
-        <p className="text-sm text-warn bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2">
+        <p className="text-sm note note-warn">
           No open slots this day{excludeAppointmentId ? " (its current time counts as busy)" : ""}. Use a custom
           time to book anyway.
         </p>
@@ -81,11 +81,7 @@ export function SlotPicker({
                 setCustom(false);
                 onChange(s, false);
               }}
-              className={`h-8 px-2.5 rounded-md border text-[13px] font-medium num transition-colors duration-150 ${
-                value === s && !custom
-                  ? "bg-brand border-brand text-white"
-                  : "bg-card border-line-2 hover:border-brand hover:text-brand-deep"
-              }`}
+              className="choice h-8 px-2.5 text-dense num" aria-pressed={value === s && !custom}
             >
               {minToLabel(s)}
             </button>
@@ -93,7 +89,7 @@ export function SlotPicker({
         </div>
       )}
       <div className="mt-2 flex items-center gap-2">
-        <label className="flex items-center gap-1.5 text-[13px] text-ink-2">
+        <label className="flex items-center gap-1.5 text-dense text-ink-2">
           <input
             type="checkbox"
             checked={custom}
@@ -108,7 +104,7 @@ export function SlotPicker({
           <input
             type="time"
             step={300}
-            className="input h-8! w-auto! text-[13px]"
+            className="input h-8! w-auto! text-dense"
             value={value != null ? `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}` : ""}
             onChange={(e) => {
               const [h, m] = e.target.value.split(":").map(Number);
@@ -117,7 +113,7 @@ export function SlotPicker({
           />
         )}
         {custom && value != null && !onGrid && (
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-warn">books anyway</span>
+          <span className="text-label font-semibold uppercase tracking-wide text-warn">books anyway</span>
         )}
       </div>
     </div>

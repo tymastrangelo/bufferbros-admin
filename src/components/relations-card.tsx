@@ -18,6 +18,7 @@ import {
 } from "@/lib/types";
 import { CustomerPicker } from "./customer-picker";
 import { OutreachSheet } from "./outreach-sheet";
+import { IconPlus, IconStar, IconX } from "./icons";
 import { ErrorNote } from "./ui";
 
 const outcomeLabel = (id: string) => OUTREACH_OUTCOMES.find((o) => o.id === id)?.label ?? id;
@@ -55,13 +56,14 @@ export function RelationsCard({
 
   return (
     <section>
-      <div className="flex items-center justify-between mb-1.5">
+      <div className="flex items-center justify-between mb-2">
         <h2 className="label">Relations</h2>
-        <button className="text-[13px] text-brand-deep font-medium" onClick={() => setLogOpen(true)}>
-          + Log outreach
+        <button className="add-link" onClick={() => setLogOpen(true)}>
+          <IconPlus width={13} height={13} />
+          Log outreach
         </button>
       </div>
-      <div className="card divide-y divide-line text-sm">
+      <div className="card divide-y divide-line text-sm overflow-hidden">
         {/* Status + snooze */}
         <div className="px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
           <span className="label w-20 shrink-0">Status</span>
@@ -102,7 +104,9 @@ export function RelationsCard({
         <div className="px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
           <span className="label w-20 shrink-0">Review</span>
           {customer.review_left_on ? (
-            <span className="chip bg-ok-wash text-ok">⭐ left {fmtDateShort(customer.review_left_on)}</span>
+            <span className="chip chip-ok">
+              <IconStar width={11} height={11} weight="fill" /> left {fmtDateShort(customer.review_left_on)}
+            </span>
           ) : (
             <>
               <span className="text-faint text-xs">
@@ -110,7 +114,7 @@ export function RelationsCard({
               </span>
               <span className="ml-auto flex gap-1.5">
                 <QuickLog customerId={customer.id} outcome="asked_review" label="Mark asked" onDone={() => router.refresh()} />
-                <QuickLog customerId={customer.id} outcome="left_review" label="Left ⭐" onDone={() => router.refresh()} />
+                <QuickLog customerId={customer.id} outcome="left_review" label="Left review" onDone={() => router.refresh()} />
               </span>
             </>
           )}
@@ -123,19 +127,19 @@ export function RelationsCard({
             <>
               <span className="text-sm">
                 referred by{" "}
-                <Link href={`/customers/${customer.referred_by}`} className="text-brand-deep hover:underline underline-offset-2">
+                <Link href={`/customers/${customer.referred_by}`} className="link">
                   {referrerName}
                 </Link>
               </span>
               {customer.referral_credited_at ? (
-                <span className="chip bg-ok-wash text-ok">both credited {money(referralCredit)}</span>
+                <span className="chip chip-ok">both credited {money(referralCredit)}</span>
               ) : (
                 <span className="ml-auto flex gap-1.5">
                   <button className="btn btn-sm" disabled={busy} onClick={() => act(() => giveReferralCredit(customer.id))}>
                     Credit both {money(referralCredit)}
                   </button>
-                  <button className="btn btn-ghost btn-sm text-faint" disabled={busy} onClick={() => act(() => setReferredBy(customer.id, null))}>
-                    ✕
+                  <button className="btn btn-ghost btn-sm btn-icon text-faint hover:text-bad" aria-label="Remove referrer" disabled={busy} onClick={() => act(() => setReferredBy(customer.id, null))}>
+                    <IconX width={14} height={14} />
                   </button>
                 </span>
               )}
@@ -153,8 +157,9 @@ export function RelationsCard({
               />
             </div>
           ) : (
-            <button className="text-[13px] text-brand-deep font-medium" onClick={() => setPickingReferrer(true)}>
-              + Who referred them?
+            <button className="add-link" onClick={() => setPickingReferrer(true)}>
+              <IconPlus width={13} height={13} />
+              Who referred them?
             </button>
           )}
         </div>
@@ -165,7 +170,7 @@ export function RelationsCard({
               {referrals.map((r, i) => (
                 <span key={r.id}>
                   {i > 0 && ", "}
-                  <Link href={`/customers/${r.id}`} className="text-brand-deep hover:underline underline-offset-2">
+                  <Link href={`/customers/${r.id}`} className="link">
                     {r.name}
                   </Link>
                 </span>

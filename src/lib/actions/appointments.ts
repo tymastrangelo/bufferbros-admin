@@ -6,9 +6,9 @@ import { getRole } from "@/lib/auth";
 import { cancelledEmail, confirmedEmail, sendEmail, updatedEmail, type JobEmailInfo } from "@/lib/email";
 import { normalizeEmail, normalizePhone } from "@/lib/format";
 import { syncAppointmentToGcal } from "@/lib/gcal";
-import { notify as sendPush } from "@/lib/notify";
+import { change, customerName, logActivity, notify as sendPush, usd } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
-import { diffDays, fmtDateShort, todayYmd, whenLabel } from "@/lib/time";
+import { diffDays, fmtDateShort, nowMinutes, todayYmd, whenLabel } from "@/lib/time";
 import type { Addon, Appointment, PaymentMethod } from "@/lib/types";
 import { cancelPaymentRequest, sendPaymentRequest } from "./stripe";
 
@@ -16,10 +16,7 @@ export type ActionResult = { ok: true; id?: string } | { ok: false; error: strin
 
 const refresh = () => revalidatePath("/", "layout");
 
-/** Whoever didn't perform the action gets the push: owner acts → washer hears, and vice versa. */
-async function counterpart(): Promise<"owner" | "washer"> {
-  return (await getRole()) === "owner" ? "washer" : "owner";
-}
+const addonNames = (a: Addon[] | null | undefined) => (a ?? []).map((x) => x.name).join(", ") || "none";
 
 function friendly(message: string): string {
   return message.includes("slot_taken")
@@ -155,9 +152,25 @@ export async function createAppointment(input: NewAppointment): Promise<ActionRe
     const to = contact.email;
     after(() => sendEmail(to, subject, html)); // don't make the owner wait on Resend
   }
-  const other = await counterpart();
-  const push = `${contact.name} · ${whenLabel(appt.date, appt.start_min)} · ${appt.service_name} · $${appt.price}${depositNote}`;
-  after(() => sendPush(other, "New job scheduled", push, "/calendar"));
+  if ((await getRole()) === "owner") {
+    const push = `${contact.name} · ${whenLabel(appt.date, appt.start_min)} · ${appt.service_name} · $${appt.price}${depositNote}`;
+    after(() => sendPush("washer", "New job scheduled", push, "/calendar", { tags: ["calendar"] }));
+  } else {
+    await logActivity(
+      `booked ${contact.name}`,
+      [
+        `${whenLabel(appt.date, appt.start_min)} · ${fmtDur(appt.duration_min)}`,
+        `${appt.service_name}${appt.size_label ? ` (${appt.size_label})` : ""} · ${usd(appt.price)}`,
+        appt.addons.length > 0 && `Add-ons: ${addonNames(appt.addons)}`,
+        appt.address && `At ${appt.address}`,
+        depositNote && depositNote.replace(" · ", "").replace(/^collect (\d+)/, "Collect $$$1"),
+        input.force && "Booked over a conflict (Book anyway)",
+        input.notify && contact.email ? `Confirmation emailed to ${contact.email}` : "Customer not emailed",
+      ],
+      "/calendar",
+      { tags: ["calendar"] }
+    );
+  }
   after(() => syncAppointmentToGcal(appt.id));
   refresh();
   return { ok: true, id: appt.id };
@@ -217,9 +230,24 @@ export async function rescheduleAppointment(
       const to = contact.email;
       after(() => sendEmail(to, subject, html));
     }
-    const other = await counterpart();
-    const push = `${contact.name} · was ${whenLabel(before.date, before.start_min)}, now ${whenLabel(next.date, next.startMin)}`;
-    after(() => sendPush(other, "Job rescheduled", push, "/calendar"));
+    if ((await getRole()) === "owner") {
+      const push = `${contact.name} · was ${whenLabel(before.date, before.start_min)}, now ${whenLabel(next.date, next.startMin)}`;
+      after(() => sendPush("washer", "Job rescheduled", push, "/calendar", { tags: ["arrows_counterclockwise"] }));
+    }
+  }
+  if (changed) {
+    const contact = await resolveContact(before);
+    await logActivity(
+      `rescheduled ${contact.name}`,
+      [
+        `Was ${whenLabel(before.date, before.start_min)} (${fmtDur(before.duration_min)})`,
+        `Now ${whenLabel(next.date, next.startMin)} (${fmtDur(next.durationMin)})`,
+        before.service_name,
+        timeChanged && (notify && contact.email ? `Customer emailed the new time` : "Customer NOT told — reach out"),
+      ],
+      "/calendar",
+      { tags: ["arrows_counterclockwise"] }
+    );
   }
   after(() => syncAppointmentToGcal(id));
   refresh();
@@ -239,12 +267,20 @@ export async function cancelAppointment(id: string, notify: boolean): Promise<Ac
     const to = contact.email;
     after(() => sendEmail(to, subject, html));
   }
-  // Declining a pending web booking skips the push — the other person never saw it.
-  if (appt.status === "scheduled") {
-    const other = await counterpart();
+  // Declining a pending web booking skips the crew push — they never saw it.
+  if (appt.status === "scheduled" && (await getRole()) === "owner") {
     const push = `${contact.name} · ${whenLabel(appt.date, appt.start_min)}`;
-    after(() => sendPush(other, "Job cancelled", push, "/calendar"));
+    after(() => sendPush("washer", "Job cancelled", push, "/calendar", { tags: ["x"] }));
   }
+  await logActivity(
+    appt.status === "pending" ? `declined ${contact.name}'s web booking` : `cancelled ${contact.name}'s job`,
+    [
+      `${whenLabel(appt.date, appt.start_min)} · ${appt.service_name} · ${usd(appt.price)}`,
+      notify && contact.email ? `Cancellation emailed to ${contact.email}` : "Customer NOT told — reach out",
+    ],
+    "/calendar",
+    { tags: ["x"], priority: 4 }
+  );
   after(() => syncAppointmentToGcal(id));
   refresh();
   return { ok: true, id };
@@ -273,8 +309,15 @@ export async function setAppointmentStatus(id: string, status: "scheduled" | "no
     const { data: openLinks } = await db.from("payment_requests").select("id").eq("appointment_id", id).eq("status", "pending");
     for (const r of openLinks ?? []) await cancelPaymentRequest(r.id);
     const contact = await resolveContact(appt);
-    after(() => sendPush("washer", "Job reopened", `${contact.name} · ${whenLabel(appt.date, appt.start_min)} is back on the schedule`, "/calendar"));
+    after(() => sendPush("washer", "Job reopened", `${contact.name} · ${whenLabel(appt.date, appt.start_min)} is back on the schedule`, "/calendar", { tags: ["arrows_counterclockwise"] }));
   }
+  const who = (await resolveContact(appt)).name;
+  await logActivity(
+    status === "no_show" ? `marked ${who} a no-show` : `put ${who}'s job back on the schedule`,
+    [`${whenLabel(appt.date, appt.start_min)} · ${appt.service_name} · ${usd(appt.price)}`, `Was: ${appt.status.replace("_", "-")}`],
+    "/calendar",
+    { tags: [status === "no_show" ? "warning" : "arrows_counterclockwise"], priority: status === "no_show" ? 4 : 3 }
+  );
   after(() => syncAppointmentToGcal(id));
   refresh();
   return { ok: true, id };
@@ -289,10 +332,19 @@ export async function startAppointment(id: string): Promise<ActionResult> {
   if (appt.started_at) return { ok: false, error: "Already started." };
   const { error } = await db.from("appointments").update({ started_at: new Date().toISOString() }).eq("id", id);
   if (error) return { ok: false, error: error.message };
-  if ((await getRole()) === "washer") {
-    const contact = await resolveContact(appt);
-    after(() => sendPush("owner", "Job started", `${contact.name} · ${appt.service_name}`, "/"));
-  }
+  const contact = await resolveContact(appt);
+  const late = appt.date === todayYmd() ? nowMinutes() - appt.start_min : 0;
+  await logActivity(
+    `started ${contact.name}'s detail`,
+    [
+      `${appt.service_name} · ${usd(appt.price)} · booked ${fmtDur(appt.duration_min)}`,
+      `Scheduled ${whenLabel(appt.date, appt.start_min)}`,
+      appt.address && `At ${appt.address}`,
+      late > 15 && late < 600 && `Started about ${fmtDur(late)} late`,
+    ],
+    "/",
+    { tags: ["arrow_forward"] }
+  );
   refresh();
   return { ok: true, id };
 }
@@ -302,6 +354,7 @@ export async function adjustJobTimes(
   id: string,
   times: { startedAt: string | null; completedAt: string }
 ): Promise<ActionResult> {
+  // activity: owner-only (returns early for workers)
   if ((await getRole()) !== "owner") return { ok: false, error: "Only Tyler can adjust job times." };
   if (times.startedAt && new Date(times.startedAt) >= new Date(times.completedAt)) {
     return { ok: false, error: "Start time must be before completion time." };
@@ -363,14 +416,25 @@ export async function completeAppointment(
   if (error) return { ok: false, error: error.message };
 
   const tookMin = appt.started_at ? (completedAt.getTime() - new Date(appt.started_at).getTime()) / 60000 : null;
-  if (role === "washer") {
+  {
     const contact = await resolveContact(appt);
-    const push =
-      `${contact.name} · $${finalPrice}` +
-      (tookMin != null && tookMin > 0 ? ` · took ${fmtDur(tookMin)}` : "") +
-      (payment && payment.amount > 0 ? ` · collected $${payment.amount} ${payment.method}` : " · no payment") +
-      (note ? `\n“${note}”` : "");
-    after(() => sendPush("owner", "Job completed", push));
+    await logActivity(
+      `completed ${contact.name}'s detail`,
+      [
+        `${appt.service_name} · ${usd(finalPrice)}${Number(appt.price) !== finalPrice ? ` (booked at ${usd(appt.price)})` : ""}`,
+        tookMin != null && tookMin > 0 ? `Took ${fmtDur(tookMin)} (booked ${fmtDur(appt.duration_min)})` : "No start time — clock wasn't started",
+        payment && payment.amount > 0
+          ? `Collected ${usd(payment.amount)} ${payment.method}${payment.amount < finalPrice ? ` — ${usd(finalPrice - payment.amount)} still owed` : ""}`
+          : stripeLink
+            ? `No payment yet — Stripe link emailed for ${usd(finalPrice)}`
+            : appt.customer_id
+              ? `No payment collected — ${usd(finalPrice)} now owed`
+              : "No payment collected (not linked to a customer)",
+        note && `Note: “${note}”`,
+      ],
+      appt.customer_id ? `/customers/${appt.customer_id}` : "/",
+      { tags: ["white_check_mark"] }
+    );
   }
 
   if (appt.customer_id) {
@@ -412,7 +476,12 @@ export async function completeAppointment(
       if (!link.ok) {
         // Job is completed and charged either way — the link just needs a retry
         // from the customer's profile. Tell the owner instead of failing the action.
-        after(() => sendPush("owner", "Stripe link not sent", link.error ?? "Unknown error", `/customers/${appt.customer_id}`));
+        after(() =>
+          sendPush("owner", "Stripe link NOT sent", `${link.error ?? "Unknown error"}\nThe job is completed and charged — resend the link from their profile.`, `/customers/${appt.customer_id}`, {
+            tags: ["warning"],
+            priority: 4,
+          })
+        );
         refresh();
         return { ok: true, id };
       }
@@ -432,6 +501,7 @@ export async function setJobAttribution(
   employeeId: string | null,
   keepAll: boolean
 ): Promise<ActionResult> {
+  // activity: owner-only (returns early for workers)
   if ((await getRole()) !== "owner") return { ok: false, error: "Only Tyler can change who did a job." };
   const db = await createClient();
   const { error } = await db
@@ -480,7 +550,8 @@ export async function approveAppointment(
     after(() => sendEmail(to, subject, html));
   }
   const push = `${contact.name} · ${whenLabel(appt.date, appt.start_min)} · ${appt.service_name} · $${appt.price}`;
-  after(() => sendPush("washer", "New job on the schedule", push, "/calendar"));
+  after(() => sendPush("washer", "New job on the schedule", push, "/calendar", { tags: ["calendar"] }));
+  await logActivity(`approved ${contact.name}'s web booking`, [push], "/calendar", { tags: ["calendar"] });
   after(() => syncAppointmentToGcal(id));
   refresh();
   return { ok: true, id };
@@ -509,11 +580,36 @@ export async function updateAppointment(
   vehicleIds?: string[]
 ): Promise<ActionResult> {
   const db = await createClient();
+  const before = await getAppt(id);
   const { error } = await db
     .from("appointments")
     .update(vehicleIds ? { ...fields, vehicle_id: vehicleIds[0] ?? null } : fields)
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
+  if (before) {
+    const contact = await resolveContact(before);
+    const diffs = [
+      "price" in fields && change("Price", Number(before.price), Number(fields.price), (v) => usd(v as number)),
+      "service_name" in fields && change("Service", before.service_name, fields.service_name),
+      "size_label" in fields && change("Size", before.size_label, fields.size_label),
+      "duration_min" in fields && change("Length", before.duration_min, fields.duration_min, (v) => fmtDur(Number(v))),
+      "addons" in fields && change("Add-ons", addonNames(before.addons), addonNames(fields.addons)),
+      "address" in fields && change("Address", before.address, fields.address),
+      "notes" in fields && change("Notes", before.notes, fields.notes),
+      "contact_name" in fields && change("Name", before.contact_name, fields.contact_name),
+      "contact_phone" in fields && change("Phone", before.contact_phone, fields.contact_phone),
+      "contact_email" in fields && change("Email", before.contact_email, fields.contact_email),
+      vehicleIds && `Vehicles on the visit: ${vehicleIds.length}`,
+    ];
+    if (diffs.some(Boolean)) {
+      await logActivity(
+        `edited ${contact.name}'s job`,
+        [`${whenLabel(before.date, before.start_min)} · ${before.service_name}`, ...diffs],
+        "/calendar",
+        { tags: ["pencil2"] }
+      );
+    }
+  }
   if (vehicleIds) {
     const { error: delErr } = await db.from("appointment_vehicles").delete().eq("appointment_id", id);
     if (delErr) return { ok: false, error: delErr.message };
@@ -532,8 +628,15 @@ export async function updateAppointment(
 /** Link a web booking to an existing customer. */
 export async function linkAppointmentToCustomer(id: string, customerId: string): Promise<ActionResult> {
   const db = await createClient();
+  const appt = await getAppt(id);
   const { error } = await db.from("appointments").update({ customer_id: customerId }).eq("id", id);
   if (error) return { ok: false, error: error.message };
+  await logActivity(
+    `linked a booking to ${await customerName(customerId)}`,
+    [appt && `${appt.contact_name ?? "Booking"} · ${whenLabel(appt.date, appt.start_min)} · ${appt.service_name}`],
+    `/customers/${customerId}`,
+    { tags: ["link"] }
+  );
   after(() => syncAppointmentToGcal(id));
   refresh();
   return { ok: true, id };
@@ -564,6 +667,16 @@ export async function createCustomerFromAppointment(id: string): Promise<ActionR
   }
   const { error: linkErr } = await db.from("appointments").update({ customer_id: customer.id }).eq("id", id);
   if (linkErr) return { ok: false, error: linkErr.message };
+  await logActivity(
+    `added ${appt.contact_name} as a customer`,
+    [
+      "From their web booking",
+      [appt.contact_phone, appt.contact_email].filter(Boolean).join(" · ") || "No phone or email on the booking",
+      appt.address,
+    ],
+    `/customers/${customer.id}`,
+    { tags: ["bust_in_silhouette"] }
+  );
   refresh();
   return { ok: true, id: customer.id };
 }

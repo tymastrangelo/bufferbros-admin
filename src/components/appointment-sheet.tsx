@@ -215,7 +215,7 @@ export function AppointmentSheet({
             <>
               <CustomerPicker value={customer} onChange={pickCustomer} autoFocus />
               {!customer && (
-                <button type="button" className="mt-1.5 text-[13px] text-brand-deep underline underline-offset-2" onClick={() => setOneOff(true)}>
+                <button type="button" className="mt-1.5 link text-dense" onClick={() => setOneOff(true)}>
                   New customer — just type the details
                 </button>
               )}
@@ -227,11 +227,11 @@ export function AppointmentSheet({
                 <input className="input num" type="tel" placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
                 <input className="input" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
               </div>
-              <p className="text-[12px] text-faint -mt-0.5">
+              <p className="text-xs text-faint -mt-0.5">
                 Saved to your client list automatically (matched by phone/email if they already exist). Add an email if
                 they&apos;ll pay by Stripe link.
               </p>
-              <button type="button" className="self-start text-[13px] text-brand-deep underline underline-offset-2" onClick={() => setOneOff(false)}>
+              <button type="button" className="self-start link text-dense" onClick={() => setOneOff(false)}>
                 Search existing customers instead
               </button>
             </div>
@@ -300,11 +300,9 @@ export function AppointmentSheet({
                       onClick={() =>
                         setBoatServices((ids) => (on ? ids.filter((x) => x !== c.id) : [...ids, c.id]))
                       }
-                      className={`rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors duration-150 ${
-                        on ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-                      }`}
+                      className="choice rounded-full px-2.5 py-1 text-xs" aria-pressed={on}
                     >
-                      {c.name} <span className={`num ${on ? "text-white/80" : "text-faint"}`}>{money(c.ratePerFt)}/ft</span>
+                      {c.name} <span className={`num ${on ? "opacity-70" : "text-faint"}`}>{money(c.ratePerFt)}/ft</span>
                     </button>
                   );
                 })}
@@ -315,14 +313,12 @@ export function AppointmentSheet({
                     key={l.label}
                     type="button"
                     onClick={() => setBoatLevelIdx(li)}
-                    className={`rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors duration-150 ${
-                      boatLevelIdx === li ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
-                    }`}
+                    className="choice rounded-full px-2.5 py-1 text-xs" aria-pressed={boatLevelIdx === li}
                   >
                     {l.label}
                   </button>
                 ))}
-                <span className="text-faint text-[11px] mx-0.5">·</span>
+                <span className="text-faint text-label mx-0.5">·</span>
                 {[
                   { trailer: false, label: "In the water" },
                   { trailer: true, label: `On a trailer −${boatTrailerDiscountPct(catalog)}%` },
@@ -331,9 +327,7 @@ export function AppointmentSheet({
                     key={o.label}
                     type="button"
                     onClick={() => setBoatTrailer(o.trailer)}
-                    className={`rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors duration-150 ${
-                      boatTrailer === o.trailer ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
-                    }`}
+                    className="choice rounded-full px-2.5 py-1 text-xs" aria-pressed={boatTrailer === o.trailer}
                   >
                     {o.label}
                   </button>
@@ -369,9 +363,7 @@ export function AppointmentSheet({
                     key={s.id}
                     type="button"
                     onClick={() => setSizeId(s.id)}
-                    className={`h-9 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
-                      sizeId === s.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-                    }`}
+                    className="choice h-9 text-dense" aria-pressed={sizeId === s.id}
                   >
                     {s.id === "sedan" ? "Sedan" : s.id === "midsize" ? "Midsize" : "Large"}
                   </button>
@@ -393,16 +385,14 @@ export function AppointmentSheet({
                   key={s.id}
                   type="button"
                   onClick={() => setService(s.id)}
-                  className={`h-9 rounded-md border px-1 text-[13px] font-medium transition-colors duration-150 ${
-                    service === s.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-                  }`}
+                  className="choice h-9 px-1 text-dense" aria-pressed={service === s.id}
                 >
                   {s.label}
                 </button>
               ))}
             </div>
             {ceramic && (
-              <div className="mt-2 text-[13px] bg-warn-wash border border-[#fde68a] rounded-md px-3 py-2.5 flex flex-col gap-1.5">
+              <div className="mt-2 text-dense note note-warn flex flex-col gap-1.5">
                 <p className="font-semibold">Ceramic coating rules</p>
                 <p>
                   Includes the full in-and-out detail · books ~{Math.round(quote.minutes / 60)}h on site · at least{" "}
@@ -463,9 +453,7 @@ export function AppointmentSheet({
                   setAssignees([]);
                   setStartMin(null);
                 }}
-                className={`h-9 px-3 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
-                  assignees.length === 0 ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
-                }`}
+                className="choice h-9 px-3 text-dense" aria-pressed={assignees.length === 0}
               >
                 Me
               </button>
@@ -477,9 +465,7 @@ export function AppointmentSheet({
                     setAssignees((ids) => (ids.includes(w.id) ? ids.filter((i) => i !== w.id) : [...ids, w.id]));
                     setStartMin(null);
                   }}
-                  className={`h-9 px-3 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
-                    assignees.includes(w.id) ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
-                  }`}
+                  className="choice h-9 px-3 text-dense" aria-pressed={assignees.includes(w.id)}
                 >
                   {w.name}
                 </button>

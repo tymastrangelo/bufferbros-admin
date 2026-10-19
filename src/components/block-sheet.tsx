@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { addBlock } from "@/lib/actions/settings";
-import { ErrorNote, Field, Sheet } from "./ui";
+import { Busy, ErrorNote, Field, Sheet } from "./ui";
 
 export function BlockSheet({ open, onClose, defaultDate }: { open: boolean; onClose: () => void; defaultDate: string }) {
   const router = useRouter();
@@ -71,7 +71,7 @@ export function BlockSheet({ open, onClose, defaultDate }: { open: boolean; onCl
             router.refresh();
           }}
         >
-          {pending ? "Blocking…" : "Block it"}
+          {pending ? <Busy>Blocking…</Busy> : "Block it"}
         </button>
       </div>
     </Sheet>

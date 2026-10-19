@@ -5,6 +5,8 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { SIZES, vehicleLabel, type SizeId, type Vehicle } from "@/lib/types";
+import { Busy } from "./ui";
+import { IconPlus } from "./icons";
 
 const SIZE_SHORT: Record<SizeId, string> = { sedan: "Sedan", midsize: "Midsize", large: "Large" };
 
@@ -82,7 +84,7 @@ export function VehiclePicker({
           </span>
         </label>
       ))}
-      {vehicles.length === 0 && !adding && <p className="text-[13px] text-faint">No vehicles on file yet.</p>}
+      {vehicles.length === 0 && !adding && <p className="text-dense text-faint">No vehicles on file yet.</p>}
       {allowAdd &&
         (adding ? (
           <div className="mt-1 border border-line-2 rounded-md p-2.5 flex flex-col gap-2">
@@ -92,9 +94,7 @@ export function VehiclePicker({
                   key={k}
                   type="button"
                   onClick={() => setKind(k)}
-                  className={`h-8 rounded-md border text-[12px] font-medium capitalize transition-colors duration-150 ${
-                    kind === k ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
-                  }`}
+                  className="choice h-8 text-xs capitalize" aria-pressed={kind === k}
                 >
                   {k}
                 </button>
@@ -107,9 +107,7 @@ export function VehiclePicker({
                     key={s.id}
                     type="button"
                     onClick={() => setSizeId(s.id)}
-                    className={`h-8 rounded-md border text-[12px] font-medium transition-colors duration-150 ${
-                      sizeId === s.id ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-                    }`}
+                    className="choice h-8 text-xs" aria-pressed={sizeId === s.id}
                   >
                     {SIZE_SHORT[s.id]}
                   </button>
@@ -129,23 +127,24 @@ export function VehiclePicker({
               <input className="input" placeholder="Make (optional)" value={make} onChange={(e) => setMake(e.target.value)} />
               <input className="input" placeholder="Model (optional)" value={model} onChange={(e) => setModel(e.target.value)} />
             </div>
-            {error && <p className="text-[13px] text-bad">{error}</p>}
+            {error && <p className="text-dense text-bad">{error}</p>}
             <div className="grid grid-cols-2 gap-2">
               <button type="button" className="btn btn-sm" onClick={() => setAdding(false)}>
                 Cancel
               </button>
               <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={addVehicle}>
-                {saving ? "Saving…" : kind === "boat" ? "Add boat" : "Add vehicle"}
+                {saving ? <Busy>Saving…</Busy> : kind === "boat" ? "Add boat" : "Add vehicle"}
               </button>
             </div>
           </div>
         ) : (
           <button
             type="button"
-            className="self-start text-[13px] text-brand-deep underline underline-offset-2"
+            className="self-start add-link"
             onClick={() => setAdding(true)}
           >
-            + Add a vehicle or boat
+            <IconPlus width={13} height={13} />
+            Add a vehicle or boat
           </button>
         ))}
     </div>

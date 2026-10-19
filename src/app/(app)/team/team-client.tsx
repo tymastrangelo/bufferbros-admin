@@ -8,7 +8,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Wheel } from "@/components/brand";
-import { ErrorNote, Field } from "@/components/ui";
+import { IconPlus } from "@/components/icons";
+import { Avatar, ErrorNote, Field, PageHeader, Stat } from "@/components/ui";
 import { addEmployee, syncCalendarNow, updateEmployee } from "@/lib/actions/employees";
 import { money } from "@/lib/format";
 import type { Employee } from "@/lib/types";
@@ -46,33 +47,32 @@ export function TeamClient({ employees, stats }: { employees: Employee[]; stats:
   const totalJobs = active.reduce((s, e) => s + (stats[e.id]?.jobsMonth ?? 0), 0);
 
   return (
-    <div className="px-4 md:px-8 py-5 md:py-7 max-w-3xl flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl md:text-2xl font-bold">Team</h1>
-        {!adding && (
-          <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>
-            Add a worker
-          </button>
-        )}
+    <div className="page max-w-3xl flex flex-col gap-4">
+      <div className="-mb-4">
+        <PageHeader
+          title="Team"
+          sub={`${active.length} active worker${active.length === 1 ? "" : "s"}`}
+          actions={
+            !adding && (
+              <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>
+                <IconPlus width={14} height={14} /> Add a worker
+              </button>
+            )
+          }
+        />
       </div>
 
       {/* Crew at a glance */}
       {active.length > 0 && (
-        <div className="grid grid-cols-3 gap-px bg-line border border-line rounded-lg overflow-hidden">
-          <div className="bg-card px-3.5 py-3">
-            <p className="label">Crew jobs — this month</p>
-            <p className="mt-1 text-xl font-bold num leading-none">{totalJobs}</p>
-          </div>
-          <div className="bg-card px-3.5 py-3">
-            <p className="label">Cuts earned — this month</p>
-            <p className="mt-1 text-xl font-bold num leading-none">{money(totalCut)}</p>
-          </div>
-          <div className="bg-card px-3.5 py-3">
-            <p className="label">Unsettled with crew</p>
-            <p className={`mt-1 text-xl font-bold num leading-none ${totalNet > 0 ? "text-ok" : totalNet < 0 ? "text-bad" : ""}`}>
-              {totalNet === 0 ? "Even" : totalNet > 0 ? `+${money(totalNet)}` : money(totalNet)}
-            </p>
-          </div>
+        <div className="stat-grid grid-cols-3">
+          <Stat label="Crew jobs — this month" value={totalJobs} />
+          <Stat label="Cuts earned — this month" value={money(totalCut)} />
+          <Stat
+            label="Unsettled with crew"
+            value={totalNet === 0 ? "Even" : totalNet > 0 ? `+${money(totalNet)}` : money(totalNet)}
+            tone={totalNet > 0 ? "ok" : totalNet < 0 ? "bad" : undefined}
+            href="/money/payouts"
+          />
         </div>
       )}
 
@@ -83,7 +83,7 @@ export function TeamClient({ employees, stats }: { employees: Employee[]; stats:
       {employees.length === 0 && !adding && (
         <p className="text-sm text-faint">No workers yet — add one and they can sign in right away.</p>
       )}
-      <p className="text-[12px] text-faint">
+      <p className="text-xs text-faint">
         Workers see the schedule and their own pay — never pricing, money, or this page. Cuts apply to payments on jobs
         they did and only change going forward.
       </p>
@@ -101,7 +101,7 @@ function AddWorkerCard({ onDone }: { onDone: () => void }) {
   const [pending, setPending] = useState(false);
 
   return (
-    <div className="card p-4 flex flex-col gap-3 bg-surface">
+    <div className="well p-4 flex flex-col gap-3">
       <p className="label">New worker</p>
       <div className="grid grid-cols-2 gap-2">
         <Field label="Name">
@@ -154,14 +154,15 @@ function WorkerCard({ employee, stats }: { employee: Employee; stats?: WorkerSta
 
   return (
     <div className={`card p-4 flex flex-col gap-3 ${employee.active ? "" : "opacity-60"}`}>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
+        <Avatar name={employee.name} size={38} />
         <div className="grow min-w-0">
-          <p className="text-[15px] font-semibold truncate">
+          <p className="text-md font-semibold truncate">
             {employee.name}
-            <span className="text-[12px] font-medium text-faint num ml-2">{employee.split_pct}% cut</span>
-            {!employee.active && <span className="chip bg-line-2 text-ink-2 ml-2">inactive</span>}
+            <span className="text-xs font-medium text-faint num ml-2">{employee.split_pct}% cut</span>
+            {!employee.active && <span className="chip ml-2">inactive</span>}
           </p>
-          <p className="text-[12px] text-ink-2 truncate">
+          <p className="text-xs text-ink-2 truncate">
             {employee.email}
             {" · "}
             {feedLive ? `calendar synced ${fmtSynced(employee.ical_synced_at)}` : "no calendar feed"}
@@ -174,7 +175,7 @@ function WorkerCard({ employee, stats }: { employee: Employee; stats?: WorkerSta
 
       {stats && (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-line border border-line rounded-lg overflow-hidden">
+          <div className="stat-grid grid-cols-2 sm:grid-cols-4">
             <MiniStat label="Jobs this month" value={String(stats.jobsMonth)} sub={money(stats.revenueMonth) + " of work"} />
             <MiniStat label="Their cut" value={money(stats.cutMonth)} sub="this month" />
             <MiniStat label="Assigned ahead" value={String(stats.upcoming)} sub={stats.upcoming === 1 ? "job" : "jobs"} />
@@ -182,21 +183,15 @@ function WorkerCard({ employee, stats }: { employee: Employee; stats?: WorkerSta
           </div>
           <Link
             href="/money/payouts"
-            className={`text-[13px] font-medium rounded-md border px-3 py-2 ${
-              stats.count === 0
-                ? "text-ok bg-ok-wash border-[#bbe7c9]"
-                : stats.net >= 0
-                  ? "text-ok bg-ok-wash border-[#bbe7c9]"
-                  : "text-bad bg-bad-wash border-[#fecaca]"
-            }`}
+            className={`note text-dense font-medium transition-opacity hover:opacity-85 ${stats.net >= 0 || stats.count === 0 ? "note-ok" : "note-bad"}`}
           >
             {stats.count === 0
-              ? "✓ All squared up"
+              ? "All squared up"
               : stats.net > 0
-                ? `${employee.name} owes you ${money(stats.net)} · ${stats.count} unsettled →`
+                ? `${employee.name} owes you ${money(stats.net)} · ${stats.count} unsettled`
                 : stats.net < 0
-                  ? `You owe ${employee.name} ${money(-stats.net)} · ${stats.count} unsettled →`
-                  : `Even — ${stats.count} unsettled to mark off →`}
+                  ? `You owe ${employee.name} ${money(-stats.net)} · ${stats.count} unsettled`
+                  : `Even — ${stats.count} unsettled to mark off`}
           </Link>
         </>
       )}
@@ -208,10 +203,10 @@ function WorkerCard({ employee, stats }: { employee: Employee; stats?: WorkerSta
 
 function MiniStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="bg-card px-3 py-2.5">
+    <div>
       <p className="label">{label}</p>
-      <p className="mt-0.5 text-lg font-bold num leading-none">{value}</p>
-      {sub && <p className="text-[11px] text-faint num mt-0.5">{sub}</p>}
+      <p className="mt-1 text-lg font-semibold num leading-none tracking-tight">{value}</p>
+      {sub && <p className="text-label text-faint num mt-0.5">{sub}</p>}
     </div>
   );
 }

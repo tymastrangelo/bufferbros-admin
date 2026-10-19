@@ -91,9 +91,7 @@ export function LedgerEntrySheet({
                 key={k}
                 type="button"
                 onClick={() => setKind(k)}
-                className={`h-9 rounded-md border text-[13px] font-medium capitalize transition-colors duration-150 ${
-                  kind === k ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
-                }`}
+                className="choice h-9 text-dense capitalize" aria-pressed={kind === k}
               >
                 {k}
               </button>
@@ -130,9 +128,7 @@ export function LedgerEntrySheet({
                   key={m}
                   type="button"
                   onClick={() => setMethod(m)}
-                  className={`h-9 rounded-md border text-[13px] font-medium capitalize transition-colors duration-150 ${
-                    method === m ? "bg-brand border-brand text-white" : "bg-card border-line-2 hover:border-brand"
-                  }`}
+                  className="choice h-9 text-dense capitalize" aria-pressed={method === m}
                 >
                   {m}
                 </button>
@@ -149,9 +145,7 @@ export function LedgerEntrySheet({
                   key={who}
                   type="button"
                   onClick={() => setCollectedBy(who)}
-                  className={`h-9 rounded-md border text-[13px] font-medium transition-colors duration-150 ${
-                    collectedBy === who ? "bg-ink border-ink text-white" : "bg-card border-line-2 hover:border-ink"
-                  }`}
+                  className="choice h-9 text-dense" aria-pressed={collectedBy === who}
                 >
                   {who === "owner" ? "Me" : "Worker"}
                 </button>

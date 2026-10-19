@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getRole } from "@/lib/auth";
 import { syncEmployeeCalendar } from "@/lib/ical";
 import { normalizeEmail } from "@/lib/format";
+import { logActivity } from "@/lib/notify";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import type { ActionResult } from "./appointments";
 
@@ -16,6 +17,7 @@ export async function addEmployee(input: {
   password: string;
   splitPct: number;
 }): Promise<ActionResult> {
+  // activity: owner-only (returns early for workers)
   if ((await getRole()) !== "owner") return { ok: false, error: "Owner only." };
   const name = input.name.trim();
   const email = normalizeEmail(input.email);
@@ -45,6 +47,7 @@ export async function updateEmployee(
   id: string,
   fields: Partial<{ name: string; split_pct: number; active: boolean; ical_url: string | null }>
 ): Promise<ActionResult> {
+  // activity: owner-only (returns early for workers)
   if ((await getRole()) !== "owner") return { ok: false, error: "Owner only." };
   if (fields.split_pct != null && !(fields.split_pct >= 0 && fields.split_pct <= 100)) {
     return { ok: false, error: "Split must be 0–100%." };
@@ -69,12 +72,14 @@ export async function saveMyCalendarFeed(url: string): Promise<ActionResult> {
   if (error) return { ok: false, error: error.message };
   const res = await syncEmployeeCalendar(me);
   if (!res.ok) return res;
+  await logActivity(trimmed ? "connected their other-job calendar" : "removed their other-job calendar", [trimmed && "Those shifts now block the schedule automatically"], "/calendar", { tags: ["calendar"] });
   refresh();
   return { ok: true };
 }
 
 /** Re-pull a feed on demand — owner for anyone, employees for themselves. */
 export async function syncCalendarNow(employeeId?: string): Promise<ActionResult> {
+  // activity: a re-sync changes nothing the worker chose — too noisy to push
   let target = employeeId ?? null;
   if ((await getRole()) !== "owner") {
     const me = await myEmployeeRow();

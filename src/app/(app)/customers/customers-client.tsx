@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { IconPlus, IconUpload } from "@/components/icons";
-import { Balance, EmptyState, ErrorNote, Field, Sheet } from "@/components/ui";
+import { IconChevronRight, IconPlus, IconStar, IconUpload, IconUsers } from "@/components/icons";
+import { Avatar, Balance, Busy, EmptyState, ErrorNote, Field, PageHeader, SearchInput, Sheet } from "@/components/ui";
+import { DuplicatesSheet } from "@/components/duplicates-sheet";
 import { createCustomer } from "@/lib/actions/customers";
+import type { DupCandidate, DupGroup } from "@/lib/duplicates";
 import { fmtPhone, phoneDigits } from "@/lib/format";
 import { fmtDateShort } from "@/lib/time";
 import type { Customer } from "@/lib/types";
@@ -20,11 +22,19 @@ export function CustomersClient({
   rows,
   unlinkedCount,
   openNew,
+  duplicates,
+  candidates,
+  openDuplicates,
 }: {
   rows: CustomerRow[];
   unlinkedCount: number;
   openNew: boolean;
+  duplicates: DupGroup[];
+  candidates: DupCandidate[];
+  openDuplicates: boolean;
 }) {
+  const [dupesOpen, setDupesOpen] = useState(openDuplicates);
+  const dupeRecords = duplicates.reduce((s, g) => s + g.ids.length, 0);
   const [q, setQ] = useState("");
   const [tag, setTag] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -63,30 +73,57 @@ export function CustomersClient({
   }, [rows, q, tag, showArchived]);
 
   return (
-    <div className="px-4 md:px-8 py-5 md:py-7 max-w-5xl">
-      <header className="flex items-center gap-2">
-        <h1 className="text-xl md:text-2xl font-bold mr-auto">Customers</h1>
-        <Link href="/customers/import" className="btn btn-sm">
-          <IconUpload width={14} height={14} /> Import
-        </Link>
-        <button className="btn btn-primary btn-sm" onClick={() => setNewOpen(true)}>
-          <IconPlus width={13} height={13} /> New
-        </button>
-      </header>
+    <div className="page max-w-5xl">
+      <PageHeader
+        title="Customers"
+        sub={`${rows.filter((r) => !r.archived).length} active`}
+        actions={
+          <>
+            <Link href="/customers/import" className="btn btn-sm">
+              <IconUpload width={14} height={14} /> Import
+            </Link>
+            <button className="btn btn-primary btn-sm" onClick={() => setNewOpen(true)}>
+              <IconPlus width={14} height={14} /> New customer
+            </button>
+          </>
+        }
+      />
 
       {unlinkedCount > 0 && (
         <Link
           href="/"
-          className="mt-3 flex items-center justify-between gap-2 rounded-md border border-[#fde68a] bg-warn-wash px-3 py-2 text-sm text-warn"
+          className="mb-4 flex items-center justify-between gap-2 note note-warn transition-opacity hover:opacity-85"
         >
           {unlinkedCount} web booking{unlinkedCount > 1 ? "s" : ""} not linked to a customer yet
           <span className="font-semibold">Review →</span>
         </Link>
       )}
 
-      <div className="mt-4 flex flex-col gap-2">
-        <input
-          className="input"
+      {duplicates.length > 0 && (
+        <button
+          onClick={() => setDupesOpen(true)}
+          className="page-in mb-4 w-full flex items-center gap-3 note note-brand text-left transition-[opacity,transform] hover:opacity-90 active:scale-[0.995]"
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand text-white">
+            <IconUsers width={16} height={16} />
+          </span>
+          <span className="grow min-w-0">
+            <span className="block font-semibold">Duplicates found</span>
+            <span className="block text-dense opacity-80">
+              {duplicates.length === 1
+                ? `${candidates.find((c) => c.id === duplicates[0].keepId)?.name ?? "Someone"} is in here ${duplicates[0].ids.length} times`
+                : `${duplicates.length} people across ${dupeRecords} records`}{" "}
+              — merge them into one.
+            </span>
+          </span>
+          <span className="inline-flex items-center gap-0.5 font-semibold shrink-0">
+            Review <IconChevronRight width={14} height={14} />
+          </span>
+        </button>
+      )}
+
+      <div className="flex flex-col gap-2.5">
+        <SearchInput
           placeholder={`Search ${rows.filter((r) => !r.archived).length} customers by name, phone, or email…`}
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -97,7 +134,7 @@ export function CustomersClient({
               <button
                 key={t}
                 onClick={() => setTag(tag === t ? null : t)}
-                className={`chip cursor-pointer ${tag === t ? "bg-ink text-white" : "bg-[#f1f4f9] text-ink-2 hover:bg-line"}`}
+                className="chip" aria-pressed={tag === t}
               >
                 {t}
               </button>
@@ -105,7 +142,7 @@ export function CustomersClient({
             {rows.some((r) => r.archived) && (
               <button
                 onClick={() => setShowArchived(!showArchived)}
-                className={`chip cursor-pointer ml-auto ${showArchived ? "bg-ink text-white" : "bg-[#f1f4f9] text-ink-2"}`}
+                className="chip ml-auto" aria-pressed={showArchived}
               >
                 archived
               </button>
@@ -114,9 +151,10 @@ export function CustomersClient({
         )}
       </div>
 
-      <div className="mt-3 card overflow-hidden">
+      <div className="mt-3">
         {filtered.length === 0 ? (
           <EmptyState
+            icon={<IconUsers width={18} height={18} />}
             title={rows.length === 0 ? "No customers yet." : "No matches."}
             hint={
               rows.length === 0
@@ -137,32 +175,34 @@ export function CustomersClient({
             }
           />
         ) : (
-          <ul className="divide-y divide-line">
+          <ul className="card divide-y divide-line overflow-hidden">
             {filtered.map((c) => (
               <li key={c.id}>
-                <Link href={`/customers/${c.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-[#f8fafd] transition-colors duration-150">
+                <Link href={`/customers/${c.id}`} className="row row-link">
+                  <Avatar name={c.name} size={34} />
                   <div className="min-w-0 grow">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <p className="text-[15px] font-medium truncate">{c.name}</p>
-                      {c.review_left_on && <span className="shrink-0 text-[13px]" title={`Left a review ${c.review_left_on}`}>⭐</span>}
+                      <p className="text-md font-medium truncate">{c.name}</p>
+                      {c.review_left_on && <IconStar width={14} height={14} weight="fill" className="shrink-0 text-warn" aria-label={`Left a review ${c.review_left_on}`} />}
                       {c.outreach_status !== "active" && (
-                        <span className="chip bg-warn-wash text-warn shrink-0">
+                        <span className="chip chip-warn shrink-0">
                           {c.outreach_status === "do_not_contact" ? "no contact" : c.outreach_status === "declined" ? "not interested" : "seasonal"}
                         </span>
                       )}
                       {c.tags.map((t) => (
-                        <span key={t} className="chip bg-[#f1f4f9] text-ink-2 shrink-0 hidden md:inline-flex">
+                        <span key={t} className="chip shrink-0 hidden md:inline-flex">
                           {t}
                         </span>
                       ))}
                     </div>
-                    <p className="text-[13px] text-faint num truncate">
+                    <p className="text-dense text-faint num truncate">
                       {fmtPhone(c.phone) || c.email || "no contact info"}
                       {c.lastVisit && ` · last ${fmtDateShort(c.lastVisit)}`}
                       {c.nextVisit && ` · next ${fmtDateShort(c.nextVisit)}`}
                     </p>
                   </div>
                   {c.balance !== 0 && <Balance amount={c.balance} />}
+                  <IconChevronRight width={16} height={16} className="shrink-0 text-faint hidden md:block" />
                 </Link>
               </li>
             ))}
@@ -171,6 +211,15 @@ export function CustomersClient({
       </div>
 
       <NewCustomerSheet open={newOpen} onClose={closeNew} />
+      <DuplicatesSheet
+        open={dupesOpen}
+        onClose={() => {
+          setDupesOpen(false);
+          if (openDuplicates) window.history.replaceState(null, "", "/customers");
+        }}
+        groups={duplicates}
+        candidates={candidates}
+      />
     </div>
   );
 }
@@ -231,7 +280,7 @@ function NewCustomerSheet({ open, onClose }: { open: boolean; onClose: () => voi
             router.push(`/customers/${res.id}`);
           }}
         >
-          {pending ? "Creating…" : "Create customer"}
+          {pending ? <Busy>Creating…</Busy> : "Create customer"}
         </button>
       </div>
     </Sheet>

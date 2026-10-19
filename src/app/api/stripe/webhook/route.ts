@@ -27,9 +27,10 @@ export async function POST(request: Request) {
     const d = event.data.object;
     await notify(
       "owner",
-      "⚠️ Stripe payment disputed",
-      `$${((d.amount ?? 0) / 100).toFixed(2)} charge disputed (${d.reason ?? "unknown reason"}). Respond in the Stripe dashboard before the deadline.`,
-      "/money/payments"
+      "Stripe payment disputed",
+      `$${((d.amount ?? 0) / 100).toFixed(2)} charge disputed (${(d.reason ?? "unknown reason").replace(/_/g, " ")}).\nRespond in the Stripe dashboard before the deadline or the money is gone.`,
+      "/money/payments",
+      { tags: ["rotating_light"], priority: 5 }
     );
     return NextResponse.json({ ok: true });
   }
@@ -118,7 +119,8 @@ export async function POST(request: Request) {
     `${customer?.name ?? "Customer"} paid $${Number(req.amount)}` +
       (req.kind === "prepay" ? ` · ${req.visits} visits prepaid` : "") +
       (fee ? ` · Stripe kept $${fee.toFixed(2)}` : ""),
-    `/customers/${req.customer_id}`
+    `/customers/${req.customer_id}`,
+    { tags: ["moneybag"] }
   );
 
   return NextResponse.json({ ok: true });

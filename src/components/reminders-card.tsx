@@ -10,8 +10,9 @@ import { completeReminder, createReminder, deleteReminder } from "@/lib/actions/
 import { fmtDateShort, todayYmd } from "@/lib/time";
 import type { Reminder } from "@/lib/types";
 import { CustomerPicker, type PickedCustomer } from "./customer-picker";
+import { IconPlus, IconX } from "./icons";
 import { VehiclePicker } from "./vehicle-picker";
-import { ErrorNote, Field, Sheet } from "./ui";
+import { Busy, ErrorNote, Field, Sheet } from "./ui";
 
 export type ReminderRow = Reminder & {
   customers: { id: string; name: string } | null;
@@ -36,16 +37,16 @@ export function RemindersCard({ reminders }: { reminders: ReminderRow[] }) {
     <section className="mt-8">
       <div className="flex items-center justify-between mb-2">
         <h2 className="label">Reminders</h2>
-        <button className="btn btn-sm" onClick={() => setOpen(true)}>
-          + New reminder
+        <button className="btn btn-ghost btn-sm text-brand-deep" onClick={() => setOpen(true)}>
+          <IconPlus width={14} height={14} /> New reminder
         </button>
       </div>
       {reminders.length === 0 ? (
         <p className="text-sm text-faint">Nothing scheduled — add one and it&apos;ll hit your phone that morning.</p>
       ) : (
-        <div className="card divide-y divide-line">
+        <div className="stagger card divide-y divide-line overflow-hidden">
           {reminders.map((r) => (
-            <div key={r.id} className="px-4 py-3 flex items-center gap-3">
+            <div key={r.id} className="row">
               <div className="min-w-0 grow">
                 <p className="text-sm font-medium truncate">
                   {r.title}
@@ -70,12 +71,12 @@ export function RemindersCard({ reminders }: { reminders: ReminderRow[] }) {
                 Done
               </button>
               <button
-                className="btn btn-ghost btn-sm shrink-0 text-faint"
+                className="btn btn-ghost btn-sm btn-icon shrink-0 text-faint hover:text-bad"
                 aria-label="Delete reminder"
                 disabled={busy === r.id}
                 onClick={() => act(r.id, () => deleteReminder(r.id))}
               >
-                ✕
+                <IconX width={14} height={14} />
               </button>
             </div>
           ))}
@@ -148,7 +149,7 @@ function NewReminderSheet({ onClose }: { onClose: () => void }) {
         </Field>
         <ErrorNote>{error}</ErrorNote>
         <button className="btn btn-primary h-11" disabled={pending || !title.trim() || !dueOn} onClick={submit}>
-          {pending ? "Saving…" : "Save reminder"}
+          {pending ? <Busy>Saving…</Busy> : "Save reminder"}
         </button>
       </div>
     </Sheet>
