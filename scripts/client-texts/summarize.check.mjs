@@ -21,6 +21,7 @@ assert.equal(g({ review_left_on: "2026-07-01" }), "rebook");
 assert.equal(g({ review_left_on: "2026-07-01" }, { hasNextVisit: true }), null); // booked
 assert.equal(g({ review_left_on: "2026-07-01", last_contacted_on: "2026-10-15" }), null); // texted 5d ago
 assert.equal(g({ review_left_on: "2026-07-01" }, { lastDetail: "2026-10-10" }), null); // detailed 10d ago, too soon
+assert.equal(g({ review_left_on: "2026-07-01", last_contacted_on: "2026-08-01" }, { lastDetail: null }), "rebook"); // never detailed but texted long ago, gone quiet
 assert.equal(g({ review_left_on: "2026-07-01", resume_on: "2026-12-01" }), null); // snoozed until December
 
 // Seasonal/snoozed: wait for their date (even if otherwise review-due), then surface as a check-in.

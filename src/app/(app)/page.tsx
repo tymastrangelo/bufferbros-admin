@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { getRole } from "@/lib/auth";
 import { netOwed, type PayoutRow } from "@/lib/payouts";
-import { computeOutreachDue, computeReviewAsks, type OutreachCustomer } from "@/lib/outreach";
+import { type OutreachCustomer } from "@/lib/outreach";
 import { liveSuggestions } from "@/lib/suggestions";
 import { findDuplicates, pairKey } from "@/lib/duplicates";
 import { getCatalog, getSettingsMap } from "@/lib/queries";
@@ -65,12 +65,11 @@ export default async function TodayPage() {
   ]);
 
   // Client-relations queue: who's due for a reach-out / a review ask.
-  const [outreachCustQ, lastDoneQ, nextVisitQ, dismissedQ] = await Promise.all([
+  const [outreachCustQ, nextVisitQ, dismissedQ] = await Promise.all([
     db
       .from("customers")
       .select("id,name,phone,email,archived,created_at,outreach_status,resume_on,last_contacted_on,review_asked_on,review_left_on")
       .eq("archived", false),
-    db.from("appointments").select("customer_id,date").eq("status", "completed").not("customer_id", "is", null).order("date", { ascending: false }),
     db.from("appointments").select("customer_id,date").eq("status", "scheduled").gte("date", today).not("customer_id", "is", null),
     db.from("customer_not_duplicates").select("a,b"),
   ]);
@@ -81,40 +80,18 @@ export default async function TodayPage() {
     ),
     ((dismissedQ.data ?? []) as { a: string; b: string }[]).map((d) => pairKey(d.a, d.b))
   );
-  const lastDetail = new Map<string, string>();
-  for (const r of (lastDoneQ.data ?? []) as { customer_id: string; date: string }[]) {
-    if (!lastDetail.has(r.customer_id)) lastDetail.set(r.customer_id, r.date);
-  }
   const nextVisit = new Map<string, string>();
   for (const r of (nextVisitQ.data ?? []) as { customer_id: string; date: string }[]) nextVisit.set(r.customer_id, r.date);
   const outreachCustomers = (outreachCustQ.data ?? []) as OutreachCustomer[];
-  // Drafted texts from the nightly Claude cards (owner only). Anyone with a pending draft (even one
-  // scheduled for a later day) is handled by "Texts to send", so they drop out of the rule-based
-  // Reach out / review lists. The rule lists are now just a net for clients with no draft yet.
+  // Drafted follow-ups from the nightly Claude cards (owner only) → the home "Follow-ups" list.
+  // Every reach-out now rides on a prepped message; there is no rule-based bare list anymore.
   const cardsQ = owner
     ? await db
         .from("customer_insights")
         .select("customer_id,updated_at,suggestion_goal,suggestion_text,suggestion_why,suggest_on,suggestion_done_at")
         .not("suggestion_goal", "is", null)
     : null;
-  const cards = (cardsQ?.data ?? []) as { customer_id: string; suggestion_goal: string | null; suggestion_done_at: string | null }[];
-  const suggestions = owner ? liveSuggestions(cards as never, outreachCustomers, nextVisit, today) : [];
-  const drafted = new Set(cards.filter((c) => c.suggestion_goal && c.suggestion_goal !== "none" && !c.suggestion_done_at).map((c) => c.customer_id));
-  const outreach = {
-    due: computeOutreachDue({
-      customers: outreachCustomers,
-      lastDetail,
-      nextVisit,
-      today,
-      afterDays: Number(settings.outreach_after_days ?? 60),
-    }).filter((d) => !drafted.has(d.id)),
-    asks: computeReviewAsks({
-      customers: outreachCustomers,
-      lastDetail,
-      today,
-      windowDays: Number(settings.review_ask_window_days ?? 14),
-    }).filter((a) => !drafted.has(a.id)),
-  };
+  const suggestions = owner ? liveSuggestions((cardsQ?.data ?? []) as never, outreachCustomers, nextVisit, today) : [];
   // Latest text-sync run for the home-page Sync button (syncs texts + regenerates the follow-ups).
   const textSyncRun = owner
     ? (((await db.from("text_sync_runs").select("*").order("requested_at", { ascending: false }).limit(1).maybeSingle()).data as TextSyncRun | null) ?? null)
@@ -197,7 +174,6 @@ export default async function TodayPage() {
       }
       attention={owner ? attention : null}
       reminders={owner ? reminders : null}
-      outreach={owner ? outreach : null}
       suggestions={suggestions}
       textSyncRun={textSyncRun}
     />

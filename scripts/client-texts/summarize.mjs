@@ -64,11 +64,11 @@ Rules:
   - "rebook": nothing is booked and it's time to come back (past their usual gap, a plan lapsed, visits were cancelled, or they just haven't been on the schedule in a while). When it fits naturally, invite them onto a recurring plan (weekly, every other week, or monthly) so they stay booked without thinking about it.
   - "review": they have had a detail done and haven't left a Google review. Best a day or two after a fresh detail, but any happy past customer who never reviewed is worth one gentle ask. If they were asked before, only nudge again if it was over a month ago, and gently.
   - "check_in": a seasonal resident coming back, or a relationship going quiet.
-  - "call": a text won't cut it — an unhappy or at-risk customer, a complaint to smooth over, or something that needs a real back-and-forth. Prefer this over a text when the situation is sensitive.
+  - "call": a call would land better than a text — an unhappy or at-risk customer, a complaint to smooth over, something that needs a real back-and-forth. This only flags that calling is the better move; you STILL write a full text below as the fallback.
   - "none": they have a visit booked and nothing is pending, Tyler texted them very recently, they declined, or they're do_not_contact.
   send_on: YYYY-MM-DD. Today if it fits now; otherwise the best future day (when they're due again, back in town, or a day or two after a detail for a review).
-  text: for every goal except "call" and "none", exactly what Tyler would send. Match how Tyler writes in these texts (length, tone, capitalization, punctuation, emoji or not). Short, warm, specific to them (their car or last visit if it fits naturally), one clear ask. For a review include ${REVIEW_LINK}. For rebooking, offer to set a time or share bufferbros.org/booking (exactly that link), and when it fits suggest a recurring plan so they stay on the schedule. Never promise specific openings; if they said which days work for them, mention those days. Never invent prices, discounts, dates or facts. For "call", instead put two or three short notes on what to cover on the phone (what to acknowledge, what to offer, what to ask). Empty string when goal is "none".
-  why: one short sentence on why this text or call, now.
+  text: for every goal except "none" (INCLUDING "call") write a complete, ready-to-send message. Match how Tyler writes in these texts (length, tone, capitalization, punctuation, emoji or not). Short, warm, specific to them (their car or last visit if it fits naturally), one clear ask. For a review include ${REVIEW_LINK}. For rebooking, offer to set a time or share bufferbros.org/booking (exactly that link), and when it fits suggest a recurring plan so they stay on the schedule. For "call", still write a warm text that fits the situation (it may gently offer to hop on a quick call). Never promise specific openings; if they said which days work for them, mention those days. Never invent prices, discounts, dates or facts. Empty string when goal is "none".
+  why: one short sentence on why this follow-up, now.
 Write in plain, short sentences. No em dashes.`;
 
 const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
@@ -83,7 +83,9 @@ export function proactiveGoal(c, { lastDetail, hasNextVisit, today }) {
   if (c.resume_on && c.resume_on > today) return null; // snoozed/seasonal: wait for their date
   const since = (d) => (d ? daysBetween(d, today) : Infinity);
   if (lastDetail && !c.review_left_on && since(c.review_asked_on) > 30) return "review";
-  if (!hasNextVisit && c.outreach_status === "active" && lastDetail && since(lastDetail) >= 30 && since(c.last_contacted_on) >= 30) return "rebook";
+  // Gone quiet: active, nothing booked, both last detail and last touch stale. Needs a detail OR a
+  // past touch so imported address books don't flood the list (same guard as computeOutreachDue).
+  if (!hasNextVisit && c.outreach_status === "active" && (lastDetail || c.last_contacted_on) && since(lastDetail) >= 30 && since(c.last_contacted_on) >= 30) return "rebook";
   if (c.resume_on && c.resume_on <= today && since(c.last_contacted_on) >= 14) return "check_in"; // their date arrived
   return null;
 }

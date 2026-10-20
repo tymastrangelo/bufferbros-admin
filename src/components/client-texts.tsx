@@ -106,25 +106,25 @@ export function SuggestionSheet({ s, onClose }: { s: Suggestion; onClose: () => 
           </Link>
         </div>
         {s.why && <p className="text-sm text-ink-2">{s.why}</p>}
+        {isCall && <p className="note note-brand text-sm">A call would land better here. The text below is ready too if you&apos;d rather send it.</p>}
         <label className="block">
-          <span className="label block mb-1.5">{isCall ? "What to talk about" : "Message (edit before sending)"}</span>
+          <span className="label block mb-1.5">Message (edit before sending)</span>
           <textarea className="textarea text-md" rows={6} value={text} onChange={(e) => setText(e.target.value)} />
         </label>
         <div className="flex flex-wrap gap-2">
-          {isCall ? (
-            s.phone ? (
-              <a className="btn btn-primary" href={telHref(s.phone)}>
-                <IconPhone width={16} height={16} /> Call {first}
-              </a>
-            ) : (
-              <p className="note text-sm">No phone number on file.</p>
-            )
-          ) : s.phone ? (
-            <a className="btn btn-primary" href={`${smsHref(s.phone)}&body=${encodeURIComponent(text)}`}>
-              <IconMessage width={16} height={16} /> Open in Messages
-            </a>
-          ) : (
+          {!s.phone ? (
             <p className="note text-sm">No phone number on file. Copy it instead.</p>
+          ) : (
+            <>
+              {isCall && (
+                <a className="btn btn-primary" href={telHref(s.phone)}>
+                  <IconPhone width={16} height={16} /> Call {first}
+                </a>
+              )}
+              <a className={isCall ? "btn" : "btn btn-primary"} href={`${smsHref(s.phone)}&body=${encodeURIComponent(text)}`}>
+                <IconMessage width={16} height={16} /> Open in Messages
+              </a>
+            </>
           )}
           <CopyButton text={text} label="Copy" className="btn" />
         </div>
@@ -145,7 +145,7 @@ export function SuggestionSheet({ s, onClose }: { s: Suggestion; onClose: () => 
           {pending ? <Busy>Saving…</Busy> : isCall ? "Mark as done" : "Mark as sent"}
         </button>
         <p className="text-xs text-faint">
-          {isCall ? "Give them a ring, then mark it done." : "Sent it from your phone? The next sync sees it and clears this on its own."}
+          {isCall ? "Call them or send the text, then mark it done." : "Sent it from your phone? The next sync sees it and clears this on its own."}
         </p>
       </div>
     </Sheet>
@@ -238,20 +238,12 @@ export function InsightCard({ insight, suggestion }: { insight: CustomerInsight;
         {suggestion && (
           <div className="px-4 py-3 flex flex-col gap-2">
             <div className="flex items-center justify-between gap-2">
-              <p className="label">{suggestion.goal === "call" ? "Suggested call" : "Suggested text"}</p>
+              <p className="label">Suggested text</p>
               <GoalChip goal={suggestion.goal} />
             </div>
             <p className="well px-3.5 py-3 text-sm whitespace-pre-wrap">{suggestion.text}</p>
             <button className="btn self-start" onClick={() => setSending(true)}>
-              {suggestion.goal === "call" ? (
-                <>
-                  <IconPhone width={16} height={16} /> Review and call
-                </>
-              ) : (
-                <>
-                  <IconMessage width={16} height={16} /> Review and send
-                </>
-              )}
+              <IconMessage width={16} height={16} /> Review and send
             </button>
           </div>
         )}

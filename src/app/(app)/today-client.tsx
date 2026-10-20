@@ -4,14 +4,12 @@ import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { IconCalendar, IconFlag, IconPhone, IconPin } from "@/components/icons";
-import { OutreachCard } from "@/components/outreach-card";
 import { TextsToSendCard, TextSyncBar } from "@/components/client-texts";
 import type { Suggestion } from "@/lib/suggestions";
 import { RemindersCard, type ReminderRow } from "@/components/reminders-card";
 import { EmptyState, PageHeader, SectionLabel, Stat } from "@/components/ui";
 import type { Catalog } from "@/lib/catalog";
 import type { TextSyncRun } from "@/lib/types";
-import type { OutreachDue, ReviewAsk } from "@/lib/outreach";
 import { fmtPhone, mapsHref, money, telHref } from "@/lib/format";
 import { fmtDateShort, minToLabel, nowMinutes } from "@/lib/time";
 
@@ -41,7 +39,6 @@ export function TodayClient({
   stats,
   attention,
   reminders,
-  outreach,
   suggestions,
   textSyncRun,
 }: {
@@ -51,8 +48,7 @@ export function TodayClient({
   stats: Stats | null; // null = washer view: schedule only
   attention: AttentionData | null;
   reminders: ReminderRow[] | null; // null = washer view
-  outreach: { due: OutreachDue[]; asks: ReviewAsk[] } | null; // null = washer view
-  /** drafted texts that fit today (owner only; empty for workers) */
+  /** drafted follow-ups that fit today (owner only; empty for workers) */
   suggestions: Suggestion[];
   /** latest text-sync run for the home Sync button (null for workers or before the first run) */
   textSyncRun: TextSyncRun | null;
@@ -229,7 +225,6 @@ export function TodayClient({
         </div>
       )}
       {suggestions.length > 0 && <TextsToSendCard suggestions={suggestions} />}
-      {outreach && <OutreachCard due={outreach.due} asks={outreach.asks} />}
 
       {reminders && <RemindersCard reminders={reminders} />}
 
