@@ -11,6 +11,7 @@ import { RelationsCard } from "@/components/relations-card";
 import { CustomerPicker, type PickedCustomer } from "@/components/customer-picker";
 import { ChannelSelect } from "@/components/marketing-bits";
 import { InsightCard, TextThread } from "@/components/client-texts";
+import { liveSuggestion } from "@/lib/suggestions";
 import { Avatar, Balance, Busy, CopyButton, ErrorNote, Field, PageHeader, Sheet, StatusChip, Tabs } from "@/components/ui";
 import { motion } from "motion/react";
 import { springSnappy } from "@/lib/motion";
@@ -190,7 +191,12 @@ export function CustomerProfile({
 
       {tab === "overview" && (
         <div key="overview" className="page-in mt-5 flex flex-col gap-6">
-          {insight && <InsightCard insight={insight} />}
+          {insight && (
+            <InsightCard
+              insight={insight}
+              suggestion={liveSuggestion(insight, customer, { today, nextVisit: upcoming[0]?.date ?? null })}
+            />
+          )}
           <section>
             <h2 className="label mb-2">Contact</h2>
             <div className="card divide-y divide-line text-sm">

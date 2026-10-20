@@ -3,6 +3,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getRole } from "@/lib/auth";
+import { logOutreach } from "@/lib/actions/relations";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "./appointments";
 
@@ -26,4 +27,23 @@ export async function requestTextSync(): Promise<ActionResult> {
   if (error) return { ok: false, error: error.message };
   revalidatePath("/", "layout");
   return { ok: true, id: data.id };
+}
+
+/**
+ * "Mark as sent" on a drafted text: logs the touch the way the Relations card would (a review
+ * ask, or a follow-up that resets "last contacted") and clears the draft until the next card.
+ */
+export async function markSuggestionSent(customerId: string, goal: "reply" | "rebook" | "review" | "check_in"): Promise<ActionResult> {
+  if ((await getRole()) !== "owner") return { ok: false, error: "Only the owner can do this." };
+  const logged = await logOutreach({ customerId, outcome: goal === "review" ? "asked_review" : "follow_up" });
+  if (!logged.ok) return logged;
+  const db = await createClient();
+  // They've been asked now: close any scheduled review reminder so it doesn't ask twice.
+  if (goal === "review") {
+    await db.from("reminders").update({ done_at: new Date().toISOString() }).eq("customer_id", customerId).is("done_at", null).like("body", "%g.page/r/%");
+  }
+  const { error } = await db.from("customer_insights").update({ suggestion_done_at: new Date().toISOString() }).eq("customer_id", customerId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/", "layout");
+  return { ok: true, id: customerId };
 }

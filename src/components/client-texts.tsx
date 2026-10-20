@@ -5,11 +5,14 @@
 // "Sync texts now" bar. Owner-only (RLS + page gate).
 import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { requestTextSync } from "@/lib/actions/texts";
+import Link from "next/link";
+import { markSuggestionSent, requestTextSync } from "@/lib/actions/texts";
+import { smsHref } from "@/lib/format";
+import { GOAL_LABEL, type Suggestion, type SuggestionGoal } from "@/lib/suggestions";
 import { dateOfInstant, fmtDateLong, fmtDateShort, todayYmd } from "@/lib/time";
 import type { CustomerInsight, CustomerMessage, TextSyncRun } from "@/lib/types";
-import { IconChats, IconCheckCircle, IconEquals, IconWarning, type IconComponent } from "./icons";
-import { Busy, EmptyState, SectionLabel } from "./ui";
+import { IconCalendar, IconChats, IconCheckCircle, IconEquals, IconMessage, IconStar, IconWarning, IconWave, type IconComponent } from "./icons";
+import { Busy, CopyButton, EmptyState, ErrorNote, SectionLabel, Sheet } from "./ui";
 
 const MOOD: Record<NonNullable<CustomerInsight["sentiment"]>, { label: string; cls: string; Icon: IconComponent }> = {
   happy: { label: "Going well", cls: "chip-ok", Icon: IconCheckCircle },
@@ -72,7 +75,106 @@ export function TextSyncBar({ run }: { run: TextSyncRun | null }) {
   );
 }
 
-export function InsightCard({ insight }: { insight: CustomerInsight }) {
+const GOAL_ICON: Record<SuggestionGoal, IconComponent> = { reply: IconChats, rebook: IconCalendar, review: IconStar, check_in: IconWave };
+
+/** Why this text: glyph + word, never color alone. A reply owed reads as needing attention. */
+export function GoalChip({ goal }: { goal: SuggestionGoal }) {
+  const Icon = GOAL_ICON[goal];
+  return (
+    <span className={`chip ${goal === "reply" ? "chip-warn" : "chip-brand"} shrink-0`}>
+      <Icon width={12} height={12} weight="bold" aria-hidden /> {GOAL_LABEL[goal]}
+    </span>
+  );
+}
+
+/** The drafted text, editable, one tap into Messages. */
+export function SuggestionSheet({ s, onClose }: { s: Suggestion; onClose: () => void }) {
+  const router = useRouter();
+  const [text, setText] = useState(s.text);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const first = s.name.split(/\s+/)[0];
+  return (
+    <Sheet open onClose={onClose} title={`Text ${first}`}>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <GoalChip goal={s.goal} />
+          <Link href={`/customers/${s.customerId}`} className="link text-sm">
+            {s.name}
+          </Link>
+        </div>
+        {s.why && <p className="text-sm text-ink-2">{s.why}</p>}
+        <label className="block">
+          <span className="label block mb-1.5">Message (edit before sending)</span>
+          <textarea className="textarea text-md" rows={6} value={text} onChange={(e) => setText(e.target.value)} />
+        </label>
+        <div className="flex flex-wrap gap-2">
+          {s.phone ? (
+            <a className="btn btn-primary" href={`${smsHref(s.phone)}&body=${encodeURIComponent(text)}`}>
+              <IconMessage width={16} height={16} /> Open in Messages
+            </a>
+          ) : (
+            <p className="note text-sm">No phone number on file. Copy it instead.</p>
+          )}
+          <CopyButton text={text} label="Copy" className="btn" />
+        </div>
+        <ErrorNote>{error}</ErrorNote>
+        <button
+          className="btn h-11"
+          disabled={pending}
+          onClick={async () => {
+            setError(null);
+            setPending(true);
+            const res = await markSuggestionSent(s.customerId, s.goal);
+            setPending(false);
+            if (!res.ok) return setError(res.error);
+            onClose();
+            router.refresh();
+          }}
+        >
+          {pending ? <Busy>Saving…</Busy> : "Mark as sent"}
+        </button>
+        <p className="text-xs text-faint">Sent it from your phone? The next sync sees it and clears this on its own.</p>
+      </div>
+    </Sheet>
+  );
+}
+
+/** Today: drafted texts that fit right now, most urgent first. */
+export function TextsToSendCard({ suggestions }: { suggestions: Suggestion[] }) {
+  const [open, setOpen] = useState<Suggestion | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  if (suggestions.length === 0) return null;
+  const shown = showAll ? suggestions : suggestions.slice(0, 6);
+  return (
+    <section className="mt-8">
+      <SectionLabel trailing={suggestions.length}>Texts to send</SectionLabel>
+      <div className="stagger card divide-y divide-line overflow-hidden">
+        {shown.map((s) => (
+          <button key={s.customerId} type="button" className="row row-link w-full text-left" onClick={() => setOpen(s)}>
+            <span className="min-w-0 grow">
+              <span className="flex items-center gap-2">
+                <span className="text-sm font-medium truncate">{s.name}</span>
+                <GoalChip goal={s.goal} />
+              </span>
+              {s.why && <span className="block text-xs text-faint truncate">{s.why}</span>}
+            </span>
+            <IconMessage width={16} height={16} className="shrink-0 text-faint" aria-hidden />
+          </button>
+        ))}
+        {suggestions.length > shown.length && (
+          <button className="row-more" onClick={() => setShowAll(true)}>
+            Show all {suggestions.length}
+          </button>
+        )}
+      </div>
+      {open && <SuggestionSheet s={open} onClose={() => setOpen(null)} />}
+    </section>
+  );
+}
+
+export function InsightCard({ insight, suggestion }: { insight: CustomerInsight; suggestion?: Suggestion | null }) {
+  const [sending, setSending] = useState(false);
   const mood = insight.sentiment ? MOOD[insight.sentiment] : null;
   return (
     <section>
@@ -116,7 +218,20 @@ export function InsightCard({ insight }: { insight: CustomerInsight }) {
             </p>
           </div>
         )}
+        {suggestion && (
+          <div className="px-4 py-3 flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="label">Suggested text</p>
+              <GoalChip goal={suggestion.goal} />
+            </div>
+            <p className="well px-3.5 py-3 text-sm whitespace-pre-wrap">{suggestion.text}</p>
+            <button className="btn self-start" onClick={() => setSending(true)}>
+              <IconMessage width={16} height={16} /> Review and send
+            </button>
+          </div>
+        )}
       </div>
+      {sending && suggestion && <SuggestionSheet s={suggestion} onClose={() => setSending(false)} />}
     </section>
   );
 }

@@ -354,6 +354,12 @@ export interface CustomerInsight {
   open_items: { text: string; since: string }[];
   sentiment: "happy" | "neutral" | "at_risk" | null;
   next_step: string | null;
+  /** drafted next text (0027); hidden by src/lib/suggestions.ts once it no longer fits */
+  suggestion_goal: "reply" | "rebook" | "review" | "check_in" | "none" | null;
+  suggestion_text: string | null;
+  suggestion_why: string | null;
+  suggest_on: string | null;
+  suggestion_done_at: string | null;
 }
 
 /** One client-texts run on Tyler's Mac (0026): nightly, button, or manual. */

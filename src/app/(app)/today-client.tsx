@@ -5,6 +5,8 @@ import { useState, useSyncExternalStore } from "react";
 import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { IconCalendar, IconFlag, IconPhone, IconPin } from "@/components/icons";
 import { OutreachCard } from "@/components/outreach-card";
+import { TextsToSendCard } from "@/components/client-texts";
+import type { Suggestion } from "@/lib/suggestions";
 import { RemindersCard, type ReminderRow } from "@/components/reminders-card";
 import { EmptyState, PageHeader, SectionLabel, Stat } from "@/components/ui";
 import type { Catalog } from "@/lib/catalog";
@@ -39,6 +41,7 @@ export function TodayClient({
   attention,
   reminders,
   outreach,
+  suggestions,
 }: {
   dateLabel: string;
   jobs: JobWithCustomer[];
@@ -47,6 +50,8 @@ export function TodayClient({
   attention: AttentionData | null;
   reminders: ReminderRow[] | null; // null = washer view
   outreach: { due: OutreachDue[]; asks: ReviewAsk[] } | null; // null = washer view
+  /** drafted texts that fit today (owner only; empty for workers) */
+  suggestions: Suggestion[];
 }) {
   // Store the tapped job, render the fresh copy from server props so an open
   // sheet updates in place after any action refreshes the route.
@@ -214,6 +219,7 @@ export function TodayClient({
         </section>
       )}
 
+      {suggestions.length > 0 && <TextsToSendCard suggestions={suggestions} />}
       {outreach && <OutreachCard due={outreach.due} asks={outreach.asks} />}
 
       {reminders && <RemindersCard reminders={reminders} />}

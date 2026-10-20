@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { getRole } from "@/lib/auth";
 import { netOwed, type PayoutRow } from "@/lib/payouts";
 import { computeOutreachDue, computeReviewAsks, type OutreachCustomer } from "@/lib/outreach";
+import { liveSuggestions } from "@/lib/suggestions";
 import { findDuplicates, pairKey } from "@/lib/duplicates";
 import { getCatalog, getSettingsMap } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
@@ -87,6 +88,16 @@ export default async function TodayPage() {
   const nextVisit = new Map<string, string>();
   for (const r of (nextVisitQ.data ?? []) as { customer_id: string; date: string }[]) nextVisit.set(r.customer_id, r.date);
   const outreachCustomers = (outreachCustQ.data ?? []) as OutreachCustomer[];
+  // Drafted texts from the nightly Claude cards (owner only). A customer with a live draft drops
+  // out of the rule-based Reach out / review lists so nobody shows up twice.
+  const cardsQ = owner
+    ? await db
+        .from("customer_insights")
+        .select("customer_id,updated_at,suggestion_goal,suggestion_text,suggestion_why,suggest_on,suggestion_done_at")
+        .not("suggestion_goal", "is", null)
+    : null;
+  const suggestions = owner ? liveSuggestions((cardsQ?.data ?? []) as never, outreachCustomers, nextVisit, today) : [];
+  const suggested = new Set(suggestions.map((s) => s.customerId));
   const outreach = {
     due: computeOutreachDue({
       customers: outreachCustomers,
@@ -94,13 +105,13 @@ export default async function TodayPage() {
       nextVisit,
       today,
       afterDays: Number(settings.outreach_after_days ?? 60),
-    }),
+    }).filter((d) => !suggested.has(d.id)),
     asks: computeReviewAsks({
       customers: outreachCustomers,
       lastDetail,
       today,
       windowDays: Number(settings.review_ask_window_days ?? 14),
-    }),
+    }).filter((a) => !suggested.has(a.id)),
   };
 
   // Resolve vehicle_ids -> labels for the reminders card in one lookup.
@@ -181,6 +192,7 @@ export default async function TodayPage() {
       attention={owner ? attention : null}
       reminders={owner ? reminders : null}
       outreach={owner ? outreach : null}
+      suggestions={suggestions}
     />
   );
 }
