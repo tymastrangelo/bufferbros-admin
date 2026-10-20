@@ -38,5 +38,20 @@ export {
   Trash as IconTrash,
   CaretUpDown as IconCaretUpDown,
   Eye as IconEye,
+  Megaphone as IconMarketing,
+  CheckCircle as IconCheckCircle,
+  Circle as IconCircle,
+  CaretDown as IconChevronDown,
+  LinkSimple as IconLink,
+  ChatsCircle as IconChats,
+  Browser as IconBrowser,
+  HandWaving as IconWave,
+  // weekly marketing calls (shape + label, never color alone)
+  TrendUp as IconTrendUp,
+  Equals as IconEquals,
+  Wrench as IconWrench,
+  Pause as IconPause,
+  HourglassMedium as IconHourglass,
+  Warning as IconWarning,
 } from "@phosphor-icons/react/ssr";
 export type { Icon as IconComponent } from "@phosphor-icons/react";

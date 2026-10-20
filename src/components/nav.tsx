@@ -17,6 +17,7 @@ import {
   IconEye,
   IconDollar,
   IconLogout,
+  IconMarketing,
   IconMore,
   IconPlus,
   IconRepeat,
@@ -41,6 +42,7 @@ const NAV = [
   { href: "/plans", label: "Plans", icon: IconRepeat },
   { href: "/quote", label: "Quote", icon: IconSparkle },
   { href: "/money", label: "Money", icon: IconDollar },
+  { href: "/marketing", label: "Marketing", icon: IconMarketing },
   { href: "/team", label: "Team", icon: IconTeam },
   { href: "/settings", label: "Settings", icon: IconSettings },
 ];
@@ -60,6 +62,7 @@ const NEW_ACTIONS = [
   { href: "/quote", label: "New quote", icon: IconSparkle },
   { href: "/customers?new=1", label: "New customer", icon: IconUsers },
   { href: "/money/payments?new=1", label: "Record payment", icon: IconDollar },
+  { href: "/marketing/leads?new=1", label: "New lead", icon: IconMarketing },
   { href: "/calendar?block=1", label: "Block time", icon: IconBlock },
 ];
 
@@ -227,7 +230,7 @@ export function Shell({
             ))}
             <TabItem
               label="More"
-              active={moreOpen || ["/plans", "/settings", "/team", "/customers/import"].some((h) => isActive(pathname, h))}
+              active={moreOpen || ["/plans", "/marketing", "/settings", "/team", "/customers/import"].some((h) => isActive(pathname, h))}
               onClick={() => setMoreOpen(true)}
             >
               {(on) => (
@@ -262,6 +265,7 @@ export function Shell({
             {owner &&
               [
                 { href: "/plans", label: "Plans", icon: IconRepeat },
+                { href: "/marketing", label: "Marketing", icon: IconMarketing },
                 { href: "/quote", label: "Quote builder", icon: IconSparkle },
                 { href: "/team", label: "Team", icon: IconTeam },
                 { href: "/settings", label: "Settings", icon: IconSettings },

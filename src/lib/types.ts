@@ -51,6 +51,9 @@ export interface Customer {
   referred_by: string | null;
   /** Set once the one-shot referral credit has been paid to both sides. */
   referral_credited_at: string | null;
+  /** Marketing channel they found us through (null = derive from their first booking). */
+  acquired_via: ChannelId | null;
+  acquired_campaign_id: string | null;
 }
 
 export interface OutreachLog {
@@ -262,7 +265,73 @@ export interface Expense {
   amount: number;
   memo: string | null;
   recurring_id: string | null;
+  /** Ad spend: the marketing campaign this expense paid for. */
+  campaign_id: string | null;
   created_at: string;
+}
+
+// ── Marketing (0024) ─────────────────────────────────────────────────────────
+
+export type ChannelId =
+  | "google_ads"
+  | "google_lsa"
+  | "google_organic"
+  | "meta_ads"
+  | "social"
+  | "nextdoor"
+  | "print"
+  | "partnership"
+  | "referral"
+  | "word_of_mouth"
+  | "other";
+export type CampaignStatus = "planned" | "active" | "paused" | "ended";
+export type LeadKind = "call" | "text" | "form" | "email_signup" | "boat_inquiry" | "dm" | "in_person";
+export type LeadStatus = "new" | "contacted" | "quoted" | "booked" | "lost";
+export type TaskPhase = "now" | "month" | "season" | "ongoing";
+
+export interface MarketingCampaign {
+  id: string;
+  created_at: string;
+  channel: ChannelId;
+  name: string;
+  status: CampaignStatus;
+  start_on: string | null;
+  end_on: string | null;
+  monthly_budget: number | null;
+  target_cpa: number | null;
+  utm_campaign: string | null;
+  notes: string | null;
+}
+
+export interface Lead {
+  id: string;
+  created_at: string;
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  kind: LeadKind;
+  channel: ChannelId | null;
+  campaign_id: string | null;
+  status: LeadStatus;
+  lost_reason: string | null;
+  est_value: number | null;
+  contacted_at: string | null;
+  customer_id: string | null;
+  email_signup_id: string | null;
+  attribution: unknown;
+  notes: string | null;
+}
+
+export interface MarketingTask {
+  id: string;
+  created_at: string;
+  phase: TaskPhase;
+  sort: number;
+  title: string;
+  detail: string | null;
+  channel: ChannelId | null;
+  due_on: string | null;
+  done_on: string | null;
 }
 
 export type CompanyLedgerKind = "revenue" | "payout" | "capital" | "expense";

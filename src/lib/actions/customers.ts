@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { normalizeEmail, normalizePhone } from "@/lib/format";
 import { change, customerName, logActivity } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
-import type { Customer, SizeId } from "@/lib/types";
+import type { ChannelId, Customer, SizeId } from "@/lib/types";
 import type { ActionResult } from "./appointments";
 
 const refresh = () => revalidatePath("/", "layout");
@@ -18,6 +18,8 @@ export interface CustomerFields {
   tags?: string[];
   /** Auto-email a Stripe payment link when a job completes without payment. */
   stripePayments?: boolean;
+  /** Marketing channel they found us through. */
+  acquiredVia?: ChannelId | null;
 }
 
 function clean(fields: CustomerFields) {
@@ -29,6 +31,7 @@ function clean(fields: CustomerFields) {
     notes: fields.notes?.trim() || null,
     tags: (fields.tags ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean),
     ...(fields.stripePayments !== undefined && { stripe_payments: fields.stripePayments }),
+    ...(fields.acquiredVia !== undefined && { acquired_via: fields.acquiredVia }),
   };
 }
 

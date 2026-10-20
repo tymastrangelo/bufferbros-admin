@@ -60,7 +60,7 @@ export default async function TodayPage() {
       .is("settled_on", null),
     getSettingsMap(),
     db.from("employees").select("id,name,split_pct,active").order("created_at"),
-    db.from("reminders").select("*, customers(id,name)").is("done_at", null).order("due_on").limit(10),
+    db.from("reminders").select("*, customers(id,name,phone)").is("done_at", null).order("due_on").limit(10),
   ]);
 
   // Client-relations queue: who's due for a reach-out / a review ask.
@@ -104,7 +104,7 @@ export default async function TodayPage() {
   };
 
   // Resolve vehicle_ids -> labels for the reminders card in one lookup.
-  const reminderRows = (remindersQ.data ?? []) as unknown as (Reminder & { customers: { id: string; name: string } | null })[];
+  const reminderRows = (remindersQ.data ?? []) as unknown as (Reminder & { customers: { id: string; name: string; phone: string | null } | null })[];
   const reminderVehIds = [...new Set(reminderRows.flatMap((r) => r.vehicle_ids))];
   const vehById = new Map<string, string>();
   if (reminderVehIds.length) {

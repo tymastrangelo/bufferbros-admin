@@ -9,14 +9,18 @@ import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { LedgerEntrySheet } from "@/components/ledger-entry-sheet";
 import { RelationsCard } from "@/components/relations-card";
 import { CustomerPicker, type PickedCustomer } from "@/components/customer-picker";
+import { ChannelSelect } from "@/components/marketing-bits";
 import { Avatar, Balance, Busy, CopyButton, ErrorNote, Field, PageHeader, Sheet, StatusChip, Tabs } from "@/components/ui";
 import { motion } from "motion/react";
 import { springSnappy } from "@/lib/motion";
 import { deleteVehicle, mergeCustomers, saveVehicle, setCustomerArchived, updateCustomer } from "@/lib/actions/customers";
+import { setCustomerSource } from "@/lib/actions/marketing";
 import { cancelPaymentRequest, sendPaymentRequest } from "@/lib/actions/stripe";
 import { boatQuote, type Catalog } from "@/lib/catalog";
 import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
+import { channelFromAttribution, channelLabel } from "@/lib/marketing";
 import { fmtDateShort, minToLabel } from "@/lib/time";
+import { useOwner } from "@/lib/use-owner";
 import { SIZES, sizeLabel, type Customer, type EntryKind, type LedgerEntry, type OutreachLog, type PaymentRequest, type Plan, type SizeId, type Vehicle } from "@/lib/types";
 
 type Tab = "overview" | "visits" | "ledger";
@@ -175,7 +179,7 @@ export function CustomerProfile({
               {customer.addresses.map((a, i) => (
                 <Row key={i} k={a.label || "Address"} v={a.address} />
               ))}
-              <Row k="Source" v={customer.source || "manual"} />
+              <SourceRow customer={customer} appointments={appointments} />
             </div>
           </section>
 
@@ -373,6 +377,41 @@ function ContactBtn({ href, icon, label, newTab }: { href: string | null; icon: 
       {icon}
       <span className="text-label">{label}</span>
     </a>
+  );
+}
+
+/** Marketing source. Unset = worked out from a referral or their first website booking. */
+function SourceRow({ customer, appointments }: { customer: Customer; appointments: JobWithCustomer[] }) {
+  const router = useRouter();
+  const owner = useOwner();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // appointments arrive newest first; the earliest one carrying website attribution counts
+  const firstAttr = [...appointments].reverse().find((a) => (a as { attribution?: unknown }).attribution) as { attribution?: unknown } | undefined;
+  const derived = customer.referred_by ? "referral" : channelFromAttribution(firstAttr?.attribution);
+  return (
+    <div className="flex flex-wrap items-center px-4 py-2 gap-x-3 gap-y-1">
+      <span className="label w-20 shrink-0">Found us</span>
+      {owner ? (
+        <ChannelSelect
+          className="select h-8! w-auto text-sm"
+          value={customer.acquired_via}
+          unknownLabel={derived ? `${channelLabel(derived)} (auto)` : "Unknown"}
+          disabled={busy}
+          onChange={async (v) => {
+            setError(null);
+            setBusy(true);
+            const res = await setCustomerSource(customer.id, v);
+            setBusy(false);
+            if (!res.ok) return setError(res.error);
+            router.refresh();
+          }}
+        />
+      ) : (
+        <span className="text-sm">{channelLabel(customer.acquired_via ?? derived)}</span>
+      )}
+      {error && <ErrorNote>{error}</ErrorNote>}
+    </div>
   );
 }
 

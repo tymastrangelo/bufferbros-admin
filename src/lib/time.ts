@@ -28,6 +28,11 @@ export function todayYmd(): string {
   return ymdFmt.format(new Date());
 }
 
+/** The America/New_York calendar date of a timestamp (timestamptz ISO string). */
+export function dateOfInstant(iso: string): string {
+  return ymdFmt.format(new Date(iso));
+}
+
 /** Minutes since midnight, right now, in America/New_York. */
 export function nowMinutes(): number {
   const [h, m] = hmFmt.format(new Date()).split(":").map(Number);

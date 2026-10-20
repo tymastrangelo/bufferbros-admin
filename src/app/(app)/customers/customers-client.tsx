@@ -6,11 +6,12 @@ import { useMemo, useState } from "react";
 import { IconChevronRight, IconPlus, IconStar, IconUpload, IconUsers } from "@/components/icons";
 import { Avatar, Balance, Busy, EmptyState, ErrorNote, Field, PageHeader, SearchInput, Sheet } from "@/components/ui";
 import { DuplicatesSheet } from "@/components/duplicates-sheet";
+import { ChannelSelect } from "@/components/marketing-bits";
 import { createCustomer } from "@/lib/actions/customers";
 import type { DupCandidate, DupGroup } from "@/lib/duplicates";
 import { fmtPhone, phoneDigits } from "@/lib/format";
 import { fmtDateShort } from "@/lib/time";
-import type { Customer } from "@/lib/types";
+import type { ChannelId, Customer } from "@/lib/types";
 
 export type CustomerRow = Customer & {
   balance: number;
@@ -232,6 +233,7 @@ function NewCustomerSheet({ open, onClose }: { open: boolean; onClose: () => voi
   const [address, setAddress] = useState("");
   const [tags, setTags] = useState("");
   const [notes, setNotes] = useState("");
+  const [foundVia, setFoundVia] = useState<ChannelId | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -253,6 +255,9 @@ function NewCustomerSheet({ open, onClose }: { open: boolean; onClose: () => voi
         <Field label="Address">
           <input className="input" value={address} onChange={(e) => setAddress(e.target.value)} />
         </Field>
+        <Field label="How they found you" hint="Feeds cost per customer on the Marketing page">
+          <ChannelSelect value={foundVia} onChange={setFoundVia} unknownLabel="Not sure" />
+        </Field>
         <Field label="Tags" hint="Comma-separated — vip, weekly, prepaid…">
           <input className="input" value={tags} onChange={(e) => setTags(e.target.value)} />
         </Field>
@@ -273,6 +278,7 @@ function NewCustomerSheet({ open, onClose }: { open: boolean; onClose: () => voi
               addresses: address ? [{ label: "Home", address }] : [],
               tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
               notes,
+              acquiredVia: foundVia,
             });
             setPending(false);
             if (!res.ok) return setError(res.error);

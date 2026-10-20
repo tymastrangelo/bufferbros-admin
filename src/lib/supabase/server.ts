@@ -6,8 +6,10 @@ import { LARP_COOKIE, VIEW_AS_COOKIE, wrapClient } from "@/lib/larp/client";
  * Request-scoped client. LARP mode (cookie bb_larp) swaps business tables for the demo
  * dataset; "view as" (bb_view_as) keeps real reads but refuses every write. Both are
  * read-only, so nothing a demo or preview click does can touch prod data.
+ * `realData`: skip LARP — Marketing always shows (and writes) the real numbers, never demo
+ * ones (Tyler, 2026-10-20). "View as" stays read-only either way.
  */
-export async function createClient() {
+export async function createClient({ realData = false }: { realData?: boolean } = {}) {
   const cookieStore = await cookies();
   const real = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -26,7 +28,7 @@ export async function createClient() {
     }
   );
   return wrapClient(real, {
-    larp: cookieStore.get(LARP_COOKIE)?.value === "1",
+    larp: !realData && cookieStore.get(LARP_COOKIE)?.value === "1",
     readOnly: !!cookieStore.get(VIEW_AS_COOKIE)?.value,
   });
 }

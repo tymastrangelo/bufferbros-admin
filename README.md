@@ -24,6 +24,7 @@ setup + deploy + data migration in [`SETUP.md`](SETUP.md).
 | Weekly cron route | `src/app/api/cron/generate-occurrences/route.ts` |
 | CSV export (payments/charges/expenses) | `src/app/api/export/route.ts` |
 | Screens | `src/app/(app)/{page,calendar,customers,plans,money,settings}` |
+| Marketing: channel funnel + weekly call, leads, campaigns (spend = `expenses.campaign_id`), playbook. Always real data, never LARP | `src/app/(app)/marketing`, `src/lib/marketing.ts` (+ `.check.ts`), migration `0024` |
 
 ## Key data rules
 
