@@ -88,16 +88,18 @@ export default async function TodayPage() {
   const nextVisit = new Map<string, string>();
   for (const r of (nextVisitQ.data ?? []) as { customer_id: string; date: string }[]) nextVisit.set(r.customer_id, r.date);
   const outreachCustomers = (outreachCustQ.data ?? []) as OutreachCustomer[];
-  // Drafted texts from the nightly Claude cards (owner only). A customer with a live draft drops
-  // out of the rule-based Reach out / review lists so nobody shows up twice.
+  // Drafted texts from the nightly Claude cards (owner only). Anyone with a pending draft (even one
+  // scheduled for a later day) is handled by "Texts to send", so they drop out of the rule-based
+  // Reach out / review lists. The rule lists are now just a net for clients with no draft yet.
   const cardsQ = owner
     ? await db
         .from("customer_insights")
         .select("customer_id,updated_at,suggestion_goal,suggestion_text,suggestion_why,suggest_on,suggestion_done_at")
         .not("suggestion_goal", "is", null)
     : null;
-  const suggestions = owner ? liveSuggestions((cardsQ?.data ?? []) as never, outreachCustomers, nextVisit, today) : [];
-  const suggested = new Set(suggestions.map((s) => s.customerId));
+  const cards = (cardsQ?.data ?? []) as { customer_id: string; suggestion_goal: string | null; suggestion_done_at: string | null }[];
+  const suggestions = owner ? liveSuggestions(cards as never, outreachCustomers, nextVisit, today) : [];
+  const drafted = new Set(cards.filter((c) => c.suggestion_goal && c.suggestion_goal !== "none" && !c.suggestion_done_at).map((c) => c.customer_id));
   const outreach = {
     due: computeOutreachDue({
       customers: outreachCustomers,
@@ -105,13 +107,13 @@ export default async function TodayPage() {
       nextVisit,
       today,
       afterDays: Number(settings.outreach_after_days ?? 60),
-    }).filter((d) => !suggested.has(d.id)),
+    }).filter((d) => !drafted.has(d.id)),
     asks: computeReviewAsks({
       customers: outreachCustomers,
       lastDetail,
       today,
       windowDays: Number(settings.review_ask_window_days ?? 14),
-    }).filter((a) => !suggested.has(a.id)),
+    }).filter((a) => !drafted.has(a.id)),
   };
 
   // Resolve vehicle_ids -> labels for the reminders card in one lookup.

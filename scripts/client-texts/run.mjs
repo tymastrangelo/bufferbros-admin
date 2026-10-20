@@ -101,9 +101,9 @@ if (process.argv.includes("--dry-run")) {
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "text_sync_runs", filter: "status=eq.pending" }, drain)
     .subscribe((status) => {
       if (status !== "SUBSCRIBED") log(`listener: ${status}`);
-      else drain(); // catches requests made while the Mac was asleep
+      drain(); // on connect, AND on every error/reconnect, so a flaky socket never strands a pending request
     });
-  setInterval(drain, 30 * 60_000); // safety net if a Realtime event is ever missed
+  setInterval(drain, 2 * 60_000); // safety net: a button press lands within ~2 min even if Realtime is down
   log("listener: waiting for sync requests");
 } else {
   const ok = await runOnce(process.argv.includes("--nightly") ? "nightly" : "manual");
