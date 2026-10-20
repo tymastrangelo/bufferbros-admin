@@ -23,6 +23,10 @@ assert.equal(g({ review_left_on: "2026-07-01", last_contacted_on: "2026-10-15" }
 assert.equal(g({ review_left_on: "2026-07-01" }, { lastDetail: "2026-10-10" }), null); // detailed 10d ago, too soon
 assert.equal(g({ review_left_on: "2026-07-01", resume_on: "2026-12-01" }), null); // snoozed until December
 
+// Seasonal/snoozed: wait for their date (even if otherwise review-due), then surface as a check-in.
+assert.equal(g({ resume_on: "2026-11-01" }), null); // snoozed until Nov, nothing goes out
+assert.equal(g({ review_left_on: "2026-07-01", outreach_status: "seasonal", resume_on: "2026-10-01" }), "check_in"); // date arrived
+
 // Never-detailed and do-not-contact are always out.
 assert.equal(g({}, { lastDetail: null }), null);
 assert.equal(g({ outreach_status: "do_not_contact" }), null);

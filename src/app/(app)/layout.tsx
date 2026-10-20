@@ -26,14 +26,25 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       : me?.name ?? user.email?.split("@")[0] ?? "Crew";
 
   return (
-    <Shell
-      role={previewing ? "washer" : realRole}
-      me={{ name, roleLabel: realRole === "owner" ? "Owner" : "Crew" }}
-      crew={realRole === "owner" ? crew.map((e) => ({ id: e.id, name: e.name })) : []}
-      previewing={previewing ? { id: previewing.id, name: previewing.name } : null}
-      larp={realRole === "owner" && (await cookies()).get(LARP_COOKIE)?.value === "1"}
-    >
-      {children}
-    </Shell>
+    <>
+      <Shell
+        role={previewing ? "washer" : realRole}
+        me={{ name, roleLabel: realRole === "owner" ? "Owner" : "Crew" }}
+        crew={realRole === "owner" ? crew.map((e) => ({ id: e.id, name: e.name })) : []}
+        previewing={previewing ? { id: previewing.id, name: previewing.name } : null}
+        larp={realRole === "owner" && (await cookies()).get(LARP_COOKIE)?.value === "1"}
+      >
+        {children}
+      </Shell>
+      <VersionTag />
+    </>
+  );
+}
+
+/** Tiny release marker, bottom-right — the deployed commit so we can tell what's live. */
+function VersionTag() {
+  const sha = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7);
+  return (
+    <span className="fixed bottom-1 right-2 z-10 text-micro text-faint tabular-nums pointer-events-none select-none opacity-70">{sha ?? "dev"}</span>
   );
 }

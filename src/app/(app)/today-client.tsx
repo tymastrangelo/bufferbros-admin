@@ -5,11 +5,12 @@ import { useState, useSyncExternalStore } from "react";
 import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { IconCalendar, IconFlag, IconPhone, IconPin } from "@/components/icons";
 import { OutreachCard } from "@/components/outreach-card";
-import { TextsToSendCard } from "@/components/client-texts";
+import { TextsToSendCard, TextSyncBar } from "@/components/client-texts";
 import type { Suggestion } from "@/lib/suggestions";
 import { RemindersCard, type ReminderRow } from "@/components/reminders-card";
 import { EmptyState, PageHeader, SectionLabel, Stat } from "@/components/ui";
 import type { Catalog } from "@/lib/catalog";
+import type { TextSyncRun } from "@/lib/types";
 import type { OutreachDue, ReviewAsk } from "@/lib/outreach";
 import { fmtPhone, mapsHref, money, telHref } from "@/lib/format";
 import { fmtDateShort, minToLabel, nowMinutes } from "@/lib/time";
@@ -42,6 +43,7 @@ export function TodayClient({
   reminders,
   outreach,
   suggestions,
+  textSyncRun,
 }: {
   dateLabel: string;
   jobs: JobWithCustomer[];
@@ -52,6 +54,8 @@ export function TodayClient({
   outreach: { due: OutreachDue[]; asks: ReviewAsk[] } | null; // null = washer view
   /** drafted texts that fit today (owner only; empty for workers) */
   suggestions: Suggestion[];
+  /** latest text-sync run for the home Sync button (null for workers or before the first run) */
+  textSyncRun: TextSyncRun | null;
 }) {
   // Store the tapped job, render the fresh copy from server props so an open
   // sheet updates in place after any action refreshes the route.
@@ -219,6 +223,11 @@ export function TodayClient({
         </section>
       )}
 
+      {reminders !== null && (
+        <div className="mt-8">
+          <TextSyncBar run={textSyncRun} />
+        </div>
+      )}
       {suggestions.length > 0 && <TextsToSendCard suggestions={suggestions} />}
       {outreach && <OutreachCard due={outreach.due} asks={outreach.asks} />}
 

@@ -39,7 +39,7 @@ const SCHEMA = {
       additionalProperties: false,
       required: ["goal", "send_on", "text", "why"],
       properties: {
-        goal: { enum: ["reply", "rebook", "review", "check_in", "none"] },
+        goal: { enum: ["reply", "rebook", "review", "check_in", "call", "none"] },
         send_on: { type: "string" },
         text: { type: "string" },
         why: { type: "string" },
@@ -64,23 +64,27 @@ Rules:
   - "rebook": nothing is booked and it's time to come back (past their usual gap, a plan lapsed, visits were cancelled, or they just haven't been on the schedule in a while). When it fits naturally, invite them onto a recurring plan (weekly, every other week, or monthly) so they stay booked without thinking about it.
   - "review": they have had a detail done and haven't left a Google review. Best a day or two after a fresh detail, but any happy past customer who never reviewed is worth one gentle ask. If they were asked before, only nudge again if it was over a month ago, and gently.
   - "check_in": a seasonal resident coming back, or a relationship going quiet.
+  - "call": a text won't cut it — an unhappy or at-risk customer, a complaint to smooth over, or something that needs a real back-and-forth. Prefer this over a text when the situation is sensitive.
   - "none": they have a visit booked and nothing is pending, Tyler texted them very recently, they declined, or they're do_not_contact.
   send_on: YYYY-MM-DD. Today if it fits now; otherwise the best future day (when they're due again, back in town, or a day or two after a detail for a review).
-  text: what Tyler would actually send. Match how Tyler writes in these texts (length, tone, capitalization, punctuation, emoji or not). Short, warm, specific to them (their car or last visit if it fits naturally), one clear ask. For a review include ${REVIEW_LINK}. For rebooking, offer to set a time or share bufferbros.org/booking (exactly that link), and when it fits suggest a recurring plan so they stay on the schedule. Never promise specific openings; if they said which days work for them, mention those days. Never invent prices, discounts, dates or facts. Empty string when goal is "none".
-  why: one short sentence on why this text, now.
+  text: for every goal except "call" and "none", exactly what Tyler would send. Match how Tyler writes in these texts (length, tone, capitalization, punctuation, emoji or not). Short, warm, specific to them (their car or last visit if it fits naturally), one clear ask. For a review include ${REVIEW_LINK}. For rebooking, offer to set a time or share bufferbros.org/booking (exactly that link), and when it fits suggest a recurring plan so they stay on the schedule. Never promise specific openings; if they said which days work for them, mention those days. Never invent prices, discounts, dates or facts. For "call", instead put two or three short notes on what to cover on the phone (what to acknowledge, what to offer, what to ask). Empty string when goal is "none".
+  why: one short sentence on why this text or call, now.
 Write in plain, short sentences. No em dashes.`;
 
 const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
 
-/** The proactive ask a client is due for with no new texts needed: a Google review (any past
- *  customer who never left one), or a rebook (active, nothing booked, gone quiet). Review wins so
- *  the one-time ask goes out before the recurring rebook nudge. Pure; pinned by summarize.check.mjs. */
+/** The proactive reason to draft a client a follow-up with no new texts needed, so every active
+ *  client gets a prepped message: a Google review (past customer who never left one), a rebook
+ *  (active, nothing booked, gone quiet), or a check-in (their seasonal/snooze date arrived).
+ *  Review wins so the one-time ask goes out first. The returned goal is only a selection reason —
+ *  Claude still picks the final goal (it may choose "call"). Pure; pinned by summarize.check.mjs. */
 export function proactiveGoal(c, { lastDetail, hasNextVisit, today }) {
   if (c.archived || c.outreach_status === "do_not_contact") return null;
+  if (c.resume_on && c.resume_on > today) return null; // snoozed/seasonal: wait for their date
   const since = (d) => (d ? daysBetween(d, today) : Infinity);
   if (lastDetail && !c.review_left_on && since(c.review_asked_on) > 30) return "review";
-  if (!hasNextVisit && c.outreach_status === "active" && lastDetail && since(lastDetail) >= 30 && since(c.last_contacted_on) >= 30 && (!c.resume_on || c.resume_on <= today))
-    return "rebook";
+  if (!hasNextVisit && c.outreach_status === "active" && lastDetail && since(lastDetail) >= 30 && since(c.last_contacted_on) >= 30) return "rebook";
+  if (c.resume_on && c.resume_on <= today && since(c.last_contacted_on) >= 14) return "check_in"; // their date arrived
   return null;
 }
 

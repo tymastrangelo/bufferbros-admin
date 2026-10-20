@@ -33,7 +33,7 @@ export async function requestTextSync(): Promise<ActionResult> {
  * "Mark as sent" on a drafted text: logs the touch the way the Relations card would (a review
  * ask, or a follow-up that resets "last contacted") and clears the draft until the next card.
  */
-export async function markSuggestionSent(customerId: string, goal: "reply" | "rebook" | "review" | "check_in"): Promise<ActionResult> {
+export async function markSuggestionSent(customerId: string, goal: "reply" | "rebook" | "review" | "check_in" | "call"): Promise<ActionResult> {
   if ((await getRole()) !== "owner") return { ok: false, error: "Only the owner can do this." };
   const logged = await logOutreach({ customerId, outcome: goal === "review" ? "asked_review" : "follow_up" });
   if (!logged.ok) return logged;

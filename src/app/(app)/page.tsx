@@ -7,7 +7,7 @@ import { findDuplicates, pairKey } from "@/lib/duplicates";
 import { getCatalog, getSettingsMap } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { addDays, fmtDateLong, todayYmd, weekdayOf } from "@/lib/time";
-import { vehicleLabel, type Plan, type Reminder, type Vehicle } from "@/lib/types";
+import { vehicleLabel, type Plan, type Reminder, type TextSyncRun, type Vehicle } from "@/lib/types";
 import { TodayClient, type AttentionData } from "./today-client";
 import type { JobWithCustomer } from "@/components/job-sheet";
 import type { ReminderRow } from "@/components/reminders-card";
@@ -115,6 +115,10 @@ export default async function TodayPage() {
       windowDays: Number(settings.review_ask_window_days ?? 14),
     }).filter((a) => !drafted.has(a.id)),
   };
+  // Latest text-sync run for the home-page Sync button (syncs texts + regenerates the follow-ups).
+  const textSyncRun = owner
+    ? (((await db.from("text_sync_runs").select("*").order("requested_at", { ascending: false }).limit(1).maybeSingle()).data as TextSyncRun | null) ?? null)
+    : null;
 
   // Resolve vehicle_ids -> labels for the reminders card in one lookup.
   const reminderRows = (remindersQ.data ?? []) as unknown as (Reminder & { customers: { id: string; name: string; phone: string | null } | null })[];
@@ -195,6 +199,7 @@ export default async function TodayPage() {
       reminders={owner ? reminders : null}
       outreach={owner ? outreach : null}
       suggestions={suggestions}
+      textSyncRun={textSyncRun}
     />
   );
 }

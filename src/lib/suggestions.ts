@@ -5,16 +5,17 @@
 // already texted them, or it was marked sent.
 import type { CustomerInsight } from "./types";
 
-export type SuggestionGoal = "reply" | "rebook" | "review" | "check_in";
+export type SuggestionGoal = "reply" | "rebook" | "review" | "check_in" | "call";
 
 export const GOAL_LABEL: Record<SuggestionGoal, string> = {
   reply: "Reply",
   rebook: "Rebook",
   review: "Review",
   check_in: "Check in",
+  call: "Call",
 };
-/** Most urgent first: an unanswered customer beats everything. */
-const GOAL_ORDER: SuggestionGoal[] = ["reply", "rebook", "review", "check_in"];
+/** Most urgent first: an unanswered customer beats everything; a call means it needs a real talk. */
+const GOAL_ORDER: SuggestionGoal[] = ["reply", "call", "rebook", "review", "check_in"];
 
 export interface SuggestionCustomer {
   id: string;

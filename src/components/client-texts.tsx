@@ -7,11 +7,11 @@ import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { markSuggestionSent, requestTextSync } from "@/lib/actions/texts";
-import { smsHref } from "@/lib/format";
+import { smsHref, telHref } from "@/lib/format";
 import { GOAL_LABEL, type Suggestion, type SuggestionGoal } from "@/lib/suggestions";
 import { dateOfInstant, fmtDateLong, fmtDateShort, todayYmd } from "@/lib/time";
 import type { CustomerInsight, CustomerMessage, TextSyncRun } from "@/lib/types";
-import { IconCalendar, IconChats, IconCheckCircle, IconEquals, IconMessage, IconStar, IconWarning, IconWave, type IconComponent } from "./icons";
+import { IconCalendar, IconChats, IconCheckCircle, IconEquals, IconMessage, IconPhone, IconStar, IconWarning, IconWave, type IconComponent } from "./icons";
 import { Busy, CopyButton, EmptyState, ErrorNote, SectionLabel, Sheet } from "./ui";
 
 const MOOD: Record<NonNullable<CustomerInsight["sentiment"]>, { label: string; cls: string; Icon: IconComponent }> = {
@@ -75,13 +75,14 @@ export function TextSyncBar({ run }: { run: TextSyncRun | null }) {
   );
 }
 
-const GOAL_ICON: Record<SuggestionGoal, IconComponent> = { reply: IconChats, rebook: IconCalendar, review: IconStar, check_in: IconWave };
+const GOAL_ICON: Record<SuggestionGoal, IconComponent> = { reply: IconChats, rebook: IconCalendar, review: IconStar, check_in: IconWave, call: IconPhone };
 
-/** Why this text: glyph + word, never color alone. A reply owed reads as needing attention. */
+/** Why this follow-up: glyph + word, never color alone. A reply owed or a call needed reads as
+ *  needing attention. */
 export function GoalChip({ goal }: { goal: SuggestionGoal }) {
   const Icon = GOAL_ICON[goal];
   return (
-    <span className={`chip ${goal === "reply" ? "chip-warn" : "chip-brand"} shrink-0`}>
+    <span className={`chip ${goal === "reply" || goal === "call" ? "chip-warn" : "chip-brand"} shrink-0`}>
       <Icon width={12} height={12} weight="bold" aria-hidden /> {GOAL_LABEL[goal]}
     </span>
   );
@@ -94,8 +95,9 @@ export function SuggestionSheet({ s, onClose }: { s: Suggestion; onClose: () => 
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const first = s.name.split(/\s+/)[0];
+  const isCall = s.goal === "call";
   return (
-    <Sheet open onClose={onClose} title={`Text ${first}`}>
+    <Sheet open onClose={onClose} title={`${isCall ? "Call" : "Text"} ${first}`}>
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-2">
           <GoalChip goal={s.goal} />
@@ -105,11 +107,19 @@ export function SuggestionSheet({ s, onClose }: { s: Suggestion; onClose: () => 
         </div>
         {s.why && <p className="text-sm text-ink-2">{s.why}</p>}
         <label className="block">
-          <span className="label block mb-1.5">Message (edit before sending)</span>
+          <span className="label block mb-1.5">{isCall ? "What to talk about" : "Message (edit before sending)"}</span>
           <textarea className="textarea text-md" rows={6} value={text} onChange={(e) => setText(e.target.value)} />
         </label>
         <div className="flex flex-wrap gap-2">
-          {s.phone ? (
+          {isCall ? (
+            s.phone ? (
+              <a className="btn btn-primary" href={telHref(s.phone)}>
+                <IconPhone width={16} height={16} /> Call {first}
+              </a>
+            ) : (
+              <p className="note text-sm">No phone number on file.</p>
+            )
+          ) : s.phone ? (
             <a className="btn btn-primary" href={`${smsHref(s.phone)}&body=${encodeURIComponent(text)}`}>
               <IconMessage width={16} height={16} /> Open in Messages
             </a>
@@ -132,15 +142,18 @@ export function SuggestionSheet({ s, onClose }: { s: Suggestion; onClose: () => 
             router.refresh();
           }}
         >
-          {pending ? <Busy>Saving…</Busy> : "Mark as sent"}
+          {pending ? <Busy>Saving…</Busy> : isCall ? "Mark as done" : "Mark as sent"}
         </button>
-        <p className="text-xs text-faint">Sent it from your phone? The next sync sees it and clears this on its own.</p>
+        <p className="text-xs text-faint">
+          {isCall ? "Give them a ring, then mark it done." : "Sent it from your phone? The next sync sees it and clears this on its own."}
+        </p>
       </div>
     </Sheet>
   );
 }
 
-/** Today: drafted texts that fit right now, most urgent first. */
+/** Today: prepped follow-ups that fit right now, most urgent first — a drafted text, or a call
+ *  with notes on what to cover. */
 export function TextsToSendCard({ suggestions }: { suggestions: Suggestion[] }) {
   const [open, setOpen] = useState<Suggestion | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -148,7 +161,7 @@ export function TextsToSendCard({ suggestions }: { suggestions: Suggestion[] }) 
   const shown = showAll ? suggestions : suggestions.slice(0, 6);
   return (
     <section className="mt-8">
-      <SectionLabel trailing={suggestions.length}>Texts to send</SectionLabel>
+      <SectionLabel trailing={suggestions.length}>Follow-ups</SectionLabel>
       <div className="stagger card divide-y divide-line overflow-hidden">
         {shown.map((s) => (
           <button key={s.customerId} type="button" className="row row-link w-full text-left" onClick={() => setOpen(s)}>
@@ -159,7 +172,11 @@ export function TextsToSendCard({ suggestions }: { suggestions: Suggestion[] }) 
               </span>
               {s.why && <span className="block text-xs text-faint truncate">{s.why}</span>}
             </span>
-            <IconMessage width={16} height={16} className="shrink-0 text-faint" aria-hidden />
+            {s.goal === "call" ? (
+              <IconPhone width={16} height={16} className="shrink-0 text-faint" aria-hidden />
+            ) : (
+              <IconMessage width={16} height={16} className="shrink-0 text-faint" aria-hidden />
+            )}
           </button>
         ))}
         {suggestions.length > shown.length && (
@@ -221,12 +238,20 @@ export function InsightCard({ insight, suggestion }: { insight: CustomerInsight;
         {suggestion && (
           <div className="px-4 py-3 flex flex-col gap-2">
             <div className="flex items-center justify-between gap-2">
-              <p className="label">Suggested text</p>
+              <p className="label">{suggestion.goal === "call" ? "Suggested call" : "Suggested text"}</p>
               <GoalChip goal={suggestion.goal} />
             </div>
             <p className="well px-3.5 py-3 text-sm whitespace-pre-wrap">{suggestion.text}</p>
             <button className="btn self-start" onClick={() => setSending(true)}>
-              <IconMessage width={16} height={16} /> Review and send
+              {suggestion.goal === "call" ? (
+                <>
+                  <IconPhone width={16} height={16} /> Review and call
+                </>
+              ) : (
+                <>
+                  <IconMessage width={16} height={16} /> Review and send
+                </>
+              )}
             </button>
           </div>
         )}
