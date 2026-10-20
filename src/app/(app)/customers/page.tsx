@@ -3,7 +3,7 @@ import { requireOwner } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { findDuplicates, pairKey, type DupCandidate } from "@/lib/duplicates";
 import { todayYmd } from "@/lib/time";
-import type { Customer } from "@/lib/types";
+import type { Customer, TextSyncRun } from "@/lib/types";
 import { CustomersClient, type CustomerRow } from "./customers-client";
 
 export const metadata: Metadata = { title: "Customers" };
@@ -19,7 +19,7 @@ export default async function CustomersPage({
   const db = await createClient();
   const today = todayYmd();
 
-  const [customersQ, balancesQ, lastQ, nextQ, unlinkedQ, apptCustQ, ledgerCustQ, dismissedQ] = await Promise.all([
+  const [customersQ, balancesQ, lastQ, nextQ, unlinkedQ, apptCustQ, ledgerCustQ, dismissedQ, syncQ] = await Promise.all([
     db.from("customers").select("*").order("created_at", { ascending: false }),
     db.from("customer_balances").select("*"),
     db.from("appointments").select("customer_id,date").eq("status", "completed").not("customer_id", "is", null).order("date", { ascending: false }),
@@ -29,6 +29,7 @@ export default async function CustomersPage({
     db.from("appointments").select("customer_id").not("customer_id", "is", null),
     db.from("ledger_entries").select("customer_id"),
     db.from("customer_not_duplicates").select("a,b"),
+    db.from("text_sync_runs").select("*").order("requested_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
   const activity = new Map<string, number>();
   for (const r of [...(apptCustQ.data ?? []), ...(ledgerCustQ.data ?? [])] as { customer_id: string }[])
@@ -69,6 +70,7 @@ export default async function CustomersPage({
 
   return (
     <CustomersClient
+      textSync={(syncQ.data as TextSyncRun | null) ?? null}
       rows={rows}
       unlinkedCount={unlinkedQ.count ?? 0}
       openNew={params.new === "1"}

@@ -356,6 +356,19 @@ export interface CustomerInsight {
   next_step: string | null;
 }
 
+/** One client-texts run on Tyler's Mac (0026): nightly, button, or manual. */
+export interface TextSyncRun {
+  id: string;
+  requested_at: string;
+  source: "button" | "nightly" | "manual";
+  status: "pending" | "running" | "done" | "error";
+  started_at: string | null;
+  finished_at: string | null;
+  texts_synced: number | null;
+  cards_updated: number | null;
+  error: string | null;
+}
+
 export type CompanyLedgerKind = "revenue" | "payout" | "capital" | "expense";
 /** 'gabe' is pre-0015 history; new employee payouts are 'employee' + employee_id. */
 export type PayoutParty = "gabe" | "ceo" | "employee";

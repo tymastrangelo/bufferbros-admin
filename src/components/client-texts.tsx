@@ -1,12 +1,15 @@
 "use client";
 
-// Customer profile pieces fed by the Mac text sync (scripts/client-texts): the "What we know"
-// card Claude writes nightly, and the conversation itself. Owner-only (RLS + page gate).
-import { useLayoutEffect, useRef } from "react";
-import { dateOfInstant, fmtDateLong, fmtDateShort } from "@/lib/time";
-import type { CustomerInsight, CustomerMessage } from "@/lib/types";
+// Customer pieces fed by the Mac text sync (scripts/client-texts): the "What we know" card Claude
+// writes after each sync (only for customers with new texts), the conversation itself, and the
+// "Sync texts now" bar. Owner-only (RLS + page gate).
+import { useRouter } from "next/navigation";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { requestTextSync } from "@/lib/actions/texts";
+import { dateOfInstant, fmtDateLong, fmtDateShort, todayYmd } from "@/lib/time";
+import type { CustomerInsight, CustomerMessage, TextSyncRun } from "@/lib/types";
 import { IconChats, IconCheckCircle, IconEquals, IconWarning, type IconComponent } from "./icons";
-import { EmptyState, SectionLabel } from "./ui";
+import { Busy, EmptyState, SectionLabel } from "./ui";
 
 const MOOD: Record<NonNullable<CustomerInsight["sentiment"]>, { label: string; cls: string; Icon: IconComponent }> = {
   happy: { label: "Going well", cls: "chip-ok", Icon: IconCheckCircle },
@@ -15,6 +18,59 @@ const MOOD: Record<NonNullable<CustomerInsight["sentiment"]>, { label: string; c
 };
 
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+/** "11:39 AM" today, "Mon, Oct 19 11:39 AM" otherwise. */
+const whenOf = (iso: string) => (dateOfInstant(iso) === todayYmd() ? timeOf(iso) : `${fmtDateShort(dateOfInstant(iso))} ${timeOf(iso)}`);
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** Last run status + "Sync texts now". The listener on Tyler's Mac picks the request up in
+ *  seconds; this re-renders live as the run row changes (LiveRefresh). */
+export function TextSyncBar({ run }: { run: TextSyncRun | null }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const age = run ? now - Date.parse(run.requested_at) : Infinity;
+  const inFlight = !!run && (run.status === "pending" || run.status === "running") && age < 30 * 60_000;
+  let status: React.ReactNode;
+  if (!run) status = "Texts haven't synced yet.";
+  else if (run.status === "pending") status = age > 3 * 60_000 ? "Waiting for your Mac. It syncs as soon as it's on and awake." : "Waiting for your Mac…";
+  else if (run.status === "running") status = "Syncing texts and updating cards…";
+  else if (run.status === "error") status = <span className="text-bad">Last sync failed ({whenOf(run.finished_at ?? run.requested_at)}): {run.error}</span>;
+  else
+    status = (
+      <>
+        Synced {whenOf(run.finished_at ?? run.requested_at)} · {plural(run.texts_synced ?? 0, "new text")} · {plural(run.cards_updated ?? 0, "card")} updated
+        {run.error && <span className="text-warn"> · {run.error}</span>}
+      </>
+    );
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+      <p className="text-xs text-faint" aria-live="polite">
+        {error ? <span className="text-bad">{error}</span> : status}
+      </p>
+      <button
+        className="btn btn-sm"
+        disabled={busy || inFlight}
+        onClick={async () => {
+          setError(null);
+          setBusy(true);
+          const res = await requestTextSync();
+          setBusy(false);
+          if (!res.ok) return setError(res.error);
+          router.refresh();
+        }}
+      >
+        {busy || inFlight ? <Busy>Syncing…</Busy> : "Sync texts now"}
+      </button>
+    </div>
+  );
+}
 
 export function InsightCard({ insight }: { insight: CustomerInsight }) {
   const mood = insight.sentiment ? MOOD[insight.sentiment] : null;
@@ -66,7 +122,7 @@ export function InsightCard({ insight }: { insight: CustomerInsight }) {
 }
 
 /** The thread, oldest at top, opening scrolled to the newest message. */
-export function TextThread({ messages, hasPhone, insightPending }: { messages: CustomerMessage[]; hasPhone: boolean; insightPending: boolean }) {
+export function TextThread({ messages, hasPhone, run }: { messages: CustomerMessage[]; hasPhone: boolean; run: TextSyncRun | null }) {
   const scroller = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -75,20 +131,24 @@ export function TextThread({ messages, hasPhone, insightPending }: { messages: C
 
   if (messages.length === 0) {
     return (
-      <EmptyState
-        icon={<IconChats width={20} height={20} />}
-        title={hasPhone ? "No texts synced yet." : "No phone number on file."}
-        hint={
-          hasPhone
-            ? "Texts with this customer show up here once the Mac sync is running (scripts/client-texts/install.sh). Only threads with CRM customers are copied."
-            : "Add their phone number and their text thread will sync here."
-        }
-      />
+      <div className="flex flex-col gap-3">
+        <TextSyncBar run={run} />
+        <EmptyState
+          icon={<IconChats width={20} height={20} />}
+          title={hasPhone ? "No texts with this customer yet." : "No phone number on file."}
+          hint={
+            hasPhone
+              ? "Their one-on-one texts with you show up here after the next sync. Only threads with CRM customers are copied from your Mac."
+              : "Add their phone number and their text thread will sync here."
+          }
+        />
+      </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3">
+      <TextSyncBar run={run} />
       <div ref={scroller} className="card max-h-[70vh] overflow-y-auto overscroll-contain px-3 py-3 flex flex-col gap-1.5">
         {messages.map((m, i) => {
           const d = dateOfInstant(m.sent_at);
@@ -110,8 +170,7 @@ export function TextThread({ messages, hasPhone, insightPending }: { messages: C
         })}
       </div>
       <p className="text-xs text-faint">
-        {messages.length >= 300 ? "Latest 300 texts. " : ""}Synced from your Mac every 15 minutes.
-        {insightPending ? " Claude reads new texts each morning." : ""}
+        {messages.length >= 300 ? "Latest 300 texts. " : ""}Syncs every night and whenever you tap Sync. The card above updates only when there are new texts.
       </p>
     </div>
   );

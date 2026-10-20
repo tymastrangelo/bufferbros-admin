@@ -22,7 +22,7 @@ import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
 import { channelFromAttribution, channelLabel } from "@/lib/marketing";
 import { fmtDateShort, minToLabel } from "@/lib/time";
 import { useOwner } from "@/lib/use-owner";
-import { SIZES, sizeLabel, type Customer, type CustomerInsight, type CustomerMessage, type EntryKind, type LedgerEntry, type OutreachLog, type PaymentRequest, type Plan, type SizeId, type Vehicle } from "@/lib/types";
+import { SIZES, sizeLabel, type Customer, type CustomerInsight, type CustomerMessage, type TextSyncRun, type EntryKind, type LedgerEntry, type OutreachLog, type PaymentRequest, type Plan, type SizeId, type Vehicle } from "@/lib/types";
 
 type Tab = "overview" | "visits" | "ledger" | "texts";
 
@@ -41,6 +41,7 @@ export function CustomerProfile({
   referralCredit,
   texts,
   insight,
+  textSync,
 }: {
   customer: Customer;
   vehicles: Vehicle[];
@@ -57,6 +58,7 @@ export function CustomerProfile({
   /** null = not the owner (texts are owner-only) */
   texts: CustomerMessage[] | null;
   insight: CustomerInsight | null;
+  textSync: TextSyncRun | null;
 }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [editOpen, setEditOpen] = useState(false);
@@ -316,11 +318,7 @@ export function CustomerProfile({
 
       {tab === "texts" && texts && (
         <div key="texts" className="page-in mt-5">
-          <TextThread
-            messages={texts}
-            hasPhone={!!customer.phone}
-            insightPending={texts.length > 0 && (!insight || (insight.through_message_at ?? "") < texts[texts.length - 1].sent_at)}
-          />
+          <TextThread messages={texts} hasPhone={!!customer.phone} run={textSync} />
         </div>
       )}
 

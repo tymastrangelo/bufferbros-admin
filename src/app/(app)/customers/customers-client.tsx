@@ -7,11 +7,12 @@ import { IconChevronRight, IconPlus, IconStar, IconUpload, IconUsers } from "@/c
 import { Avatar, Balance, Busy, EmptyState, ErrorNote, Field, PageHeader, SearchInput, Sheet } from "@/components/ui";
 import { DuplicatesSheet } from "@/components/duplicates-sheet";
 import { ChannelSelect } from "@/components/marketing-bits";
+import { TextSyncBar } from "@/components/client-texts";
 import { createCustomer } from "@/lib/actions/customers";
 import type { DupCandidate, DupGroup } from "@/lib/duplicates";
 import { fmtPhone, phoneDigits } from "@/lib/format";
 import { fmtDateShort } from "@/lib/time";
-import type { ChannelId, Customer } from "@/lib/types";
+import type { ChannelId, Customer, TextSyncRun } from "@/lib/types";
 
 export type CustomerRow = Customer & {
   balance: number;
@@ -26,6 +27,7 @@ export function CustomersClient({
   duplicates,
   candidates,
   openDuplicates,
+  textSync,
 }: {
   rows: CustomerRow[];
   unlinkedCount: number;
@@ -33,6 +35,7 @@ export function CustomersClient({
   duplicates: DupGroup[];
   candidates: DupCandidate[];
   openDuplicates: boolean;
+  textSync: TextSyncRun | null;
 }) {
   const [dupesOpen, setDupesOpen] = useState(openDuplicates);
   const dupeRecords = duplicates.reduce((s, g) => s + g.ids.length, 0);
@@ -89,6 +92,10 @@ export function CustomersClient({
           </>
         }
       />
+
+      <div className="mb-4">
+        <TextSyncBar run={textSync} />
+      </div>
 
       {unlinkedCount > 0 && (
         <Link

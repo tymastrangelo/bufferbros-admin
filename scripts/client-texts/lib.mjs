@@ -1,10 +1,13 @@
 // Shared pieces for the client-texts sync (runs on Tyler's Mac, not on Vercel).
 // Pure functions are checked by lib.check.mjs: `node scripts/client-texts/lib.check.mjs`.
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const REPO = join(dirname(fileURLToPath(import.meta.url)), "../..");
+/** Sync watermark + run lock live here (outside the repo). */
+export const STATE_DIR = join(homedir(), "Library/Application Support/BufferBros");
 
 /** Messages stores dates as time since 2001-01-01 UTC: nanoseconds on modern macOS, seconds before. */
 export function appleDateToISO(v) {
