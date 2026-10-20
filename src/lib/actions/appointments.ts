@@ -8,13 +8,17 @@ import { normalizeEmail, normalizePhone } from "@/lib/format";
 import { syncAppointmentToGcal } from "@/lib/gcal";
 import { change, customerName, logActivity, notify as sendPush, usd } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
-import { diffDays, fmtDateShort, nowMinutes, todayYmd, whenLabel } from "@/lib/time";
+import { addDays, diffDays, fmtDateShort, nowMinutes, todayYmd, whenLabel } from "@/lib/time";
 import type { Addon, Appointment, PaymentMethod } from "@/lib/types";
 import { cancelPaymentRequest, sendPaymentRequest } from "./stripe";
 
 export type ActionResult = { ok: true; id?: string } | { ok: false; error: string };
 
 const refresh = () => revalidatePath("/", "layout");
+
+// Google review link (keep in sync with scripts/client-texts/summarize.mjs). A reminder body that
+// contains "g.page/r/" is treated as a review ask everywhere (reminders-card, the close trigger).
+const REVIEW_LINK = "https://g.page/r/CXiiEGVufNEdEAE/review";
 
 const addonNames = (a: Addon[] | null | undefined) => (a ?? []).map((x) => x.name).join(", ") || "none";
 
@@ -435,6 +439,39 @@ export async function completeAppointment(
       appt.customer_id ? `/customers/${appt.customer_id}` : "/",
       { tags: ["white_check_mark"] }
     );
+  }
+
+  // Ride the glow: after a completed detail, queue a next-day Google-review nudge in Reminders —
+  // unless they've already left one, were asked in the last month, or one's already waiting. Best
+  // effort: a missed review nudge must never fail a completed job.
+  if (appt.customer_id) {
+    try {
+      const { data: cust } = await db
+        .from("customers")
+        .select("name, review_left_on, review_asked_on")
+        .eq("id", appt.customer_id)
+        .maybeSingle();
+      const askedRecently = !!cust?.review_asked_on && diffDays(cust.review_asked_on, todayYmd()) < 30;
+      if (cust && !cust.review_left_on && !askedRecently) {
+        const { count } = await db
+          .from("reminders")
+          .select("id", { count: "exact", head: true })
+          .eq("customer_id", appt.customer_id)
+          .is("done_at", null)
+          .like("body", "%g.page/r/%");
+        if (!count) {
+          const first = cust.name.split(/\s+/)[0] || cust.name;
+          await db.from("reminders").insert({
+            customer_id: appt.customer_id,
+            due_on: addDays(todayYmd(), 1),
+            title: `Ask ${cust.name} for a Google review`,
+            body: `Text: Hey ${first}, hope it's still looking great after the detail! If you have a sec, a quick Google review really helps us out: ${REVIEW_LINK}`,
+          });
+        }
+      }
+    } catch {
+      /* non-fatal: the detail is already marked complete */
+    }
   }
 
   if (appt.customer_id) {

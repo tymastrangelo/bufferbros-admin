@@ -15,6 +15,8 @@ assert.equal(g({ review_left_on: "2026-07-01" }), "rebook");
 assert.equal(g({ review_asked_on: "2026-10-10" }, { hasNextVisit: true }), null);
 // Asked over a month ago: a gentle re-ask is allowed (rebook off here via a booking).
 assert.equal(g({ review_asked_on: "2026-09-01" }, { hasNextVisit: true }), "review");
+// A next-day review reminder already covers them (created on detail completion): don't also draft one.
+assert.equal(g({}, { hasOpenReviewReminder: true, hasNextVisit: true }), null);
 
 // Rebook needs: no booking, active, a past detail >=30d, not contacted in the last 30d.
 assert.equal(g({ review_left_on: "2026-07-01" }), "rebook");

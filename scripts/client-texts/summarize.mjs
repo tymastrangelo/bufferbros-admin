@@ -78,11 +78,12 @@ const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400
  *  (active, nothing booked, gone quiet), or a check-in (their seasonal/snooze date arrived).
  *  Review wins so the one-time ask goes out first. The returned goal is only a selection reason —
  *  Claude still picks the final goal (it may choose "call"). Pure; pinned by summarize.check.mjs. */
-export function proactiveGoal(c, { lastDetail, hasNextVisit, today }) {
+export function proactiveGoal(c, { lastDetail, hasNextVisit, hasOpenReviewReminder, today }) {
   if (c.archived || c.outreach_status === "do_not_contact") return null;
   if (c.resume_on && c.resume_on > today) return null; // snoozed/seasonal: wait for their date
   const since = (d) => (d ? daysBetween(d, today) : Infinity);
-  if (lastDetail && !c.review_left_on && since(c.review_asked_on) > 30) return "review";
+  // Skip review when a next-day review reminder already covers them (created on detail completion).
+  if (lastDetail && !c.review_left_on && !hasOpenReviewReminder && since(c.review_asked_on) > 30) return "review";
   // Gone quiet: active, nothing booked, both last detail and last touch stale. Needs a detail OR a
   // past touch so imported address books don't flood the list (same guard as computeOutreachDue).
   if (!hasNextVisit && c.outreach_status === "active" && (lastDetail || c.last_contacted_on) && since(lastDetail) >= 30 && since(c.last_contacted_on) >= 30) return "rebook";
@@ -115,7 +116,7 @@ function timing({ today, appts, plans, c }) {
 
 /** @returns {Promise<{ updated: number, due: number, failed: number }>} */
 export async function summarizeChanged(call, { limit = 40, only = null, log = console.log } = {}) {
-  const [msgs, insights, oneOffs, custs, visits] = await Promise.all([
+  const [msgs, insights, oneOffs, custs, visits, reviewReminders] = await Promise.all([
     getAll(call, `customer_messages?select=customer_id,sent_at&order=sent_at.desc${only ? `&customer_id=eq.${only}` : ""}`),
     getAll(call, "customer_insights?select=customer_id,through_message_at,updated_at,suggestion_goal,suggestion_done_at"),
     // one-off visits only: weekly plan washes shouldn't re-read a customer every week
@@ -124,7 +125,10 @@ export async function summarizeChanged(call, { limit = 40, only = null, log = co
     // when they have no new texts — every active client gets a text to send, not just texters.
     getAll(call, "customers?select=id,archived,outreach_status,resume_on,last_contacted_on,review_asked_on,review_left_on&archived=eq.false"),
     getAll(call, "appointments?select=customer_id,date,status&customer_id=not.is.null"),
+    // open review-ask reminders (created on detail completion) own the review nudge — don't also draft one
+    getAll(call, "reminders?select=customer_id&done_at=is.null&body=like.*g.page/r/*"),
   ]);
+  const reviewReminderSet = new Set(reviewReminders.map((r) => r.customer_id));
   const newest = new Map();
   const counts = new Map();
   for (const m of msgs) {
@@ -163,7 +167,7 @@ export async function summarizeChanged(call, { limit = 40, only = null, log = co
   const proactive = only
     ? []
     : custs
-        .filter((c) => !hasPendingDraft(c.id) && proactiveGoal(c, { lastDetail: lastDetail.get(c.id) ?? null, hasNextVisit: nextVisit.has(c.id), today: todayStr }))
+        .filter((c) => !hasPendingDraft(c.id) && proactiveGoal(c, { lastDetail: lastDetail.get(c.id) ?? null, hasNextVisit: nextVisit.has(c.id), hasOpenReviewReminder: reviewReminderSet.has(c.id), today: todayStr }))
         .map((c) => c.id);
   const ids = (only ? [only] : [...new Set([...textStale, ...proactive])]).slice(0, limit);
   const due = ids.map((id) => [id, newest.get(id) ?? null]);
