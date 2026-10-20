@@ -10,6 +10,7 @@ import { LedgerEntrySheet } from "@/components/ledger-entry-sheet";
 import { RelationsCard } from "@/components/relations-card";
 import { CustomerPicker, type PickedCustomer } from "@/components/customer-picker";
 import { ChannelSelect } from "@/components/marketing-bits";
+import { InsightCard, TextThread } from "@/components/client-texts";
 import { Avatar, Balance, Busy, CopyButton, ErrorNote, Field, PageHeader, Sheet, StatusChip, Tabs } from "@/components/ui";
 import { motion } from "motion/react";
 import { springSnappy } from "@/lib/motion";
@@ -21,9 +22,9 @@ import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
 import { channelFromAttribution, channelLabel } from "@/lib/marketing";
 import { fmtDateShort, minToLabel } from "@/lib/time";
 import { useOwner } from "@/lib/use-owner";
-import { SIZES, sizeLabel, type Customer, type EntryKind, type LedgerEntry, type OutreachLog, type PaymentRequest, type Plan, type SizeId, type Vehicle } from "@/lib/types";
+import { SIZES, sizeLabel, type Customer, type CustomerInsight, type CustomerMessage, type EntryKind, type LedgerEntry, type OutreachLog, type PaymentRequest, type Plan, type SizeId, type Vehicle } from "@/lib/types";
 
-type Tab = "overview" | "visits" | "ledger";
+type Tab = "overview" | "visits" | "ledger" | "texts";
 
 export function CustomerProfile({
   customer,
@@ -38,6 +39,8 @@ export function CustomerProfile({
   referrals,
   referrerName,
   referralCredit,
+  texts,
+  insight,
 }: {
   customer: Customer;
   vehicles: Vehicle[];
@@ -51,6 +54,9 @@ export function CustomerProfile({
   referrals: { id: string; name: string }[];
   referrerName: string | null;
   referralCredit: number;
+  /** null = not the owner (texts are owner-only) */
+  texts: CustomerMessage[] | null;
+  insight: CustomerInsight | null;
 }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [editOpen, setEditOpen] = useState(false);
@@ -165,11 +171,24 @@ export function CustomerProfile({
             ),
           },
           { value: "ledger", label: "Ledger" },
+          ...(texts
+            ? [
+                {
+                  value: "texts" as const,
+                  label: (
+                    <>
+                      Texts{texts.length > 0 && <span className="ml-1.5 text-faint num">{texts.length}</span>}
+                    </>
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
 
       {tab === "overview" && (
         <div key="overview" className="page-in mt-5 flex flex-col gap-6">
+          {insight && <InsightCard insight={insight} />}
           <section>
             <h2 className="label mb-2">Contact</h2>
             <div className="card divide-y divide-line text-sm">
@@ -292,6 +311,16 @@ export function CustomerProfile({
               {customer.archived ? "Unarchive customer" : "Archive customer"}
             </button>
           </div>
+        </div>
+      )}
+
+      {tab === "texts" && texts && (
+        <div key="texts" className="page-in mt-5">
+          <TextThread
+            messages={texts}
+            hasPhone={!!customer.phone}
+            insightPending={texts.length > 0 && (!insight || (insight.through_message_at ?? "") < texts[texts.length - 1].sent_at)}
+          />
         </div>
       )}
 

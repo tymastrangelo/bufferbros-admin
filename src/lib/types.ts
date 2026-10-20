@@ -334,6 +334,28 @@ export interface MarketingTask {
   done_on: string | null;
 }
 
+// ── Client texts (0025): synced from Tyler's Mac, summarized nightly by Claude ─────
+
+export interface CustomerMessage {
+  id: string;
+  sent_at: string;
+  from_me: boolean;
+  body: string | null;
+  has_attachment: boolean;
+}
+
+export interface CustomerInsight {
+  customer_id: string;
+  updated_at: string;
+  through_message_at: string | null;
+  message_count: number;
+  summary: string | null;
+  facts: { label: string; value: string }[];
+  open_items: { text: string; since: string }[];
+  sentiment: "happy" | "neutral" | "at_risk" | null;
+  next_step: string | null;
+}
+
 export type CompanyLedgerKind = "revenue" | "payout" | "capital" | "expense";
 /** 'gabe' is pre-0015 history; new employee payouts are 'employee' + employee_id. */
 export type PayoutParty = "gabe" | "ceo" | "employee";

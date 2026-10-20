@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { getRole } from "@/lib/auth";
 import { getCatalog, getSettingsMap } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { todayYmd } from "@/lib/time";
-import type { Customer, LedgerEntry, OutreachLog, PaymentRequest, Plan, Vehicle } from "@/lib/types";
+import type { Customer, CustomerInsight, CustomerMessage, LedgerEntry, OutreachLog, PaymentRequest, Plan, Vehicle } from "@/lib/types";
 import type { JobWithCustomer } from "@/components/job-sheet";
 import { CustomerProfile } from "./profile-client";
 
@@ -44,11 +45,17 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
   if (!customerQ.data) notFound();
   const customer = customerQ.data as Customer;
 
-  const [logQ, referralsQ, settings, referrerQ] = await Promise.all([
+  // Texts are owner-only; a previewing owner ("view as Gabe") sees the worker's page.
+  const owner = (await getRole()) === "owner";
+  const [logQ, referralsQ, settings, referrerQ, textsQ, insightQ] = await Promise.all([
     db.from("outreach_log").select("*").eq("customer_id", id).order("occurred_on", { ascending: false }).order("created_at", { ascending: false }).limit(8),
     db.from("customers").select("id,name").eq("referred_by", id).order("created_at"),
     getSettingsMap(),
     customer.referred_by ? db.from("customers").select("name").eq("id", customer.referred_by).single() : Promise.resolve(null),
+    owner
+      ? db.from("customer_messages").select("id,sent_at,from_me,body,has_attachment").eq("customer_id", id).order("sent_at", { ascending: false }).limit(300)
+      : Promise.resolve(null),
+    owner ? db.from("customer_insights").select("*").eq("customer_id", id).maybeSingle() : Promise.resolve(null),
   ]);
 
   return (
@@ -65,6 +72,8 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
       referrals={(referralsQ.data ?? []) as { id: string; name: string }[]}
       referrerName={referrerQ?.data?.name ?? null}
       referralCredit={Number(settings.referral_credit ?? 10)}
+      texts={textsQ ? ((textsQ.data ?? []) as CustomerMessage[]).reverse() : null}
+      insight={(insightQ?.data as CustomerInsight | null) ?? null}
     />
   );
 }

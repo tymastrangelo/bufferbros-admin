@@ -27,6 +27,9 @@ export const FAKE_TABLES = [
   "blocks",
   "customer_not_duplicates",
   "email_signups",
+  // real texts never show in demo mode
+  "customer_messages",
+  "customer_insights",
 ] as const;
 
 export interface CrewMember {
@@ -343,6 +346,7 @@ export function larpDataset(crew: CrewMember[], ceoPct = 10): Dataset {
     customers, vehicles, plans, plan_vehicles, appointments, appointment_vehicles, appointment_employees,
     ledger_entries, company_ledger, customer_balances, expenses, recurring_expenses, payment_requests,
     reminders, outreach_log, blocks: [], customer_not_duplicates: [], email_signups: [],
+    customer_messages: [], customer_insights: [],
   };
   cache = { key, data };
   return data;
