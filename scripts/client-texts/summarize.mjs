@@ -209,23 +209,28 @@ export async function summarizeChanged(call, { limit = 40, only = null, log = co
     const { suggestion: s, ...rest } = card;
     s.text = s.text.replace(/bufferbros\.org\/book(?!ing)/g, "bufferbros.org/booking"); // the model sometimes shortens the link
     const sendOn = /^\d{4}-\d{2}-\d{2}$/.test(s.send_on) ? s.send_on : today;
-    await call("customer_insights?on_conflict=customer_id", {
-      method: "POST",
-      prefer: "resolution=merge-duplicates,return=minimal",
-      body: {
-        customer_id: customerId,
-        updated_at: new Date().toISOString(),
-        through_message_at: through,
-        message_count: counts.get(customerId) ?? 0,
-        ...rest,
-        suggestion_goal: s.goal,
-        suggestion_text: s.goal === "none" ? null : s.text.trim() || null,
-        suggestion_why: s.why || null,
-        suggest_on: s.goal === "none" ? null : sendOn,
-        suggestion_done_at: null, // a fresh draft is unsent
-      },
-    });
-    updated++;
+    try {
+      // One bad card (e.g. a goal a check constraint doesn't allow yet) must not abort the whole run.
+      await call("customer_insights?on_conflict=customer_id", {
+        method: "POST",
+        prefer: "resolution=merge-duplicates,return=minimal",
+        body: {
+          customer_id: customerId,
+          updated_at: new Date().toISOString(),
+          through_message_at: through,
+          message_count: counts.get(customerId) ?? 0,
+          ...rest,
+          suggestion_goal: s.goal,
+          suggestion_text: s.goal === "none" ? null : s.text.trim() || null,
+          suggestion_why: s.why || null,
+          suggest_on: s.goal === "none" ? null : sendOn,
+          suggestion_done_at: null, // a fresh draft is unsent
+        },
+      });
+      updated++;
+    } catch (e) {
+      log(`save failed for ${c.name}: ${e.message}`);
+    }
   }
   return { updated, due: due.length, failed: due.length - updated };
 }
