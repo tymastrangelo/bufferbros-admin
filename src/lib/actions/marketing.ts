@@ -1,8 +1,9 @@
 "use server";
-// activity: Marketing is owner-only (RLS owner_only on campaigns/leads/tasks, page behind
-// requireOwner), so a worker can never trigger these and logActivity would always no-op.
+// activity: Marketing is owner-only — every action below returns early for anyone but the
+// owner (isOwner), so a worker can never trigger these and logActivity would always no-op.
 
 import { revalidatePath } from "next/cache";
+import { getRole } from "@/lib/auth";
 import { normalizeEmail, normalizePhone, phoneDigits } from "@/lib/format";
 import { isChannel, slugify } from "@/lib/marketing";
 import { createClient } from "@/lib/supabase/server";
@@ -11,6 +12,11 @@ import type { CampaignStatus, ChannelId, LeadKind, LeadStatus, TaskPhase } from 
 import type { ActionResult } from "./appointments";
 
 const refresh = () => revalidatePath("/", "layout");
+// Owner-only, enforced here too: server actions are callable endpoints, and customers,
+// expenses and settings are writable by any signed-in user at the RLS layer.
+// getRole() reads as "washer" while the owner previews a worker, so previews can't write either.
+const NOT_OWNER = { ok: false as const, error: "Only the owner can change marketing." };
+const isOwner = async () => (await getRole()) === "owner";
 const num = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? null : Math.max(0, v));
 
 // ── Campaigns ────────────────────────────────────────────────────────────────
@@ -28,6 +34,7 @@ export interface CampaignFields {
 }
 
 export async function saveCampaign(fields: CampaignFields, id?: string | null): Promise<ActionResult> {
+  if (!(await isOwner())) return NOT_OWNER;
   if (!fields.name.trim()) return { ok: false, error: "Give the campaign a name." };
   if (!isChannel(fields.channel)) return { ok: false, error: "Pick a channel." };
   const db = await createClient({ realData: true });
@@ -54,6 +61,7 @@ export async function saveCampaign(fields: CampaignFields, id?: string | null): 
 
 /** Its spend stays in Money as plain marketing expenses; leads and customers just lose the link. */
 export async function deleteCampaign(id: string): Promise<ActionResult> {
+  if (!(await isOwner())) return NOT_OWNER;
   const db = await createClient({ realData: true });
   const { error } = await db.from("marketing_campaigns").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
@@ -63,6 +71,7 @@ export async function deleteCampaign(id: string): Promise<ActionResult> {
 
 /** Ad spend is a marketing expense tagged with its campaign, so it lands in Money too. */
 export async function logAdSpend(fields: { campaignId: string | null; amount: number; occurredOn: string; memo: string }): Promise<ActionResult> {
+  if (!(await isOwner())) return NOT_OWNER;
   if (!(fields.amount > 0)) return { ok: false, error: "Enter an amount greater than zero." };
   const db = await createClient({ realData: true });
   const { error } = await db.from("expenses").insert({
@@ -79,6 +88,7 @@ export async function logAdSpend(fields: { campaignId: string | null; amount: nu
 
 /** What a new customer should cost; channels under it get a Scale call. */
 export async function saveMarketingTarget(dollars: number): Promise<ActionResult> {
+  if (!(await isOwner())) return NOT_OWNER;
   if (!(dollars > 0)) return { ok: false, error: "Enter a target above $0." };
   const db = await createClient({ realData: true });
   const { error } = await db.from("settings").upsert({ key: "marketing_target_cpa", value: String(Math.round(dollars)) });
@@ -101,6 +111,7 @@ export interface LeadFields {
 }
 
 export async function saveLead(fields: LeadFields, id?: string | null): Promise<ActionResult> {
+  if (!(await isOwner())) return NOT_OWNER;
   if (!fields.name?.trim() && !fields.phone?.trim() && !fields.email?.trim()) {
     return { ok: false, error: "Add a name, phone or email so you can follow up." };
   }
@@ -125,6 +136,7 @@ export async function saveLead(fields: LeadFields, id?: string | null): Promise<
 
 /** Moving a lead past "new" stamps the first reply time (speed to lead), once. */
 export async function setLeadStatus(id: string, status: LeadStatus, lostReason?: string | null): Promise<ActionResult> {
+  if (!(await isOwner())) return NOT_OWNER;
   const db = await createClient({ realData: true });
   const { data: before } = await db.from("leads").select("contacted_at").eq("id", id).maybeSingle();
   const { error } = await db
@@ -146,6 +158,7 @@ export async function setLeadStatus(id: string, status: LeadStatus, lostReason?:
  * Returns the customer id so the UI can open their profile to book.
  */
 export async function convertLead(id: string, channel: ChannelId | null, campaignId: string | null): Promise<ActionResult> {
+  if (!(await isOwner())) return NOT_OWNER;
   const db = await createClient({ realData: true });
   const { data: lead, error } = await db.from("leads").select("*").eq("id", id).single();
   if (error || !lead) return { ok: false, error: error?.message ?? "Lead not found." };
@@ -189,6 +202,7 @@ export async function convertLead(id: string, channel: ChannelId | null, campaig
 }
 
 export async function deleteLead(id: string): Promise<ActionResult> {
+  if (!(await isOwner())) return NOT_OWNER;
   const db = await createClient({ realData: true });
   const { error } = await db.from("leads").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
@@ -199,6 +213,7 @@ export async function deleteLead(id: string): Promise<ActionResult> {
 // ── Customer source ──────────────────────────────────────────────────────────
 
 export async function setCustomerSource(customerId: string, channel: ChannelId | null, campaignId: string | null = null): Promise<ActionResult> {
+  if (!(await isOwner())) return NOT_OWNER;
   if (channel !== null && !isChannel(channel)) return { ok: false, error: "Unknown channel." };
   const db = await createClient({ realData: true });
   const { error } = await db
@@ -213,6 +228,7 @@ export async function setCustomerSource(customerId: string, channel: ChannelId |
 // ── Playbook ─────────────────────────────────────────────────────────────────
 
 export async function setTaskDone(id: string, done: boolean): Promise<ActionResult> {
+  if (!(await isOwner())) return NOT_OWNER;
   const db = await createClient({ realData: true });
   const { error } = await db
     .from("marketing_tasks")
@@ -232,6 +248,7 @@ export interface TaskFields {
 }
 
 export async function saveTask(fields: TaskFields, id?: string | null): Promise<ActionResult> {
+  if (!(await isOwner())) return NOT_OWNER;
   if (!fields.title.trim()) return { ok: false, error: "Give the step a title." };
   const db = await createClient({ realData: true });
   const row = {
@@ -254,6 +271,7 @@ export async function saveTask(fields: TaskFields, id?: string | null): Promise<
 }
 
 export async function deleteTask(id: string): Promise<ActionResult> {
+  if (!(await isOwner())) return NOT_OWNER;
   const db = await createClient({ realData: true });
   const { error } = await db.from("marketing_tasks").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
