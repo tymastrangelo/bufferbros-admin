@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { getRole } from "@/lib/auth";
+import { reseedChecklist, seedChecklist } from "@/lib/checklist";
+import { getCatalog } from "@/lib/queries";
 import { cancelledEmail, confirmedEmail, sendEmail, updatedEmail, type JobEmailInfo } from "@/lib/email";
 import { normalizeEmail, normalizePhone } from "@/lib/format";
 import { syncAppointmentToGcal } from "@/lib/gcal";
@@ -52,6 +54,10 @@ export interface NewAppointment {
   notify?: boolean;
   /** Ceramic coating job: enforces the lead-time rule and flags the deposit in the push. */
   ceramic?: boolean;
+  /** Gate code / parking / water — saved on the customer so every job shows it. */
+  siteNotes?: string | null;
+  /** One-off new customer: the car they booked, created with them. */
+  newVehicle?: { size_id: string; kind: "car" | "boat"; make?: string | null; model?: string | null; year?: number | null; color?: string | null; plate?: string | null; length_ft?: number | null } | null;
 }
 
 const fmtDur = (mins: number) => {
@@ -100,16 +106,28 @@ export async function createAppointment(input: NewAppointment): Promise<ActionRe
           phone,
           email,
           addresses: input.address?.trim() ? [{ label: "Home", address: input.address.trim() }] : [],
+          site_notes: input.siteNotes?.trim() || null,
           source: "manual",
         })
         .select("id")
         .single();
       if (created) {
         customerId = created.id;
-        if (input.sizeId) {
+        const nv = input.newVehicle ?? (input.sizeId ? { size_id: input.sizeId, kind: "car" as const } : null);
+        if (nv) {
           const { data: v } = await db
             .from("vehicles")
-            .insert({ customer_id: customerId, size_id: input.sizeId })
+            .insert({
+              customer_id: customerId,
+              size_id: nv.size_id,
+              kind: nv.kind,
+              make: nv.make?.trim() || null,
+              model: nv.model?.trim() || null,
+              year: nv.year ?? null,
+              color: nv.color?.trim() || null,
+              plate: nv.plate?.trim().toUpperCase() || null,
+              length_ft: nv.length_ft ?? null,
+            })
             .select("id")
             .single();
           if (v) vehicleIds = [v.id];
@@ -117,6 +135,12 @@ export async function createAppointment(input: NewAppointment): Promise<ActionRe
       }
       // insert failure: fall through and book as a plain one-off — never lose the booking
     }
+  }
+  // Site notes live on the customer (gate code, parking) — save edits made while booking.
+  if (customerId && input.siteNotes !== undefined) {
+    const { data: cur } = await db.from("customers").select("site_notes").eq("id", customerId).maybeSingle();
+    const next = input.siteNotes?.trim() || null;
+    if (cur && (cur.site_notes ?? null) !== next) await db.from("customers").update({ site_notes: next }).eq("id", customerId);
   }
   const { data, error } = await db.rpc("book_appointment", {
     p_date: input.date,
@@ -143,6 +167,13 @@ export async function createAppointment(input: NewAppointment): Promise<ActionRe
   if (error) return { ok: false, error: friendly(error.message) };
 
   const appt = data as Appointment;
+  // What's included, ready to tick on site (service steps + one per add-on).
+  {
+    const catalog = await getCatalog();
+    const steps = input.ceramic ? catalog.checklists.ceramic : /^boat/i.test(input.serviceName ?? "") ? [] : catalog.checklists.standard;
+    const checklist = seedChecklist(steps, input.addons ?? []);
+    if (checklist.length) await db.from("appointments").update({ checklist }).eq("id", appt.id);
+  }
   if (vehicleIds.length) {
     // Booking exists either way — a failed link just loses the per-car list, not the job.
     const { error: vehErr } = await db
@@ -377,7 +408,7 @@ export async function adjustJobTimes(
 export async function completeAppointment(
   id: string,
   finalPrice: number,
-  payment?: { amount: number; method: PaymentMethod; memo?: string } | null,
+  payment?: { amount: number; method: PaymentMethod; memo?: string; tip?: number } | null,
   note?: string | null,
   /** Email a Stripe checkout link for the final price instead of collecting now. */
   stripeLink = false,
@@ -401,9 +432,8 @@ export async function completeAppointment(
     empId = mine?.id ?? appt.employee_id ?? null;
   }
   const self = keepAll && role === "owner" && !empId;
-  // Attribution changed at completion (e.g. pre-assigned Gabe but Tyler did it):
-  // keep the assignment rows matching so nothing shows as still on Gabe's plate.
-  if (empId !== appt.employee_id) await syncAssignees(db, id, empId ? [empId] : []);
+  // Whoever gets paid for it was on it: add them to the assignees (never drop the others).
+  await ensureAssignee(db, id, empId);
   const completedAt = new Date();
   // self_done/employee_id land before the payment insert so the mirror trigger splits it right.
   const { error } = await db
@@ -496,6 +526,7 @@ export async function completeAppointment(
         method: payment.method,
         occurred_on: appt.date,
         memo: payment.memo || null,
+        tip: Math.max(0, Number(payment.tip ?? 0)),
         collected_by: role, // was silently defaulting to 'owner' even when Gabe collected
         // Self-done + owner-collected: no Gabe transfer exists, so it's born settled.
         ...(self ? { settled_on: appt.date } : {}),
@@ -546,52 +577,77 @@ export async function setJobAttribution(
     .update({ employee_id: employeeId, self_done: keepAll && !employeeId })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
-  await syncAssignees(db, id, employeeId ? [employeeId] : []);
+  await ensureAssignee(db, id, employeeId);
   refresh();
   return { ok: true, id };
 }
 
-/** Keep the scheduling assignment rows in step with the money-side attribution. */
-async function syncAssignees(db: Awaited<ReturnType<typeof createClient>>, id: string, employeeIds: string[]) {
-  await db.from("appointment_employees").delete().eq("appointment_id", id);
-  if (employeeIds.length) {
-    const { error } = await db
-      .from("appointment_employees")
-      .insert(employeeIds.map((employee_id) => ({ appointment_id: id, employee_id })));
-    if (error) console.error("appointment_employees insert:", error.message);
-  }
+/** The payee is always among the assignees; the other assignees stay. */
+async function ensureAssignee(db: Awaited<ReturnType<typeof createClient>>, id: string, employeeId: string | null) {
+  if (!employeeId) return;
+  const { error } = await db.from("appointment_employees").upsert({ appointment_id: id, employee_id: employeeId }, { onConflict: "appointment_id,employee_id" });
+  if (error) console.error("appointment_employees upsert:", error.message);
 }
 
-/** Owner confirms a pending web booking — possibly at an edited time/price. */
-export async function approveAppointment(
-  id: string,
-  next: { date: string; startMin: number; durationMin: number; price: number },
-  notifyCustomer: boolean
-): Promise<ActionResult> {
+/**
+ * Owner-only: who's on a scheduled job (scheduling side). Replaces the assignment rows
+ * and points the payee default at the first assignee, the same way booking does. [] = the owner.
+ */
+export async function setAssignees(id: string, employeeIds: string[]): Promise<ActionResult> {
+  if ((await getRole()) !== "owner") return { ok: false, error: "Only the owner can assign jobs." };
   const db = await createClient();
-  const before = await getAppt(id);
-  if (!before) return { ok: false, error: "Appointment not found." };
-  if (before.status !== "pending") return { ok: false, error: "This booking was already handled." };
+  const appt = await getAppt(id);
+  if (!appt) return { ok: false, error: "Appointment not found." };
+  if (appt.status === "completed") return { ok: false, error: "Use “Who did it” on a completed job." };
+  const ids = Array.from(new Set(employeeIds));
+  const { data: emps } = ids.length ? await db.from("employees").select("id,name").in("id", ids) : { data: [] };
+  if ((emps?.length ?? 0) !== ids.length) return { ok: false, error: "One of those workers no longer exists." };
 
-  const { error } = await db
-    .from("appointments")
-    .update({ date: next.date, start_min: next.startMin, duration_min: next.durationMin, price: next.price, status: "scheduled" })
-    .eq("id", id);
+  await db.from("appointment_employees").delete().eq("appointment_id", id);
+  if (ids.length) {
+    const { error } = await db.from("appointment_employees").insert(ids.map((employee_id) => ({ appointment_id: id, employee_id })));
+    if (error) return { ok: false, error: error.message };
+  }
+  const { error } = await db.from("appointments").update({ employee_id: ids[0] ?? null, self_done: false }).eq("id", id);
   if (error) return { ok: false, error: error.message };
 
-  const appt = { ...before, date: next.date, start_min: next.startMin, duration_min: next.durationMin, price: next.price };
   const contact = await resolveContact(appt);
-  if (notifyCustomer && contact.email) {
-    const { subject, html } = confirmedEmail(emailInfo(appt, contact.name));
-    const to = contact.email;
-    after(() => sendEmail(to, subject, html));
-  }
-  const push = `${contact.name} · ${whenLabel(appt.date, appt.start_min)} · ${appt.service_name} · $${appt.price}`;
-  after(() => sendPush("washer", "New job on the schedule", push, "/calendar", { tags: ["calendar"] }));
-  await logActivity(`approved ${contact.name}'s web booking`, [push], "/calendar", { tags: ["calendar"] });
-  after(() => syncAppointmentToGcal(id));
+  const names = (emps ?? []).map((e) => e.name);
+  await logActivity(
+    `assigned ${contact.name}'s job`,
+    [`Now: ${names.length ? names.join(" + ") : "Me"}`, whenLabel(appt.date, appt.start_min)],
+    `/calendar?view=day&d=${appt.date}`,
+    { tags: ["calendar"] }
+  );
   refresh();
   return { ok: true, id };
+}
+
+/** Tick / untick one checklist item on a job. Anyone signed in (workers do this on site). */
+export async function setChecklistItem(id: string, itemId: string, done: boolean): Promise<ActionResult> {
+  // activity: ticking is noise — completion pushes the summary instead
+  const db = await createClient();
+  const appt = await getAppt(id);
+  if (!appt) return { ok: false, error: "Appointment not found." };
+  const checklist = (appt.checklist ?? []).map((i) => (i.id === itemId ? { ...i, done } : i));
+  const { error } = await db.from("appointments").update({ checklist }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  refresh();
+  return { ok: true, id };
+}
+
+/** Gate code / parking / water — lives on the customer so every job shows it. */
+export async function setSiteNotes(customerId: string, notes: string): Promise<ActionResult> {
+  const db = await createClient();
+  const next = notes.trim().slice(0, 500) || null;
+  const { data: cust } = await db.from("customers").select("name,site_notes").eq("id", customerId).maybeSingle();
+  if (!cust) return { ok: false, error: "Customer not found." };
+  if ((cust.site_notes ?? null) === next) return { ok: true, id: customerId };
+  const { error } = await db.from("customers").update({ site_notes: next }).eq("id", customerId);
+  if (error) return { ok: false, error: error.message };
+  await logActivity(`updated ${cust.name}'s site notes`, [next ? next.slice(0, 80) : "Cleared"], `/customers/${customerId}`, { tags: ["pencil2"], priority: 3 });
+  refresh();
+  return { ok: true, id: customerId };
 }
 
 export async function updateAppointment(
@@ -618,9 +674,24 @@ export async function updateAppointment(
 ): Promise<ActionResult> {
   const db = await createClient();
   const before = await getAppt(id);
+  if (!before) return { ok: false, error: "Appointment not found." };
   const { error } = await db
     .from("appointments")
-    .update(vehicleIds ? { ...fields, vehicle_id: vehicleIds[0] ?? null } : fields)
+    .update({
+      ...(vehicleIds ? { ...fields, vehicle_id: vehicleIds[0] ?? null } : fields),
+      // add-ons changed → the checklist follows; ticks on surviving items stay
+      ...("addons" in fields && fields.addons
+        ? {
+            checklist: reseedChecklist(
+              before.checklist ?? [],
+              seedChecklist(
+                (before.checklist ?? []).filter((i) => i.id.startsWith("svc:")).map((i) => i.name),
+                fields.addons
+              )
+            ),
+          }
+        : {}),
+    })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
   if (before) {

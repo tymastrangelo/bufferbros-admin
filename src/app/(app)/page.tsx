@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { getRole } from "@/lib/auth";
-import { netOwed, type PayoutRow } from "@/lib/payouts";
+import { netOwed, payeeOf, type PayoutRow } from "@/lib/payouts";
 import { type OutreachCustomer } from "@/lib/outreach";
 import { liveSuggestions } from "@/lib/suggestions";
 import { findDuplicates, pairKey } from "@/lib/duplicates";
@@ -22,13 +22,12 @@ export default async function TodayPage() {
   const weekStart = addDays(today, -weekdayOf(today)); // Sunday
   const monthStart = `${today.slice(0, 7)}-01`;
 
-  const [jobsQ, weekPayQ, monthPayQ, doneQ, balancesQ, plansQ, unlinkedQ, planApptsQ, pendingQ, catalog, payoutQ, settings, employeesQ, remindersQ] = await Promise.all([
+  const [jobsQ, weekPayQ, monthPayQ, doneQ, balancesQ, plansQ, unlinkedQ, planApptsQ, catalog, payoutQ, settings, employeesQ, remindersQ, frontedQ] = await Promise.all([
     db
       .from("appointments")
-      .select("*, customers(id,name,phone,email,stripe_payments)")
+      .select("*, customers(id,name,phone,email,stripe_payments,site_notes), appointment_employees(employee_id), appointment_vehicles(vehicles(*))")
       .eq("date", today)
       .neq("status", "cancelled")
-      .neq("status", "pending") // web bookings awaiting approval live in the owner's attention list
       .order("start_min"),
     db.from("ledger_entries").select("kind,amount").gte("occurred_on", weekStart).in("kind", ["payment", "credit", "refund"]),
     db.from("ledger_entries").select("kind,amount").gte("occurred_on", monthStart).in("kind", ["payment", "credit", "refund"]),
@@ -41,27 +40,22 @@ export default async function TodayPage() {
     db.from("plans").select("*, customers(name)").eq("status", "active"),
     db
       .from("appointments")
-      .select("*, customers(id,name,phone,email,stripe_payments)")
+      .select("*, customers(id,name,phone,email,stripe_payments,site_notes), appointment_employees(employee_id), appointment_vehicles(vehicles(*))")
       .is("customer_id", null)
       .eq("status", "scheduled")
       .order("date")
       .limit(8),
     db.from("appointments").select("plan_id").eq("status", "scheduled").gte("date", today).not("plan_id", "is", null),
-    db
-      .from("appointments")
-      .select("*, customers(id,name,phone,email,stripe_payments)")
-      .eq("status", "pending")
-      .order("date")
-      .order("start_min"),
     getCatalog(),
     db
       .from("ledger_entries")
-      .select("amount,processor_fee,collected_by,settled_on,appointments(self_done,employee_id)")
+      .select("amount,processor_fee,tip,collected_by,settled_on,employee_id,plan_id,appointments(self_done,employee_id,plan_id)")
       .in("kind", ["payment", "credit"])
       .is("settled_on", null),
     getSettingsMap(),
     db.from("employees").select("id,name,split_pct,active").order("created_at"),
     db.from("reminders").select("*, customers(id,name,phone)").is("done_at", null).order("due_on").limit(10),
+    db.from("expenses").select("amount").not("paid_by_employee_id", "is", null).is("reimbursed_on", null),
   ]);
 
   // Client-relations queue: who's due for a reach-out / a review ask.
@@ -111,29 +105,36 @@ export default async function TodayPage() {
   }));
 
   const sum = (rows: { amount: number }[] | null) => (rows ?? []).reduce((s, r) => s + Number(r.amount), 0);
+  const plans = (plansQ.data ?? []) as (Plan & { customers: { name: string } | null })[];
   // Net of the owner <-> workers split across unsettled payments: + = workers owe Tyler.
-  // Each payment runs at its job's worker's cut; unlinked ones at the default worker's.
+  // Each payment runs at its payee's cut (job's worker → payment's worker → plan's worker);
+  // a payment with no payee pays nobody and stays out of the net (0029).
   const employees = ((employeesQ.data ?? []) as { id: string; name: string; split_pct: number; active: boolean }[]).map(
     (e) => ({ ...e, split_pct: Number(e.split_pct) })
   );
-  const defaultEmp = employees.find((e) => e.id === settings.default_employee_id) ?? employees[0];
-  const pctFor = (employeeId: string | null) =>
-    (employees.find((e) => e.id === employeeId) ?? defaultEmp)?.split_pct ?? Number(settings.split_washer_pct ?? 60);
+  const planWorker = new Map(plans.filter((p) => p.employee_id).map((p) => [p.id, p.employee_id as string]));
   const payoutRows: PayoutRow[] = (
-    (payoutQ.data ?? []) as unknown as { amount: number; processor_fee: number; collected_by: "owner" | "washer"; settled_on: string | null; appointments: { self_done: boolean; employee_id: string | null } | null }[]
-  ).map((r) => ({
-    amount: Number(r.amount),
-    fee: Number(r.processor_fee ?? 0),
-    collectedBy: r.collected_by,
-    settledOn: r.settled_on,
-    selfDone: !!r.appointments?.self_done,
-    pct: pctFor(r.appointments?.employee_id ?? null),
-  }));
-  const payoutNet = Math.round(netOwed(payoutRows, Number(settings.split_washer_pct ?? 60)).net);
+    (payoutQ.data ?? []) as unknown as {
+      amount: number;
+      processor_fee: number;
+      tip: number;
+      collected_by: "owner" | "washer";
+      settled_on: string | null;
+      employee_id: string | null;
+      plan_id: string | null;
+      appointments: { self_done: boolean; employee_id: string | null; plan_id: string | null } | null;
+    }[]
+  ).flatMap((r) => {
+    const payee = payeeOf(r, (id) => planWorker.get(id) ?? null);
+    const emp = employees.find((e) => e.id === payee);
+    if (!emp) return [];
+    return [{ amount: Number(r.amount), fee: Number(r.processor_fee ?? 0), tip: Number(r.tip ?? 0), collectedBy: r.collected_by, settledOn: r.settled_on, selfDone: !!r.appointments?.self_done, pct: emp.split_pct }];
+  });
+  const frontedRows = ((frontedQ.data ?? []) as { amount: number }[]).map((f) => ({ amount: Number(f.amount), reimbursedOn: null }));
+  const payoutNet = Math.round(netOwed(payoutRows, Number(settings.split_washer_pct ?? 60), frontedRows).net);
   const activeWorkers = employees.filter((e) => e.active);
   const workerLabel = activeWorkers.length === 1 ? activeWorkers[0].name : "Workers";
   const scheduledPlanIds = new Set((planApptsQ.data ?? []).map((r) => r.plan_id));
-  const plans = (plansQ.data ?? []) as (Plan & { customers: { name: string } | null })[];
   const plansWithoutVisit = plans
     .filter((p) => !scheduledPlanIds.has(p.id))
     .map((p) => ({ id: p.id, customerName: p.customers?.name ?? "Unknown", cadence: p.cadence }));
@@ -144,7 +145,6 @@ export default async function TodayPage() {
   }));
 
   const attention: AttentionData = {
-    pending: (pendingQ.data ?? []) as JobWithCustomer[],
     unlinked: (unlinkedQ.data ?? []) as JobWithCustomer[],
     owed: owed.slice(0, 6),
     plansWithoutVisit: plansWithoutVisit.slice(0, 6),

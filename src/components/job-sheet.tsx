@@ -7,37 +7,45 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   adjustJobTimes,
-  approveAppointment,
   cancelAppointment,
   completeAppointment,
   createCustomerFromAppointment,
   linkAppointmentToCustomer,
   rescheduleAppointment,
   setAppointmentStatus,
+  setAssignees,
   startAppointment,
   updateAppointment,
 } from "@/lib/actions/appointments";
 import { useOwner } from "@/lib/use-owner";
+import { useToast } from "./toast";
 import { Wheel } from "@/components/brand";
 import { addonQuote, computeQuote, computeVehiclesQuote, type Catalog } from "@/lib/catalog";
 import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { fmtDateShort, minToLabel, whenLabel } from "@/lib/time";
 import { setJobAttribution } from "@/lib/actions/appointments";
-import { PAYMENT_METHODS, SIZES, sizeLabel, vehicleLabel, type Appointment, type Customer, type Employee, type PaymentMethod, type SizeId, type Vehicle } from "@/lib/types";
-import { IconCheck, IconMail, IconMessage, IconPhone, IconPin, IconPlay } from "./icons";
+import { PAYMENT_METHODS, SIZES, sizeLabel, vehicleLabel, type Appointment, type Customer, type PaymentMethod, type SizeId, type Vehicle } from "@/lib/types";
+import { IconMail, IconMessage, IconPhone, IconPin, IconPlay } from "./icons";
 import { CustomerPicker, type PickedCustomer } from "./customer-picker";
+import { WhoPicker, type EmployeeLite } from "./who-picker";
+import { ChecklistSection, MoneySection, TimelineSection, VehiclesSection, WhereSection } from "./job-detail-sections";
+import { JobPhotos } from "./job-photos";
+import { checklistProgress } from "@/lib/checklist";
 import { VehiclePicker } from "./vehicle-picker";
 import { SlotPicker } from "./slot-picker";
-import { Busy, ErrorNote, Field, Sheet, StatusChip } from "./ui";
+import { Busy, ConfirmPanel, ErrorNote, Field, Sheet, StatusChip } from "./ui";
 
 export type JobWithCustomer = Appointment & {
-  customers: Pick<Customer, "id" | "name" | "phone" | "email" | "stripe_payments"> | null;
+  customers: (Pick<Customer, "id" | "name" | "phone" | "email" | "stripe_payments"> & { site_notes?: string | null }) | null;
+  /** The cars/boats on the visit (pages that select appointment_vehicles(vehicles(*))). */
+  appointment_vehicles?: { vehicles: Vehicle | null }[];
+  /** Who's on the job (scheduling side). Pages that don't select it fall back to employee_id. */
+  appointment_employees?: { employee_id: string }[];
 };
 
-type Panel = "none" | "approve" | "complete" | "reschedule" | "edit" | "cancel" | "link" | "times" | "who";
+type Panel = "none" | "complete" | "reschedule" | "edit" | "cancel" | "link" | "times" | "who";
 
-type EmployeeLite = Pick<Employee, "id" | "name" | "active">;
 
 const fmtDur = (mins: number) => {
   const h = Math.floor(mins / 60);
@@ -59,11 +67,27 @@ export function JobSheet({
 }) {
   const router = useRouter();
   const owner = useOwner();
+  const toast = useToast();
   const [panel, setPanel] = useState<Panel>("none");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // Who-did-it chips (owner only; RLS gives washers just their own row anyway).
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
+  const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
+  useEffect(() => {
+    if (owner) return;
+    let stale = false;
+    const db = createClient();
+    db.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      db.from("employees").select("id").eq("user_id", user.id).maybeSingle().then(({ data }) => {
+        if (!stale) setMyEmployeeId(data?.id ?? null);
+      });
+    });
+    return () => {
+      stale = true;
+    };
+  }, [owner]);
   useEffect(() => {
     if (!owner) return;
     let stale = false;
@@ -90,9 +114,18 @@ export function JobSheet({
   if (!job) return null;
 
   const displayName = job.customers?.name ?? job.contact_name ?? "Unknown";
+  const assigneeIds = job.appointment_employees?.map((a) => a.employee_id) ?? (job.employee_id ? [job.employee_id] : []);
+  const vehicles = (job.appointment_vehicles ?? []).map((r) => r.vehicles).filter(Boolean) as Vehicle[];
   const phone = job.customers?.phone ?? job.contact_phone;
   const email = job.customers?.email ?? job.contact_email;
   const unlinked = !job.customer_id;
+
+  /** Undo for cancel / no-show: back on the schedule, then re-render the route. */
+  async function putBack(id: string) {
+    const res = await setAppointmentStatus(id, "scheduled");
+    if (res.ok) router.refresh();
+    return res;
+  }
 
   async function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
     setError(null);
@@ -114,9 +147,14 @@ export function JobSheet({
         <div>
           <div className="flex items-center gap-2 flex-wrap">
             <StatusChip status={job.status} />
-            {job.employee_id && employees.some((e) => e.id === job.employee_id) && (
-              <span className="chip">{employees.find((e) => e.id === job.employee_id)!.name}</span>
-            )}
+            {assigneeIds
+              .map((id) => employees.find((e) => e.id === id))
+              .filter(Boolean)
+              .map((e) => (
+                <span key={e!.id} className="chip">
+                  {e!.name}
+                </span>
+              ))}
             {owner && job.self_done && <span className="chip chip-ok">Your job — kept in full</span>}
             {job.plan_id && <span className="chip chip-brand">plan</span>}
             {job.source === "web" && <span className="chip">web booking</span>}
@@ -132,6 +170,9 @@ export function JobSheet({
             <p className="text-sm text-ink-2 mt-0.5">+ {job.addons.map((a) => a.name).join(", ")}</p>
           )}
           {job.notes && <p className="mt-2 text-sm note note-warn">{job.notes}</p>}
+          <div className="mt-2">
+            <VehiclesSection vehicles={vehicles} sizeLabel={job.size_label ?? (job.size_id ? sizeLabel(job.size_id) : null)} />
+          </div>
         </div>
 
         {/* Contact links */}
@@ -158,13 +199,8 @@ export function JobSheet({
             <span className="text-label">Email</span>
           </a>
         </div>
-        {(phone || job.address) && (
-          <p className="text-dense text-ink-2 -mt-2">
-            {phone && <span className="num">{fmtPhone(phone)}</span>}
-            {phone && job.address && " · "}
-            {job.address}
-          </p>
-        )}
+        {phone && <p className="text-dense text-ink-2 -mt-2 num">{fmtPhone(phone)}</p>}
+        <WhereSection address={job.address} customerId={job.customer_id} siteNotes={job.customers?.site_notes ?? null} />
 
         {unlinked && panel !== "link" && (
           <button className="btn btn-sm self-start" onClick={() => setPanel("link")}>
@@ -177,24 +213,22 @@ export function JobSheet({
           </Link>
         )}
 
+        <ChecklistSection appointmentId={job.id} items={job.checklist ?? []} readOnly={job.status === "cancelled"} />
+        <div className="flex flex-col gap-1.5">
+          <p className="label">Photos</p>
+          <JobPhotos appointmentId={job.id} owner={owner} customerPhone={phone ?? null} />
+        </div>
+        {(owner || (myEmployeeId && job.employee_id === myEmployeeId)) && job.customer_id && (
+          <div className="flex flex-col gap-1.5">
+            <p className="label">Money</p>
+            <MoneySection appointmentId={job.id} customerId={job.customer_id} price={Number(job.price)} />
+          </div>
+        )}
+        <TimelineSection appointmentId={job.id} names={Object.fromEntries(employees.map((e) => [e.id, e.name]))} />
+
         <ErrorNote>{error}</ErrorNote>
 
         {/* Primary actions */}
-        {job.status === "pending" && panel === "none" && (
-          <div className="flex flex-col gap-2">
-            <button className="btn btn-primary h-11" onClick={() => setPanel("approve")}>
-              Review &amp; approve…
-            </button>
-            <div className="grid grid-cols-2 gap-2">
-              <button className="btn" onClick={() => setPanel("edit")}>
-                Edit details
-              </button>
-              <button className="btn btn-danger" onClick={() => setPanel("cancel")}>
-                Decline…
-              </button>
-            </div>
-          </div>
-        )}
         {job.status === "scheduled" && panel === "none" && (
           <div className="flex flex-col gap-2">
             {!job.started_at ? (
@@ -231,7 +265,13 @@ export function JobSheet({
             <button
               className="btn btn-ghost btn-sm self-center text-ink-2"
               disabled={pending}
-              onClick={() => run(() => setAppointmentStatus(job.id, "no_show")).then((ok) => ok && onClose())}
+              onClick={() =>
+                run(() => setAppointmentStatus(job.id, "no_show")).then((ok) => {
+                  if (!ok) return;
+                  onClose();
+                  toast({ title: `${displayName} marked no-show`, tone: "warn", undo: () => putBack(job.id) });
+                })
+              }
             >
               Mark as no-show
             </button>
@@ -252,7 +292,6 @@ export function JobSheet({
               Completed {job.completed_at ? `· charged ${money(Number(job.price))}` : ""}. Adjust money on the
               customer&apos;s ledger if needed.
             </p>
-            {job.customer_id && <PaymentStatus job={job} />}
             {job.completed_at && (
               <p className="note text-dense num">
                 {job.started_at ? (
@@ -304,17 +343,6 @@ export function JobSheet({
           </div>
         )}
 
-        {panel === "approve" && (
-          <ApprovePanel
-            job={job}
-            hasEmail={!!email}
-            pending={pending}
-            onCancel={() => setPanel("none")}
-            onSubmit={(next, notify) =>
-              run(() => approveAppointment(job.id, next, notify)).then((ok) => ok && onClose())
-            }
-          />
-        )}
         {panel === "complete" && (
           <CompletePanel
             job={job}
@@ -327,7 +355,7 @@ export function JobSheet({
             }
           />
         )}
-        {panel === "who" && (
+        {panel === "who" && job.status === "completed" && (
           <WhoPanel
             job={job}
             employees={employees}
@@ -336,6 +364,15 @@ export function JobSheet({
             onSubmit={(employeeId, keepAll) =>
               run(() => setJobAttribution(job.id, employeeId, keepAll)).then((ok) => ok && setPanel("none"))
             }
+          />
+        )}
+        {panel === "who" && job.status !== "completed" && (
+          <AssignPanel
+            initial={assigneeIds}
+            employees={employees}
+            pending={pending}
+            onCancel={() => setPanel("none")}
+            onSubmit={(ids) => run(() => setAssignees(job.id, ids)).then((ok) => ok && setPanel("none"))}
           />
         )}
         {panel === "reschedule" && (
@@ -363,10 +400,15 @@ export function JobSheet({
         {panel === "cancel" && (
           <CancelPanel
             hasEmail={!!email}
-            decline={job.status === "pending"}
             pending={pending}
             onBack={() => setPanel("none")}
-            onSubmit={(notify) => run(() => cancelAppointment(job.id, notify)).then((ok) => ok && onClose())}
+            onSubmit={(notify) =>
+              run(() => cancelAppointment(job.id, notify)).then((ok) => {
+                if (!ok) return;
+                onClose();
+                toast({ title: `${displayName}'s job cancelled`, detail: whenLabel(job.date, job.start_min), undo: () => putBack(job.id) });
+              })
+            }
           />
         )}
         {panel === "times" && (
@@ -395,57 +437,6 @@ export function JobSheet({
 
 type PayMode = "now" | "stripe" | "balance";
 
-/**
- * Owner-only "who did this detail" chips. Picking "Me" reveals the
- * keep-all-the-money box — checked, the worker/business split is skipped and the
- * whole payment stays with the business.
- */
-function WhoPicker({
-  employees,
-  value,
-  keepAll,
-  onChange,
-  label = "Who did this detail?",
-}: {
-  employees: EmployeeLite[];
-  value: string | null;
-  keepAll: boolean;
-  onChange: (employeeId: string | null, keepAll: boolean) => void;
-  label?: string;
-}) {
-  // Active workers, plus the current assignee even if since deactivated.
-  const options = employees.filter((e) => e.active || e.id === value);
-  return (
-    <Field label={label}>
-      <div className="grid grid-cols-3 gap-1.5">
-        {options.map((e) => (
-          <button
-            key={e.id}
-            type="button"
-            onClick={() => onChange(e.id, false)}
-            className="choice min-h-9 px-1 py-1.5 text-dense" aria-pressed={value === e.id}
-          >
-            {e.name}
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => onChange(null, true)}
-          className="choice min-h-9 px-1 py-1.5 text-dense" aria-pressed={value === null}
-        >
-          Me
-        </button>
-      </div>
-      {value === null && (
-        <label className="mt-2 flex items-center gap-2.5 text-sm font-medium">
-          <input type="checkbox" checked={keepAll} onChange={(e) => onChange(null, e.target.checked)} />
-          Keep all the money — skip the worker split
-        </label>
-      )}
-    </Field>
-  );
-}
-
 function CompletePanel({
   job,
   owner,
@@ -461,7 +452,7 @@ function CompletePanel({
   onCancel: () => void;
   onSubmit: (
     finalPrice: number,
-    payment: { amount: number; method: PaymentMethod; memo?: string } | null,
+    payment: { amount: number; method: PaymentMethod; memo?: string; tip?: number } | null,
     note: string,
     stripeLink: boolean,
     keepAll: boolean,
@@ -483,7 +474,9 @@ function CompletePanel({
   const [amount, setAmount] = useState(String(job.price));
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [memo, setMemo] = useState("");
+  const [tip, setTip] = useState("");
   const [note, setNote] = useState("");
+  const todo = checklistProgress(job.checklist ?? []);
 
   const MODES: { id: PayMode; label: string; disabled?: boolean }[] = [
     { id: "now", label: "Collected now" },
@@ -494,6 +487,11 @@ function CompletePanel({
   return (
     <div className="well p-4 flex flex-col gap-3">
       <p className="label">Finalize job</p>
+      {todo.total > 0 && todo.done < todo.total && (
+        <p className="note note-warn text-dense">
+          {todo.total - todo.done} of {todo.total} checklist items not ticked — fine if they were done, just saying.
+        </p>
+      )}
       <Field label="Final price" hint={Number(finalPrice) !== Number(job.price) ? `Quoted ${money(Number(job.price))}` : undefined}>
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-faint">$</span>
@@ -539,12 +537,11 @@ function CompletePanel({
                   </option>
                 ))}
               </select>
-              <input
-                className="input col-span-2"
-                placeholder="Memo (add “tip” if it includes one)"
-                value={memo}
-                onChange={(e) => setMemo(e.target.value)}
-              />
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-faint">$</span>
+                <input type="number" inputMode="decimal" min={0} className="input num pl-7" placeholder="Tip" value={tip} onChange={(e) => setTip(e.target.value)} aria-label="Tip" />
+              </div>
+              <input className="input" placeholder="Memo" value={memo} onChange={(e) => setMemo(e.target.value)} aria-label="Memo" />
               <p className="col-span-2 text-xs text-faint -mt-1">
                 Money already in hand — cash, Zelle, or a card you ran yourself.
               </p>
@@ -587,7 +584,7 @@ function CompletePanel({
           onClick={() =>
             onSubmit(
               Number(finalPrice),
-              payMode === "now" && job.customer_id ? { amount: Number(amount), method, memo } : null,
+              payMode === "now" && job.customer_id ? { amount: Number(amount), method, memo, tip: Number(tip) || 0 } : null,
               note.trim(),
               payMode === "stripe",
               keepAll,
@@ -612,55 +609,6 @@ function CompletePanel({
   );
 }
 
-/** Live paid/unpaid state for a completed job: real payments + the latest Stripe link. */
-function PaymentStatus({ job }: { job: JobWithCustomer }) {
-  const [state, setState] = useState<{ paid: number; method: string | null; link: string | null } | null>(null);
-
-  useEffect(() => {
-    let stale = false;
-    (async () => {
-      const db = createClient();
-      const [payQ, reqQ] = await Promise.all([
-        db.from("ledger_entries").select("amount,method").eq("appointment_id", job.id).eq("kind", "payment"),
-        db
-          .from("payment_requests")
-          .select("status")
-          .eq("appointment_id", job.id)
-          .order("created_at", { ascending: false })
-          .limit(1),
-      ]);
-      if (stale) return;
-      const paid = (payQ.data ?? []).reduce((s, r) => s + Number(r.amount), 0);
-      setState({ paid, method: payQ.data?.[0]?.method ?? null, link: reqQ.data?.[0]?.status ?? null });
-    })();
-    return () => {
-      stale = true;
-    };
-  }, [job.id]);
-
-  if (!state) return null;
-  if (state.paid > 0) {
-    return (
-      <p className="text-dense font-medium note note-ok">
-        <IconCheck width={14} height={14} weight="bold" className="inline -mt-0.5" /> Paid <span className="num">{money(state.paid)}</span>
-        {state.link === "paid" ? " via Stripe" : state.method ? ` via ${state.method}` : ""}
-      </p>
-    );
-  }
-  if (state.link === "pending") {
-    return (
-      <p className="text-dense font-medium note note-warn">
-        Stripe link sent — not paid yet
-      </p>
-    );
-  }
-  return (
-    <p className="note text-dense">
-      Not paid yet — the charge is on their balance.
-    </p>
-  );
-}
-
 // ponytail: datetime-local in the browser's timezone — Tyler and the business are both
 // Eastern; skip the Intl round-trip a multi-timezone shop would need.
 const toLocalInput = (iso: string | null) => {
@@ -674,6 +622,54 @@ const toLocalInput = (iso: string | null) => {
  * Owner-only: fix who did any detail — past ones included. Saving re-splits every
  * payment on the job (the DB trigger rebuilds the payout rows).
  */
+/** Scheduled jobs: who's on it (scheduling). Pick several for a two-person detail; none = Me. */
+function AssignPanel({
+  initial,
+  employees,
+  pending,
+  onCancel,
+  onSubmit,
+}: {
+  initial: string[];
+  employees: EmployeeLite[];
+  pending: boolean;
+  onCancel: () => void;
+  onSubmit: (employeeIds: string[]) => void;
+}) {
+  const [ids, setIds] = useState<string[]>(initial);
+  const options = employees.filter((e) => e.active || ids.includes(e.id));
+  return (
+    <div className="well p-4 flex flex-col gap-3">
+      <Field label="Who's on this job?" hint="Their calendar picks it up. Pick more than one for a two-person detail; Me frees everyone.">
+        <div className="grid grid-cols-3 gap-1.5">
+          <button type="button" onClick={() => setIds([])} className="choice min-h-9 px-1 py-1.5 text-dense" aria-pressed={ids.length === 0}>
+            Me
+          </button>
+          {options.map((e) => (
+            <button
+              key={e.id}
+              type="button"
+              onClick={() => setIds((cur) => (cur.includes(e.id) ? cur.filter((i) => i !== e.id) : [...cur, e.id]))}
+              className="choice min-h-9 px-1 py-1.5 text-dense"
+              aria-pressed={ids.includes(e.id)}
+            >
+              {e.name}
+            </button>
+          ))}
+        </div>
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <button className="btn" onClick={onCancel}>
+          Back
+        </button>
+        <button className="btn btn-primary" disabled={pending} onClick={() => onSubmit(ids)}>
+          {pending ? <Busy>Saving…</Busy> : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function WhoPanel({
   job,
   employees,
@@ -757,76 +753,6 @@ function TimesPanel({
           }
         >
           {pending ? <Busy>Saving…</Busy> : "Save times"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ApprovePanel({
-  job,
-  hasEmail,
-  pending,
-  onCancel,
-  onSubmit,
-}: {
-  job: JobWithCustomer;
-  hasEmail: boolean;
-  pending: boolean;
-  onCancel: () => void;
-  onSubmit: (next: { date: string; startMin: number; durationMin: number; price: number }, notify: boolean) => void;
-}) {
-  const [date, setDate] = useState(job.date);
-  const [startMin, setStartMin] = useState<number | null>(job.start_min);
-  const [duration, setDuration] = useState(job.duration_min);
-  const [price, setPrice] = useState(String(job.price));
-  const [notify, setNotify] = useState(hasEmail);
-
-  return (
-    <div className="well p-4 flex flex-col gap-3">
-      <p className="label">
-        Approve — requested {fmtDateShort(job.date)} at {minToLabel(job.start_min)}
-      </p>
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Date">
-          <input type="date" className="input num" value={date} onChange={(e) => { setDate(e.target.value); setStartMin(null); }} />
-        </Field>
-        <Field label="Duration (min)">
-          <input type="number" className="input num" step={15} min={15} value={duration} onChange={(e) => setDuration(Number(e.target.value))} />
-        </Field>
-      </div>
-      <Field label="Time">
-        <SlotPicker
-          date={date}
-          durationMin={duration}
-          value={startMin}
-          onChange={(m) => setStartMin(m)}
-          excludeAppointmentId={job.id}
-          employeeIds={job.employee_id ? [job.employee_id] : []}
-        />
-      </Field>
-      <Field label="Price">
-        <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-faint">$</span>
-          <input type="number" className="input num pl-7" value={price} min={0} onChange={(e) => setPrice(e.target.value)} />
-        </div>
-      </Field>
-      {hasEmail && (
-        <label className="flex items-center gap-2.5 text-sm">
-          <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
-          Email the customer their confirmation
-        </label>
-      )}
-      <div className="grid grid-cols-2 gap-2">
-        <button className="btn" onClick={onCancel}>
-          Back
-        </button>
-        <button
-          className="btn btn-primary"
-          disabled={pending || startMin == null}
-          onClick={() => startMin != null && onSubmit({ date, startMin, durationMin: duration, price: Number(price) }, notify)}
-        >
-          {pending ? <Busy>Confirming…</Busy> : "Approve & confirm"}
         </button>
       </div>
     </div>
@@ -1052,36 +978,35 @@ function EditPanel({
 
 function CancelPanel({
   hasEmail,
-  decline = false,
   pending,
   onBack,
   onSubmit,
 }: {
   hasEmail: boolean;
-  decline?: boolean;
   pending: boolean;
   onBack: () => void;
   onSubmit: (notify: boolean) => void;
 }) {
   const [notify, setNotify] = useState(hasEmail);
   return (
-    <div className="well p-4 flex flex-col gap-3">
-      <p className="text-sm">{decline ? "Decline this booking request?" : "Cancel this appointment?"}</p>
+    <ConfirmPanel
+      title="Cancel this job?"
+      consequence="The slot opens back up. You can put it back on the schedule from this sheet."
+      confirmLabel="Cancel job"
+      busyLabel="Cancelling…"
+      cancelLabel="Keep it"
+      destructive
+      pending={pending}
+      onCancel={onBack}
+      onConfirm={() => onSubmit(notify)}
+    >
       {hasEmail && (
         <label className="flex items-center gap-2.5 text-sm">
           <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
           Send the cancellation email
         </label>
       )}
-      <div className="grid grid-cols-2 gap-2">
-        <button className="btn" onClick={onBack}>
-          Keep it
-        </button>
-        <button className="btn btn-danger" disabled={pending} onClick={() => onSubmit(notify)}>
-          {pending ? (decline ? "Declining…" : "Cancelling…") : decline ? "Decline booking" : "Cancel appointment"}
-        </button>
-      </div>
-    </div>
+    </ConfirmPanel>
   );
 }
 

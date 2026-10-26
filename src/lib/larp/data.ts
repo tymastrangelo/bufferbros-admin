@@ -4,6 +4,7 @@
 // Only the tables listed in FAKE_TABLES are faked; catalog, settings, hours and the
 // real employee roster pass through (see client.ts), so pricing and screens stay real.
 import { addDays, todayYmd, weekdayOf } from "@/lib/time";
+import { seedChecklist } from "@/lib/checklist";
 
 type Row = Record<string, unknown>;
 export type Dataset = Record<string, Row[]>;
@@ -16,6 +17,8 @@ export const FAKE_TABLES = [
   "appointments",
   "appointment_vehicles",
   "appointment_employees",
+  "appointment_events",
+  "appointment_photos",
   "ledger_entries",
   "company_ledger",
   "customer_balances",
@@ -107,6 +110,7 @@ export function larpDataset(crew: CrewMember[], ceoPct = 10): Dataset {
       email: r1() < 0.8 ? `${name.toLowerCase().replace(/[^a-z]+/g, ".")}${i % 7 === 0 ? i : ""}@gmail.com` : null,
       addresses: [{ label: "Home", address: `${100 + Math.floor(r1() * 1800)} ${pick(r1, STREETS)}, ${pick(r1, TOWNS)}` }],
       notes: r1() < 0.12 ? pick(r1, ["Gate code 1942#", "Park on the left side of the driveway", "Two golden retrievers — lots of hair", "Prefers mornings", "Garage code on file"]) : null,
+      site_notes: r1() < 0.2 ? pick(r1, ["Gate 4412 · park on the street", "Hose on the left side of the garage", "Spigot behind the pool cage, no outlet outside", "Dock slip B-14, key in the lockbox 0921"]) : null,
       tags: [r1() < 0.18 && "vip", r1() < 0.1 && "referral", r1() < 0.06 && "seasonal"].filter(Boolean),
       source: pick(r1, ["website", "website", "manual", "contacts-import"]),
       archived: r1() < 0.02,
@@ -163,6 +167,7 @@ export function larpDataset(crew: CrewMember[], ceoPct = 10): Dataset {
       vehicle_id: car?.id ?? null,
       cadence,
       interval_days: null,
+      employee_id: crew.length ? crew[i % crew.length].id : null,
       per_visit_price: cadence === "weekly" ? 129 : cadence === "biweekly" ? 159 : 189,
       preferred_dow: 1 + Math.floor(r() * 5),
       preferred_min: 480 + Math.floor(r() * 16) * 30,
@@ -184,6 +189,9 @@ export function larpDataset(crew: CrewMember[], ceoPct = 10): Dataset {
   const appointments: Row[] = [];
   const appointment_vehicles: Row[] = [];
   const appointment_employees: Row[] = [];
+  const appointment_events: Row[] = [];
+  const appointment_photos: Row[] = [];
+  const STEPS = ["Full interior vacuum, seats, carpets and mats", "Hand wash with a double foam bath", "Layer of protective spray wax", "Wheels, tires and tire shine", "All interior surfaces wiped down", "Interior and exterior glass", "Door jambs cleaned"];
   const ledger_entries: Row[] = [];
   const company_ledger: Row[] = [];
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
@@ -228,7 +236,7 @@ export function larpDataset(crew: CrewMember[], ceoPct = 10): Dataset {
       const empId = crewIds.length && r() < 0.78 ? pick(r, crewIds) : null;
       const past = d < 0 || (d === 0 && start + duration < nowMin);
       const roll = r();
-      const status = past ? (roll < 0.94 ? "completed" : roll < 0.98 ? "cancelled" : "no_show") : d > 0 && d < 9 && roll < 0.012 ? "pending" : "scheduled";
+      const status = past ? (roll < 0.94 ? "completed" : roll < 0.98 ? "cancelled" : "no_show") : "scheduled";
       const id = uid(4, appointments.length);
       const appt: Row = {
         id,
@@ -237,7 +245,7 @@ export function larpDataset(crew: CrewMember[], ceoPct = 10): Dataset {
         customer_id: cust.id,
         vehicle_id: car?.id ?? null,
         plan_id: plan?.id ?? null,
-        source: plan ? "recurring" : status === "pending" ? "web" : r() < 0.4 ? "web" : "manual",
+        source: plan ? "recurring" : r() < 0.4 ? "web" : "manual",
         status,
         date,
         start_min: start,
@@ -258,8 +266,26 @@ export function larpDataset(crew: CrewMember[], ceoPct = 10): Dataset {
         gcal_event_id: null,
         self_done: false,
         employee_id: empId,
+        cancelled_at: status === "cancelled" ? iso(addDays(date, -1)) : null,
+        attribution: null,
+        checklist: seedChecklist(boat ? [] : STEPS, addons.map((a) => ({ id: a.id as string, name: a.name as string }))).map((i) => ({
+          ...i,
+          done: status === "completed" ? r() < 0.9 : false,
+        })),
       };
       appointments.push(appt);
+      appointment_events.push({ id: appointment_events.length + 1, appointment_id: id, at: appt.created_at, actor_user_id: null, kind: "booked", detail: { source: appt.source } });
+      if (status === "completed") {
+        appointment_events.push({ id: appointment_events.length + 1, appointment_id: id, at: appt.started_at, actor_user_id: null, kind: "started", detail: {} });
+        appointment_events.push({ id: appointment_events.length + 1, appointment_id: id, at: appt.completed_at, actor_user_id: null, kind: "completed", detail: { from: "scheduled", to: "completed" } });
+        if (r() < 0.3) {
+          for (let p = 0; p < 4; p++) {
+            appointment_photos.push({ id: uid(12, appointment_photos.length), appointment_id: id, path: `larp/${(p % 4) + 1}.jpg`, kind: p < 2 ? "before" : "after", taken_by: empId, created_at: p < 2 ? appt.started_at : appt.completed_at });
+          }
+        }
+      } else if (status === "cancelled") {
+        appointment_events.push({ id: appointment_events.length + 1, appointment_id: id, at: appt.cancelled_at, actor_user_id: null, kind: "cancelled", detail: { from: "scheduled", to: "cancelled" } });
+      }
       if (car) appointment_vehicles.push({ appointment_id: id, vehicle_id: car.id });
       if (empId) appointment_employees.push({ appointment_id: id, employee_id: empId });
 
@@ -283,6 +309,8 @@ export function larpDataset(crew: CrewMember[], ceoPct = 10): Dataset {
             collected_by: empId && method !== "card" ? "washer" : "owner",
             settled_on: d < -12 ? addDays(date, 7) : null,
             processor_fee: fee,
+            tip: empId && r() < 0.18 ? pick(r, [10, 20, 20, 40]) : 0,
+            employee_id: null,
           };
           ledger_entries.push(pay);
           mirror(pay, empId, cust.name as string);
@@ -344,7 +372,7 @@ export function larpDataset(crew: CrewMember[], ceoPct = 10): Dataset {
   const customer_balances: Row[] = customers.map((c) => ({ customer_id: c.id, name: c.name, balance: Math.round((balance.get(c.id as string) ?? 0) * 100) / 100 }));
 
   const data: Dataset = {
-    customers, vehicles, plans, plan_vehicles, appointments, appointment_vehicles, appointment_employees,
+    customers, vehicles, plans, plan_vehicles, appointments, appointment_vehicles, appointment_employees, appointment_events, appointment_photos,
     ledger_entries, company_ledger, customer_balances, expenses, recurring_expenses, payment_requests,
     reminders, outreach_log, blocks: [], customer_not_duplicates: [], email_signups: [],
     customer_messages: [], customer_insights: [], text_sync_runs: [],

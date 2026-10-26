@@ -16,7 +16,7 @@ import type { Reminder } from "@/lib/types";
 import { CustomerPicker, type PickedCustomer } from "./customer-picker";
 import { IconMessage, IconPhone, IconPlus } from "./icons";
 import { VehiclePicker } from "./vehicle-picker";
-import { Busy, CopyButton, ErrorNote, Field, Sheet } from "./ui";
+import { Busy, CopyButton, ErrorNote, Field, LiveList, LiveRow, Sheet } from "./ui";
 
 /** "Text: <message>" → the message to send; anything else is a plain note. */
 const messageOf = (body: string | null) => (body && /^text:/i.test(body) ? body.replace(/^text:\s*/i, "") : null);
@@ -57,8 +57,9 @@ export function RemindersCard({ reminders }: { reminders: ReminderRow[] }) {
         <p className="text-sm text-faint">Nothing scheduled — add one and it&apos;ll hit your phone that morning.</p>
       ) : (
         <div className="stagger card divide-y divide-line overflow-hidden">
+          <LiveList>
           {reminders.map((r) => (
-            <div key={r.id} className="row row-link">
+            <LiveRow key={r.id} className="row row-link">
               <button type="button" className="min-w-0 grow -my-3 py-3 text-left" onClick={() => setViewId(r.id)}>
                 <span className="block text-sm font-medium truncate">{r.title}</span>
                 <span className="block text-xs text-faint truncate">
@@ -73,8 +74,9 @@ export function RemindersCard({ reminders }: { reminders: ReminderRow[] }) {
               <button className="btn btn-sm shrink-0" disabled={busy === r.id} onClick={() => act(r.id, () => completeReminder(r.id))}>
                 Done
               </button>
-            </div>
+            </LiveRow>
           ))}
+          </LiveList>
         </div>
       )}
       {open && <NewReminderSheet onClose={() => setOpen(false)} />}

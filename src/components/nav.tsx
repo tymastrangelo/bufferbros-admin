@@ -12,6 +12,7 @@ import {
   IconBoat,
   IconCalendar,
   IconCaretUpDown,
+  IconChart,
   IconCheck,
   IconChevronRight,
   IconEye,
@@ -42,6 +43,7 @@ const NAV = [
   { href: "/plans", label: "Plans", icon: IconRepeat },
   { href: "/quote", label: "Quote", icon: IconSparkle },
   { href: "/money", label: "Money", icon: IconDollar },
+  { href: "/insights", label: "Insights", icon: IconChart },
   { href: "/marketing", label: "Marketing", icon: IconMarketing },
   { href: "/team", label: "Team", icon: IconTeam },
   { href: "/settings", label: "Settings", icon: IconSettings },
@@ -230,7 +232,7 @@ export function Shell({
             ))}
             <TabItem
               label="More"
-              active={moreOpen || ["/plans", "/marketing", "/settings", "/team", "/customers/import"].some((h) => isActive(pathname, h))}
+              active={moreOpen || ["/plans", "/insights", "/marketing", "/settings", "/team", "/customers/import"].some((h) => isActive(pathname, h))}
               onClick={() => setMoreOpen(true)}
             >
               {(on) => (
@@ -264,6 +266,7 @@ export function Shell({
           <div className="flex flex-col gap-0.5 -mx-1">
             {owner &&
               [
+                { href: "/insights", label: "Insights", icon: IconChart },
                 { href: "/plans", label: "Plans", icon: IconRepeat },
                 { href: "/marketing", label: "Marketing", icon: IconMarketing },
                 { href: "/quote", label: "Quote builder", icon: IconSparkle },

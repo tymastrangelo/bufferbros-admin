@@ -24,6 +24,8 @@ export interface LedgerFields {
   appointmentId?: string | null;
   planId?: string | null;
   collectedBy?: "owner" | "washer"; // who received the client's cash (money-in kinds)
+  /** Tip handed over with a payment — the worker's, outside the split and the balance. */
+  tip?: number;
 }
 
 // collected_by only means something for money-in kinds; charges/discounts stay 'owner'.
@@ -51,6 +53,7 @@ export async function addLedgerEntry(fields: LedgerFields): Promise<ActionResult
       appointment_id: fields.appointmentId || null,
       plan_id: fields.planId || null,
       collected_by: collectedBy,
+      tip: fields.kind === "payment" ? Math.max(0, Number(fields.tip ?? 0)) : 0,
     })
     .select("id")
     .single();
@@ -60,6 +63,7 @@ export async function addLedgerEntry(fields: LedgerFields): Promise<ActionResult
     [
       `${usd(Math.abs(fields.amount))}${fields.method ? ` ${fields.method}` : ""} · ${fields.occurredOn}`,
       isCashIn(fields.kind) && `Collected by ${collectedBy === "washer" ? "them" : "you"}`,
+      Number(fields.tip ?? 0) > 0 && `Tip: ${usd(Number(fields.tip))}`,
       fields.memo?.trim() && `Memo: ${fields.memo.trim()}`,
     ],
     `/customers/${fields.customerId}`,
@@ -71,7 +75,7 @@ export async function addLedgerEntry(fields: LedgerFields): Promise<ActionResult
 
 export async function updateLedgerEntry(
   id: string,
-  fields: Pick<LedgerFields, "kind" | "amount" | "method" | "occurredOn" | "memo" | "collectedBy">
+  fields: Pick<LedgerFields, "kind" | "amount" | "method" | "occurredOn" | "memo" | "collectedBy" | "tip">
 ): Promise<ActionResult> {
   if (!fields.amount || fields.amount <= 0) return { ok: false, error: "Enter an amount greater than zero." };
   const db = await createClient();
@@ -84,6 +88,7 @@ export async function updateLedgerEntry(
       method: fields.kind === "payment" || fields.kind === "refund" ? fields.method ?? null : null,
       occurred_on: fields.occurredOn,
       memo: fields.memo?.trim() || null,
+      tip: fields.kind === "payment" ? Math.max(0, Number(fields.tip ?? 0)) : 0,
       ...(isCashIn(fields.kind) && fields.collectedBy ? { collected_by: fields.collectedBy } : {}),
     })
     .eq("id", id);
@@ -97,6 +102,7 @@ export async function updateLedgerEntry(
         change("Method", before.method, fields.method ?? null),
         change("Date", before.occurred_on, fields.occurredOn),
         change("Memo", before.memo, fields.memo?.trim() || null),
+        change("Tip", Number(before.tip ?? 0), Number(fields.tip ?? 0), (v) => usd(v as number)),
       ],
       `/customers/${before.customer_id}`,
       { tags: ["pencil2"], priority: 4 }
@@ -117,6 +123,38 @@ export async function setPaymentSettled(ledgerEntryId: string, settled: boolean)
     .update({ settled_on: settled ? todayYmd() : null })
     .eq("id", ledgerEntryId);
   if (error) return { ok: false, error: error.message };
+  refresh();
+  return { ok: true, id: ledgerEntryId };
+}
+
+/**
+ * Owner-only: pick who gets the worker cut on a payment with no resolved payee. A job
+ * payment re-attributes the job itself (the re-mirror trigger rebuilds the split); a
+ * balance/prepay payment gets its own employee_id. null = the owner did it.
+ */
+export async function attributeLedgerEntry(ledgerEntryId: string, employeeId: string | null): Promise<ActionResult> {
+  if ((await getRole()) !== "owner") return { ok: false, error: "Only the owner can attribute payments." };
+  const db = await createClient();
+  const { data: entry } = await db
+    .from("ledger_entries")
+    .select("id,amount,customer_id,appointment_id")
+    .eq("id", ledgerEntryId)
+    .maybeSingle();
+  if (!entry) return { ok: false, error: "Payment not found." };
+  const { data: emp } = employeeId ? await db.from("employees").select("name").eq("id", employeeId).maybeSingle() : { data: null };
+  if (employeeId && !emp) return { ok: false, error: "That worker no longer exists." };
+  if (!entry.appointment_id && !employeeId) return { ok: false, error: "A payment with no job needs a worker — or mark it settled to clear it." };
+
+  const { error } = entry.appointment_id
+    ? await db.from("appointments").update({ employee_id: employeeId, self_done: !employeeId }).eq("id", entry.appointment_id)
+    : await db.from("ledger_entries").update({ employee_id: employeeId }).eq("id", ledgerEntryId);
+  if (error) return { ok: false, error: error.message };
+  await logActivity(
+    "attributed a payment",
+    [await customerName(entry.customer_id), usd(Number(entry.amount)), `Cut goes to ${emp?.name ?? "nobody — your job"}`],
+    "/money/payouts",
+    { tags: ["money_with_wings"] }
+  );
   refresh();
   return { ok: true, id: ledgerEntryId };
 }
@@ -144,6 +182,8 @@ export interface ExpenseFields {
   amount: number;
   memo?: string | null;
   recurringId?: string | null;
+  /** The worker who paid out of pocket (null = the company / Tyler paid). undefined = leave as is. */
+  paidByEmployeeId?: string | null;
 }
 
 export async function saveExpense(fields: ExpenseFields, id?: string | null): Promise<ActionResult> {
@@ -156,12 +196,31 @@ export async function saveExpense(fields: ExpenseFields, id?: string | null): Pr
     memo: fields.memo?.trim() || null,
     // undefined = leave the recurring link alone on edits
     ...(fields.recurringId !== undefined && { recurring_id: fields.recurringId }),
+    // undefined = leave who-paid alone on edits; switching back to the company clears the reimbursement
+    ...(fields.paidByEmployeeId !== undefined && { paid_by_employee_id: fields.paidByEmployeeId, ...(fields.paidByEmployeeId ? {} : { reimbursed_on: null }) }),
   };
   const { error } = id ? await db.from("expenses").update(row).eq("id", id) : await db.from("expenses").insert(row);
   if (error) return { ok: false, error: error.message };
-  await logActivity(`${id ? "edited" : "logged"} an expense`, [`${usd(row.amount)} · ${row.category} · ${row.occurred_on}`, row.memo], "/money/expenses", { tags: ["receipt"] });
+  const { data: payer } = fields.paidByEmployeeId ? await db.from("employees").select("name").eq("id", fields.paidByEmployeeId).maybeSingle() : { data: null };
+  await logActivity(
+    `${id ? "edited" : "logged"} an expense${payer ? ` ${payer.name} paid for` : ""}`,
+    [`${usd(row.amount)} · ${row.category} · ${row.occurred_on}`, row.memo, payer && `You owe ${payer.name} ${usd(row.amount)} back — settle it on Payouts`],
+    payer ? "/money/payouts" : "/money/expenses",
+    { tags: ["receipt"] }
+  );
   refresh();
   return { ok: true };
+}
+
+/** Owner-only: mark a worker-fronted expense paid back (or undo). */
+export async function setExpenseReimbursed(expenseId: string, reimbursed: boolean): Promise<ActionResult> {
+  // activity: owner-only (returns early for workers); settling pushes nothing, like setPaymentSettled
+  if ((await getRole()) !== "owner") return { ok: false, error: "Only the owner can mark reimbursements." };
+  const db = await createClient();
+  const { error } = await db.from("expenses").update({ reimbursed_on: reimbursed ? todayYmd() : null }).eq("id", expenseId).not("paid_by_employee_id", "is", null);
+  if (error) return { ok: false, error: error.message };
+  refresh();
+  return { ok: true, id: expenseId };
 }
 
 export async function deleteExpense(id: string): Promise<ActionResult> {

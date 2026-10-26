@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Stat } from "@/components/ui";
-import { getSettingsMap } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { money } from "@/lib/format";
 import { addMonths, fmtMonth, todayYmd, ymOf } from "@/lib/time";
@@ -16,7 +15,7 @@ export default async function MoneyOverview() {
   const lastYm = addMonths(thisYm, -1);
   const chartStartYm = addMonths(thisYm, -11);
 
-  const [ledgerQ, balancesQ, expensesQ, capitalQ, settings, workersQ] = await Promise.all([
+  const [ledgerQ, balancesQ, expensesQ, capitalQ] = await Promise.all([
     db
       .from("ledger_entries")
       .select("kind,amount,occurred_on,plan_id")
@@ -24,10 +23,7 @@ export default async function MoneyOverview() {
     db.from("customer_balances").select("balance").neq("balance", 0),
     db.from("expenses").select("amount,occurred_on").gte("occurred_on", `${chartStartYm}-01`),
     db.from("company_ledger").select("amount,kind,party,occurred_on"),
-    getSettingsMap(),
-    db.from("employees").select("id,name,split_pct").eq("active", true).order("created_at"),
   ]);
-  const workers = (workersQ.data ?? []) as { id: string; name: string; split_pct: number }[];
 
   const entries = ((ledgerQ.data ?? []) as { kind: string; amount: number; occurred_on: string; plan_id: string | null }[]).map(
     (e) => ({ ...e, amount: Number(e.amount) })
@@ -72,11 +68,11 @@ export default async function MoneyOverview() {
   const hasChartData = bars.some((b) => b.collected + b.workerCut + b.expenses > 0);
 
   const capital = companyRows.reduce((s, r) => s + r.amount, 0);
-  const defaultWorker = workers.find((w) => w.id === settings.default_employee_id) ?? workers[0];
-  const washerPct = defaultWorker ? Number(defaultWorker.split_pct) : Number(settings.split_washer_pct ?? 60);
-  const workerName = defaultWorker?.name ?? "Worker";
-  const ceoPct = Number(settings.split_ceo_pct ?? 10);
-  const coPct = 100 - washerPct - ceoPct;
+  // Real splits this month, from the mirrored company_ledger rows (each payment at its own payee's cut).
+  const payoutsThis = companyRows.filter((r) => r.kind === "payout" && ymOf(r.occurred_on) === thisYm);
+  const crewCutThis = payoutsThis.filter((r) => r.party !== "ceo").reduce((s, r) => s + Math.abs(r.amount), 0);
+  const ceoCutThis = payoutsThis.filter((r) => r.party === "ceo").reduce((s, r) => s + Math.abs(r.amount), 0);
+  const coThis = collectedThis - crewCutThis - ceoCutThis;
 
   return (
     <div className="mt-5 flex flex-col gap-6">
@@ -94,9 +90,9 @@ export default async function MoneyOverview() {
         <Stat label="Company capital" value={money(capital)} href="/money/capital" />
         {/* spans the row's leftover cells so the grid never shows empty gray */}
         <Stat
-          label={`Split — ${workerName} ${washerPct}% / CEO ${ceoPct}% / Co ${coPct}%`}
-          value={`${money((collectedThis * washerPct) / 100)} / ${money((collectedThis * ceoPct) / 100)} / ${money((collectedThis * coPct) / 100)}`}
-          hint="of collected this month · worker cuts live on the Team page"
+          label="Split this month — crew / CEO / company"
+          value={`${money(crewCutThis)} / ${money(ceoCutThis)} / ${money(coThis)}`}
+          hint="from the payments collected this month · each worker's cut lives on their Team page"
           className="col-span-2 md:col-span-3"
         />
       </div>

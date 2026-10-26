@@ -54,6 +54,8 @@ export interface Customer {
   /** Marketing channel they found us through (null = derive from their first booking). */
   acquired_via: ChannelId | null;
   acquired_campaign_id: string | null;
+  /** Gate code, parking, water/power — shows on every job for this customer. */
+  site_notes: string | null;
 }
 
 export interface OutreachLog {
@@ -110,7 +112,16 @@ export interface Employee {
   ical_url: string | null;
   ical_synced_at: string | null;
   active: boolean;
+  /** Per-weekday hours keyed "0".."6": null/absent = business hours, false = day off, [open, close] minutes. */
+  hours: EmployeeHours | null;
+  /** Public website draws slots from workers with this on (none on = whole-business calendar). */
+  takes_web_bookings: boolean;
+  phone: string | null;
+  /** 1–6 → --color-worker-N (calendar lane stripe, avatar ring). */
+  color: number;
 }
+
+export type EmployeeHours = Record<string, false | [number, number] | null>;
 
 export interface Service {
   id: string;
@@ -119,6 +130,8 @@ export interface Service {
   note: string | null;
   active: boolean;
   sort: number;
+  /** The steps this service includes — seeds each job's checklist. */
+  checklist: string[];
 }
 
 export interface ServicePricing {
@@ -173,6 +186,8 @@ export interface Plan {
   email_confirmations: boolean;
   /** True = no discounted entry detail — the plan starts straight at the maintenance rate. */
   skip_entry: boolean;
+  /** Who does this plan's visits; generated visits are assigned to them. null = the owner. */
+  employee_id: string | null;
 }
 
 export interface Appointment {
@@ -205,6 +220,11 @@ export interface Appointment {
   self_done: boolean;
   /** Who did the detail; null = the owner (or unassigned pre-0015 history). */
   employee_id: string | null;
+  /** What's included, ticked on site (seeded from services.checklist + add-ons). */
+  checklist: ChecklistItem[];
+  cancelled_at: string | null;
+  /** utm/gclid/referrer the website stamped on a web booking (0022). */
+  attribution: Record<string, string> | null;
 }
 
 export interface LedgerEntry {
@@ -222,6 +242,40 @@ export interface LedgerEntry {
   settled_on: string | null;
   /** What the processor kept (Stripe). Splits run on amount - processor_fee. */
   processor_fee: number;
+  /** Explicit payee for a payment with no appointment (balance/prepay). null = resolve via plan, else nobody. */
+  employee_id: string | null;
+  /** Tip on a payment — the worker's, outside the split and the customer balance. */
+  tip: number;
+}
+
+export type AppointmentEventKind =
+  | "booked" | "started" | "completed" | "cancelled" | "no_show" | "reopened"
+  | "rescheduled" | "assigned" | "price_changed" | "edited";
+
+/** One line of a job's timeline, written by the appointments_timeline trigger (0030). */
+export interface AppointmentEvent {
+  id: number;
+  appointment_id: string;
+  at: string;
+  actor_user_id: string | null;
+  kind: AppointmentEventKind;
+  detail: Record<string, unknown>;
+}
+
+export interface AppointmentPhoto {
+  id: string;
+  appointment_id: string;
+  /** Storage object path in the private job-photos bucket. */
+  path: string;
+  kind: "before" | "after";
+  taken_by: string | null;
+  created_at: string;
+}
+
+export interface ChecklistItem {
+  id: string;
+  name: string;
+  done: boolean;
 }
 
 export type PaymentRequestKind = "job" | "balance" | "prepay";
@@ -267,6 +321,12 @@ export interface Expense {
   recurring_id: string | null;
   /** Ad spend: the marketing campaign this expense paid for. */
   campaign_id: string | null;
+  /** 'google_ads' = written by the sync (one row per Google campaign per month). */
+  source: string | null;
+  google_campaign_id: string | null;
+  /** A worker fronted this out of pocket; the owner owes it back until reimbursed_on. */
+  paid_by_employee_id: string | null;
+  reimbursed_on: string | null;
   created_at: string;
 }
 
@@ -301,6 +361,30 @@ export interface MarketingCampaign {
   target_cpa: number | null;
   utm_campaign: string | null;
   notes: string | null;
+  /** The Google Ads campaign this CRM campaign mirrors (synced spend lands here). */
+  google_campaign_id: string | null;
+}
+
+/** Mirror of a Google Ads campaign, refreshed by the nightly sync (0031). */
+export interface AdCampaign {
+  google_id: string;
+  name: string;
+  status: "ENABLED" | "PAUSED" | string;
+  channel: string;
+  daily_budget: number | null;
+  budget_resource: string | null;
+  synced_at: string;
+}
+
+export interface AdMetric {
+  google_id: string;
+  date: string;
+  cost: number;
+  clicks: number;
+  impressions: number;
+  conversions: number;
+  conv_value: number;
+  phone_calls: number;
 }
 
 export interface Lead {

@@ -7,10 +7,11 @@ import { ExpensesClient } from "./expenses-client";
 export const metadata: Metadata = { title: "Expenses" };
 export const dynamic = "force-dynamic";
 
-export default async function ExpensesPage() {
+export default async function ExpensesPage({ searchParams }: { searchParams: Promise<{ paidBy?: string }> }) {
+  const { paidBy } = await searchParams;
   const db = await createClient();
   const today = todayYmd();
-  const [expQ, recQ, postedQ] = await Promise.all([
+  const [expQ, recQ, postedQ, empQ] = await Promise.all([
     db.from("expenses").select("*").order("occurred_on", { ascending: false }).order("created_at", { ascending: false }).limit(500),
     db.from("recurring_expenses").select("*").order("name"),
     db
@@ -18,7 +19,9 @@ export default async function ExpensesPage() {
       .select("recurring_id,occurred_on")
       .not("recurring_id", "is", null)
       .gte("occurred_on", `${today.slice(0, 4)}-01-01`),
+    db.from("employees").select("id,name").eq("active", true).order("created_at"),
   ]);
+  const employees = (empQ.data ?? []) as { id: string; name: string }[];
   const rows = ((expQ.data ?? []) as Expense[]).map((e) => ({ ...e, amount: Number(e.amount) }));
   const recurring = ((recQ.data ?? []) as RecurringExpense[]).map((r) => ({ ...r, expected_amount: Number(r.expected_amount) }));
   const posted = (postedQ.data ?? []) as { recurring_id: string; occurred_on: string }[];
@@ -31,5 +34,5 @@ export default async function ExpensesPage() {
     return r.due_month === month && !posted.some((p) => p.recurring_id === r.id); // yearly: postedQ is already this-year
   });
 
-  return <ExpensesClient rows={rows} recurring={recurring} due={due} />;
+  return <ExpensesClient rows={rows} recurring={recurring} due={due} employees={employees} defaultPaidBy={employees.some((e) => e.id === paidBy) ? paidBy! : null} />;
 }

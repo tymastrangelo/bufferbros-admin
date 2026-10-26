@@ -53,5 +53,7 @@ export {
   Pause as IconPause,
   HourglassMedium as IconHourglass,
   Warning as IconWarning,
+  ChartBar as IconChart,
+  Camera as IconCamera,
 } from "@phosphor-icons/react/ssr";
 export type { Icon as IconComponent } from "@phosphor-icons/react";

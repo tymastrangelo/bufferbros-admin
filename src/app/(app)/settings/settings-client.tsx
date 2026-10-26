@@ -4,8 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { BlockSheet } from "@/components/block-sheet";
 import { setLarp } from "@/lib/actions/view";
-import { IconCheck, IconChevronRight } from "@/components/icons";
-import { Busy, ErrorNote, PageHeader, SectionLabel } from "@/components/ui";
+import { IconChevronRight } from "@/components/icons";
+import { Busy, ConfirmPanel, ErrorNote, Field, PageHeader, SectionLabel, SuccessButton } from "@/components/ui";
 import {
   type AddonInput,
   changePassword,
@@ -17,10 +17,11 @@ import {
   saveSettings,
   saveWeeklyHours,
   sendTestEmail,
+  saveServiceChecklist,
 } from "@/lib/actions/settings";
 import { createClient } from "@/lib/supabase/client";
 import { fmtDateShort, minToLabel, todayYmd, WEEKDAYS } from "@/lib/time";
-import type { Block, Employee, PlanCadence, PlanPricing, Service, ServicePricing, SizeId, WeeklyHours } from "@/lib/types";
+import type { Block, PlanCadence, PlanPricing, Service, ServicePricing, SizeId, WeeklyHours } from "@/lib/types";
 
 // ponytail: tables fill 100% width; tighter cell padding on mobile so the pricing
 // grids fit a phone without side-scroll. overflow-x-auto stays as a last-resort guard.
@@ -54,17 +55,9 @@ function useSave() {
 
 function SaveButton({ state, onClick }: { state: string; onClick: () => void }) {
   return (
-    <div className="flex items-center gap-2">
-      <button className="btn btn-primary btn-sm" onClick={onClick} disabled={state === "saving"}>
-        {state === "saving" ? <Busy>Saving…</Busy> : "Save"}
-      </button>
-      {state === "saved" && (
-        <span className="page-in inline-flex items-center gap-1 text-sm font-medium text-ok">
-          <IconCheck width={15} height={15} /> Saved
-        </span>
-      )}
-      {state !== "idle" && state !== "saving" && state !== "saved" && <span className="text-sm text-bad">{state}</span>}
-    </div>
+    <SuccessButton state={state} onClick={onClick}>
+      Save
+    </SuccessButton>
   );
 }
 
@@ -103,7 +96,6 @@ export function SettingsClient({
   hours,
   blocks,
   settings,
-  employees,
   emailFrom,
   userEmail,
   larp,
@@ -114,7 +106,6 @@ export function SettingsClient({
   hours: WeeklyHours[];
   blocks: Block[];
   settings: Record<string, string>;
-  employees: Employee[];
   emailFrom: string;
   userEmail: string;
   larp: boolean;
@@ -125,6 +116,7 @@ export function SettingsClient({
       <div className="flex flex-col gap-7">
         <SettingsGroup label="Pricing">
           <PricingSection pricing={pricing} />
+          <IncludedSection services={services} />
           <CeramicSection pricing={pricing} settings={settings} />
           <BoatSection pricing={pricing} settings={settings} />
           <AddonsSection services={services} pricing={pricing} />
@@ -132,7 +124,6 @@ export function SettingsClient({
         </SettingsGroup>
         <SettingsGroup label="Schedule & booking">
           <HoursSection hours={hours} settings={settings} />
-          <OnlineBookingSection settings={settings} employees={employees} />
           <BlocksSection blocks={blocks} />
         </SettingsGroup>
         <SettingsGroup label="Clients & money">
@@ -203,6 +194,44 @@ function PricingSection({ pricing }: { pricing: ServicePricing[] }) {
       </div>
       <div className="mt-3">
         <SaveButton state={state} onClick={() => run(() => saveServicePricing([...rows.values()]))} />
+      </div>
+    </Section>
+  );
+}
+
+/** What's included: one step per line per base service. Seeds each new job's checklist. */
+function IncludedSection({ services }: { services: Service[] }) {
+  const std = services.find((s) => s.id === "standard");
+  const cer = services.find((s) => s.id === "ceramic-coating");
+  const [stdText, setStdText] = useState((std?.checklist ?? []).join("\n"));
+  const [cerText, setCerText] = useState((cer?.checklist ?? []).join("\n"));
+  const { state, run } = useSave();
+  return (
+    <Section
+      title="What's included"
+      note="One step per line. Every new job gets this list to tick through on site; add-ons add their own line automatically."
+    >
+      <div className="grid gap-3 md:grid-cols-2">
+        <Field label="The Standard Detail" hint="What the website promises — keep them matching.">
+          <textarea className="textarea min-h-40" value={stdText} onChange={(e) => setStdText(e.target.value)} />
+        </Field>
+        {cer && (
+          <Field label="Ceramic Coating">
+            <textarea className="textarea min-h-40" value={cerText} onChange={(e) => setCerText(e.target.value)} />
+          </Field>
+        )}
+      </div>
+      <div className="mt-3">
+        <SaveButton
+          state={state}
+          onClick={() =>
+            run(async () => {
+              const a = await saveServiceChecklist("standard", stdText.split("\n"));
+              if (!a.ok) return a;
+              return cer ? saveServiceChecklist("ceramic-coating", cerText.split("\n")) : a;
+            })
+          }
+        />
       </div>
     </Section>
   );
@@ -444,6 +473,8 @@ const slugify = (s: string) =>
 function AddonsSection({ services, pricing }: { services: Service[]; pricing: ServicePricing[] }) {
   const { state, run } = useSave();
   const [open, setOpen] = useState<number | null>(null);
+  const [removing, setRemoving] = useState<number | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<AddonDraft[]>(() =>
     services
       .filter((s) => s.kind === "addon")
@@ -471,11 +502,12 @@ function AddonsSection({ services, pricing }: { services: Service[]; pricing: Se
 
   async function remove(i: number) {
     const d = drafts[i];
-    if (d.id && !window.confirm(`Remove “${d.name}”? It disappears from the booking site immediately; past appointments keep their records.`)) return;
+    setRemoveError(null);
     if (d.id) {
       const res = await deleteAddon(d.id);
-      if (!res.ok) return alert(res.error);
+      if (!res.ok) return setRemoveError(res.error);
     }
+    setRemoving(null);
     setOpen(null);
     setDrafts(drafts.filter((_, j) => j !== i));
   }
@@ -588,9 +620,23 @@ function AddonsSection({ services, pricing }: { services: Service[]; pricing: Se
                     {numInput(d.flat.minutes, (v) => patch(i, { flat: { ...d.flat, minutes: v } }), `${d.name} minutes`, 15)}
                   </div>
                 )}
-                <button className="btn btn-sm btn-danger self-start mt-1" onClick={() => remove(i)}>
-                  Remove add-on
-                </button>
+                {removing === i ? (
+                  <ConfirmPanel
+                    title={`Remove “${d.name}”?`}
+                    consequence="It disappears from the booking site immediately. Past appointments keep their records."
+                    confirmLabel="Remove add-on"
+                    busyLabel="Removing…"
+                    destructive
+                    onCancel={() => setRemoving(null)}
+                    onConfirm={() => remove(i)}
+                  >
+                    <ErrorNote>{removeError}</ErrorNote>
+                  </ConfirmPanel>
+                ) : (
+                  <button className="btn btn-sm btn-danger self-start mt-1" onClick={() => (d.id ? setRemoving(i) : remove(i))}>
+                    Remove add-on
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -818,44 +864,6 @@ function HoursSection({ hours, settings }: { hours: WeeklyHours[]; settings: Rec
             })
           }
         />
-      </div>
-    </Section>
-  );
-}
-
-/**
- * Which calendars the public booking site draws its open times from. Nothing
- * worker-related ever renders on the website — this only changes which slots the
- * site offers. Unchecked = the whole-business calendar, exactly as before.
- */
-function OnlineBookingSection({ settings, employees }: { settings: Record<string, string>; employees: Employee[] }) {
-  const { state, run } = useSave();
-  const [ids, setIds] = useState<string[]>(() =>
-    (settings.web_slot_employee_ids ?? "").split(",").filter((id) => employees.some((e) => e.id === id))
-  );
-  const toggle = (id: string) => setIds((cur) => (cur.includes(id) ? cur.filter((i) => i !== id) : [...cur, id]));
-  return (
-    <Section
-      title="Online booking availability"
-      note="Check the workers who can take website jobs and the site only offers times one of them is free (their blocks + assigned jobs). No names show online. Leave everything unchecked to book against the whole business calendar — including your own time."
-    >
-      <div className="flex flex-col gap-1.5">
-        {employees.length === 0 && <p className="text-sm text-faint">No workers yet — add one on the Team page first.</p>}
-        {employees.map((e) => (
-          <label key={e.id} className="flex items-center gap-2.5 text-sm font-medium">
-            <input type="checkbox" checked={ids.includes(e.id)} onChange={() => toggle(e.id)} />
-            {e.name}
-          </label>
-        ))}
-      </div>
-      {ids.length > 0 && (
-        <p className="text-dense text-ink-2 mt-2">
-          Website slots now follow {ids.length === 1 ? `${employees.find((e) => e.id === ids[0])?.name}'s` : "these workers'"}{" "}
-          availability — handy while you&apos;re away at school.
-        </p>
-      )}
-      <div className="mt-3">
-        <SaveButton state={state} onClick={() => run(() => saveSettings({ web_slot_employee_ids: ids.join(",") }))} />
       </div>
     </Section>
   );

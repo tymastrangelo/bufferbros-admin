@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 export default async function CalendarPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; d?: string; new?: string; block?: string }>;
+  searchParams: Promise<{ view?: string; d?: string; new?: string; block?: string; who?: string; lanes?: string }>;
 }) {
   const params = await searchParams;
   const view: CalView = params.view === "week" || params.view === "day" ? params.view : "month";
@@ -41,19 +41,18 @@ export default async function CalendarPage({
   const owner = (await getRole()) === "owner";
   const apptsQuery = db
     .from("appointments")
-    .select("*, customers(id,name,phone,email,stripe_payments)")
+    .select("*, customers(id,name,phone,email,stripe_payments,site_notes), appointment_employees(employee_id), appointment_vehicles(vehicles(*))")
     .gte("date", rangeStart)
     .lt("date", rangeEnd)
     .neq("status", "cancelled")
     .order("start_min");
   const [apptsQ, blocksQ, hoursQ, catalog, myEmployee, employeesQ, plansQ] = await Promise.all([
-    // Pending web bookings stay off the washer's calendar until the owner approves.
-    owner ? apptsQuery : apptsQuery.neq("status", "pending"),
+    apptsQuery,
     db.from("blocks").select("*").gte("date", rangeStart).lt("date", rangeEnd).order("start_min"),
     db.from("weekly_hours").select("*").order("weekday"),
     getCatalog(),
     getMyEmployee(),
-    db.from("employees").select("id,name,ical_url,ical_synced_at").eq("active", true),
+    db.from("employees").select("id,name,color,hours,ical_url,ical_synced_at").eq("active", true),
     // Active plans + every visit date on file — projects standing slots past the materialized horizon.
     db.from("plans").select("*, customers(name), appointments(date,status)").eq("status", "active").not("preferred_min", "is", null),
   ]);
@@ -74,7 +73,7 @@ export default async function CalendarPage({
 
   // Opportunistic freshness between cron runs: re-pull any feed older than 6h.
   // (Staleness check runs inside after() — render must stay pure.)
-  const employees = (employeesQ.data ?? []) as Pick<Employee, "id" | "name" | "ical_url" | "ical_synced_at">[];
+  const employees = (employeesQ.data ?? []) as Pick<Employee, "id" | "name" | "color" | "hours" | "ical_url" | "ical_synced_at">[];
   after(() => {
     const stale = employees.filter(
       (e) => e.ical_url && (!e.ical_synced_at || Date.now() - new Date(e.ical_synced_at).getTime() > STALE_MS)
@@ -86,6 +85,9 @@ export default async function CalendarPage({
     <CalendarClient
       myEmployee={myEmployee}
       employeeNames={Object.fromEntries(employees.map((e) => [e.id, e.name]))}
+      crew={employees.map((e) => ({ id: e.id, name: e.name, color: e.color, hours: e.hours }))}
+      who={params.who === "me" || employees.some((e) => e.id === params.who) ? params.who! : "all"}
+      lanes={params.lanes === "1"}
       view={view}
       anchor={anchor}
       today={today}

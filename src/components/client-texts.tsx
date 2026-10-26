@@ -12,7 +12,7 @@ import { GOAL_LABEL, type Suggestion, type SuggestionGoal } from "@/lib/suggesti
 import { dateOfInstant, fmtDateLong, fmtDateShort, todayYmd } from "@/lib/time";
 import type { CustomerInsight, CustomerMessage, TextSyncRun } from "@/lib/types";
 import { IconCalendar, IconChats, IconCheckCircle, IconEquals, IconMessage, IconPhone, IconStar, IconWarning, IconWave, type IconComponent } from "./icons";
-import { Busy, CopyButton, EmptyState, ErrorNote, SectionLabel, Sheet } from "./ui";
+import { Busy, CopyButton, EmptyState, ErrorNote, LiveList, LiveRow, SectionLabel, Sheet } from "./ui";
 
 const MOOD: Record<NonNullable<CustomerInsight["sentiment"]>, { label: string; cls: string; Icon: IconComponent }> = {
   happy: { label: "Going well", cls: "chip-ok", Icon: IconCheckCircle },
@@ -163,8 +163,10 @@ export function TextsToSendCard({ suggestions }: { suggestions: Suggestion[] }) 
     <section className="mt-8">
       <SectionLabel trailing={suggestions.length}>Follow-ups</SectionLabel>
       <div className="stagger card divide-y divide-line overflow-hidden">
+        <LiveList>
         {shown.map((s) => (
-          <button key={s.customerId} type="button" className="row row-link w-full text-left" onClick={() => setOpen(s)}>
+          <LiveRow key={s.customerId}>
+          <button type="button" className="row row-link w-full text-left" onClick={() => setOpen(s)}>
             <span className="min-w-0 grow">
               <span className="flex items-center gap-2">
                 <span className="text-sm font-medium truncate">{s.name}</span>
@@ -178,7 +180,9 @@ export function TextsToSendCard({ suggestions }: { suggestions: Suggestion[] }) 
               <IconMessage width={16} height={16} className="shrink-0 text-faint" aria-hidden />
             )}
           </button>
+          </LiveRow>
         ))}
+        </LiveList>
         {suggestions.length > shown.length && (
           <button className="row-more" onClick={() => setShowAll(true)}>
             Show all {suggestions.length}

@@ -6,6 +6,7 @@ import { confirmedEmail, sendEmail } from "@/lib/email";
 import { syncAppointmentToGcal } from "@/lib/gcal";
 import { stepDays } from "@/lib/plan-projection";
 import { addDays, todayYmd, weekdayOf, whenLabel } from "@/lib/time";
+import { seedChecklist } from "@/lib/checklist";
 import { vehicleLabel, type Appointment, type Plan, type Vehicle } from "@/lib/types";
 
 export interface OccurrenceConflict {
@@ -41,11 +42,19 @@ export async function generateOccurrences(
   if (error) throw new Error(error.message);
 
   const result: GenerateResult = { created: 0, conflicts: [] };
+  // Plan workers must still be on the crew; an inactive one books the visit unassigned (and says so).
+  const { data: crew } = await db.from("employees").select("id,name,active");
+  const { data: svc } = await db.from("services").select("checklist").eq("id", "standard").maybeSingle();
+  const checklist = seedChecklist(((svc?.checklist as string[] | null) ?? []).filter((x) => typeof x === "string"), []);
+  const crewById = new Map(((crew ?? []) as { id: string; name: string; active: boolean }[]).map((e) => [e.id, e]));
 
   for (const plan of (plans ?? []) as unknown as PlanWithCustomer[]) {
     const customerName = plan.customers?.name ?? "Unknown customer";
     const step = stepDays(plan);
     const planVehicles = plan.plan_vehicles.map((r) => r.vehicles).filter(Boolean) as Vehicle[];
+    const worker = plan.employee_id ? crewById.get(plan.employee_id) ?? null : null;
+    const assignees = worker?.active ? [worker.id] : [];
+    let warnedInactive = false;
 
     const { data: appts } = await db
       .from("appointments")
@@ -95,7 +104,17 @@ export async function generateOccurrences(
             p_vehicle_id: plan.vehicle_id,
             p_plan_id: plan.id,
             p_mode: "overlap",
+            p_employee_ids: assignees,
           });
+          if (!bookErr && plan.employee_id && !worker?.active && !warnedInactive) {
+            warnedInactive = true;
+            result.conflicts.push({
+              planId: plan.id,
+              customerName,
+              date: cursor,
+              reason: `Plan's worker ${worker?.name ?? "(removed)"} is inactive — visits booked unassigned`,
+            });
+          }
           if (bookErr) {
             result.conflicts.push({
               planId: plan.id,
@@ -106,6 +125,7 @@ export async function generateOccurrences(
                 : bookErr.message,
             });
           } else {
+            if (checklist.length) await db.from("appointments").update({ checklist }).eq("id", (booked as Appointment).id);
             result.created++;
             if (planVehicles.length) {
               const { error: vehErr } = await db

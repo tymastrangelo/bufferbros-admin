@@ -54,3 +54,6 @@ graphify-out/
 .claude/
 /test-results/
 /playwright-report/
+
+# superpowers plan workspaces (ledgers, briefs)
+.superpowers/

@@ -32,6 +32,9 @@ export function VehiclePicker({
   const [lengthFt, setLengthFt] = useState("");
   const [make, setMake] = useState("");
   const [model, setModel] = useState("");
+  const [year, setYear] = useState("");
+  const [color, setColor] = useState("");
+  const [plate, setPlate] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const supabase = createClient();
@@ -52,6 +55,9 @@ export function VehiclePicker({
         length_ft: kind === "boat" ? Number(lengthFt) : null,
         make: make.trim() || null,
         model: model.trim() || null,
+        year: Number(year) >= 1900 ? Number(year) : null,
+        color: color.trim() || null,
+        plate: plate.trim().toUpperCase() || null,
       })
       .select("*")
       .single();
@@ -66,6 +72,9 @@ export function VehiclePicker({
     setAdding(false);
     setMake("");
     setModel("");
+    setYear("");
+    setColor("");
+    setPlate("");
     setLengthFt("");
   }
 
@@ -78,7 +87,15 @@ export function VehiclePicker({
             checked={selected.includes(v.id)}
             onChange={(e) => onChange(e.target.checked ? [...selected, v.id] : selected.filter((id) => id !== v.id))}
           />
-          <span className="grow truncate">{vehicleLabel(v)}</span>
+          <span className="grow truncate">
+            {vehicleLabel(v)}
+            {(v.color || v.plate) && (
+              <span className="text-xs text-faint">
+                {v.color ? ` · ${v.color}` : ""}
+                {v.plate ? ` · ${v.plate}` : ""}
+              </span>
+            )}
+          </span>
           <span className="text-xs text-faint shrink-0">
             {v.kind === "boat" ? (v.length_ft ? `${v.length_ft} ft boat` : "Boat") : SIZE_SHORT[v.size_id] ?? v.size_id}
           </span>
@@ -126,6 +143,11 @@ export function VehiclePicker({
             <div className="grid grid-cols-2 gap-2">
               <input className="input" placeholder="Make (optional)" value={make} onChange={(e) => setMake(e.target.value)} />
               <input className="input" placeholder="Model (optional)" value={model} onChange={(e) => setModel(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <input className="input num" inputMode="numeric" placeholder="Year" value={year} onChange={(e) => setYear(e.target.value)} aria-label="Year" />
+              <input className="input" placeholder="Color" value={color} onChange={(e) => setColor(e.target.value)} aria-label="Color" />
+              <input className="input" placeholder="Plate" value={plate} onChange={(e) => setPlate(e.target.value)} aria-label="Plate" />
             </div>
             {error && <p className="text-dense text-bad">{error}</p>}
             <div className="grid grid-cols-2 gap-2">

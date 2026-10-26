@@ -33,6 +33,8 @@ export interface PlanFields {
   emailConfirmations?: boolean;
   /** Skip the discounted entry detail — start straight at the maintenance rate. */
   skipEntry?: boolean;
+  /** Who does the visits (generated visits are assigned to them). null = the owner. */
+  employeeId?: string | null;
   /**
    * Record an upfront block payment right after the plan is created (payment +
    * discount credit on the ledger, so visits draw from the balance). Omit = they
@@ -58,6 +60,7 @@ function toRow(fields: PlanFields) {
     notes: fields.notes?.trim() || null,
     email_confirmations: fields.emailConfirmations ?? false,
     skip_entry: fields.skipEntry ?? false,
+    employee_id: fields.employeeId ?? null,
   };
 }
 

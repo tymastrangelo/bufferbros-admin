@@ -41,6 +41,7 @@ export function LedgerEntrySheet({
   const [method, setMethod] = useState<PaymentMethod>(entry?.method ?? "cash");
   const [date, setDate] = useState(entry?.occurred_on ?? todayYmd());
   const [memo, setMemo] = useState(entry?.memo ?? "");
+  const [tip, setTip] = useState(entry?.tip ? String(entry.tip) : "");
   const [collectedBy, setCollectedBy] = useState<"owner" | "washer">(entry?.collected_by ?? "owner");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -55,7 +56,7 @@ export function LedgerEntrySheet({
     setError(null);
     setPending(true);
     const res = entry
-      ? await updateLedgerEntry(entry.id, { kind, amount: Number(amount), method, occurredOn: date, memo, collectedBy })
+      ? await updateLedgerEntry(entry.id, { kind, amount: Number(amount), method, occurredOn: date, memo, collectedBy, tip: Number(tip) || 0 })
       : await addLedgerEntry({
           customerId: targetCustomer,
           kind,
@@ -64,6 +65,7 @@ export function LedgerEntrySheet({
           occurredOn: date,
           memo,
           collectedBy,
+          tip: Number(tip) || 0,
         });
     setPending(false);
     if (!res.ok) return setError(res.error);
@@ -120,6 +122,14 @@ export function LedgerEntrySheet({
           </Field>
         </div>
 
+        {kind === "payment" && (
+          <Field label="Tip (optional)" hint="Goes 100% to whoever did the job; never part of the split.">
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-faint">$</span>
+              <input type="number" inputMode="decimal" min={0} step={1} className="input num pl-7" value={tip} onChange={(e) => setTip(e.target.value)} />
+            </div>
+          </Field>
+        )}
         {needsMethod && (
           <Field label="Method">
             <div className="grid grid-cols-3 gap-1.5">

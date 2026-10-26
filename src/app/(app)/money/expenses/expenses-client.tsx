@@ -9,17 +9,43 @@ import { money } from "@/lib/format";
 import { fmtDateShort, todayYmd } from "@/lib/time";
 import { EXPENSE_CATEGORIES, type Expense, type RecurringExpense } from "@/lib/types";
 
+type Payer = { id: string; name: string };
+
+/** Me + each worker: who actually paid. A worker's pick makes it a fronted expense (Payouts owes it back). */
+function PaidBy({ value, onChange, employees }: { value: string | null; onChange: (id: string | null) => void; employees: Payer[] }) {
+  if (employees.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5" role="group" aria-label="Who paid">
+      <button type="button" className="choice h-9 px-3 text-dense" aria-pressed={value === null} onClick={() => onChange(null)}>
+        Me / the business
+      </button>
+      {employees.map((e) => (
+        <button key={e.id} type="button" className="choice h-9 px-3 text-dense" aria-pressed={value === e.id} onClick={() => onChange(e.id)}>
+          {e.name} paid
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ExpensesClient({
   rows,
   recurring,
   due,
+  employees,
+  defaultPaidBy,
 }: {
   rows: Expense[];
   recurring: RecurringExpense[];
   due: RecurringExpense[];
+  employees: Payer[];
+  /** From ?paidBy= (the worker page's "Log something they paid"). */
+  defaultPaidBy: string | null;
 }) {
   const router = useRouter();
   const [amount, setAmount] = useState("");
+  const [paidBy, setPaidBy] = useState<string | null>(defaultPaidBy);
+  const nameOf = (id: string | null) => employees.find((e) => e.id === id)?.name ?? "a worker";
   const [category, setCategory] = useState("supplies");
   const [memo, setMemo] = useState("");
   const [date, setDate] = useState(todayYmd());
@@ -35,7 +61,7 @@ export function ExpensesClient({
   async function quickAdd() {
     setError(null);
     setPending(true);
-    const res = await saveExpense({ occurredOn: date, category, amount: Number(amount), memo });
+    const res = await saveExpense({ occurredOn: date, category, amount: Number(amount), memo, paidByEmployeeId: paidBy });
     setPending(false);
     if (!res.ok) return setError(res.error);
     setAmount("");
@@ -87,6 +113,12 @@ export function ExpensesClient({
             {pending ? <Busy>Adding…</Busy> : "Add"}
           </button>
         </div>
+        {employees.length > 0 && (
+          <div className="mt-2.5 flex flex-col gap-1">
+            <PaidBy value={paidBy} onChange={setPaidBy} employees={employees} />
+            {paidBy && <p className="text-xs text-ink-2">Out of {nameOf(paidBy)}&apos;s pocket — it lands on Payouts as money you owe them until you mark it paid back.</p>}
+          </div>
+        )}
         <div className="mt-2">
           <ErrorNote>{error}</ErrorNote>
         </div>
@@ -124,7 +156,14 @@ export function ExpensesClient({
                 <tr key={r.id} onClick={() => setEdit(r)}>
                   <td data-label="Date" className="num whitespace-nowrap">{fmtDateShort(r.occurred_on)}</td>
                   <td data-label="Category" className="capitalize">{r.category}</td>
-                  <td data-label="Memo" className="text-ink-2 max-w-[240px] truncate">{r.memo}</td>
+                  <td data-label="Memo" className="text-ink-2 max-w-[240px] truncate">
+                    {r.memo}
+                    {r.paid_by_employee_id && (
+                      <span className={`chip ml-1.5 ${r.reimbursed_on ? "chip-ok" : "chip-warn"}`}>
+                        {nameOf(r.paid_by_employee_id)} paid{r.reimbursed_on ? " · paid back" : " · owed"}
+                      </span>
+                    )}
+                  </td>
                   <td data-label="Amount" className="num text-right font-medium">{money(r.amount)}</td>
                 </tr>
               ))}
@@ -133,7 +172,7 @@ export function ExpensesClient({
         )}
       </div>
 
-      {edit && <ExpenseEditSheet expense={edit} onClose={() => setEdit(null)} />}
+      {edit && <ExpenseEditSheet expense={edit} employees={employees} onClose={() => setEdit(null)} />}
       {confirm && <ConfirmDueSheet item={confirm} onClose={() => setConfirm(null)} />}
       {recurringOpen && <RecurringSheet items={recurring} onClose={() => setRecurringOpen(false)} />}
     </div>
@@ -344,8 +383,9 @@ function RecurringForm({ item, onBack, onClose }: { item: RecurringExpense | nul
   );
 }
 
-function ExpenseEditSheet({ expense, onClose }: { expense: Expense; onClose: () => void }) {
+function ExpenseEditSheet({ expense, employees, onClose }: { expense: Expense; employees: Payer[]; onClose: () => void }) {
   const router = useRouter();
+  const [paidBy, setPaidBy] = useState<string | null>(expense.paid_by_employee_id ?? null);
   const [amount, setAmount] = useState(String(expense.amount));
   const [category, setCategory] = useState(expense.category);
   const [memo, setMemo] = useState(expense.memo ?? "");
@@ -379,6 +419,11 @@ function ExpenseEditSheet({ expense, onClose }: { expense: Expense; onClose: () 
         <Field label="Memo">
           <input className="input" value={memo} onChange={(e) => setMemo(e.target.value)} />
         </Field>
+        {employees.length > 0 && (
+          <Field label="Who paid" hint={expense.reimbursed_on ? `Paid back ${expense.reimbursed_on}` : paidBy ? "Owed back on Payouts until you mark it paid" : undefined}>
+            <PaidBy value={paidBy} onChange={setPaidBy} employees={employees} />
+          </Field>
+        )}
         <ErrorNote>{error}</ErrorNote>
         <button
           className="btn btn-primary h-11"
@@ -386,7 +431,7 @@ function ExpenseEditSheet({ expense, onClose }: { expense: Expense; onClose: () 
           onClick={async () => {
             setError(null);
             setPending(true);
-            const res = await saveExpense({ occurredOn: date, category, amount: Number(amount), memo }, expense.id);
+            const res = await saveExpense({ occurredOn: date, category, amount: Number(amount), memo, paidByEmployeeId: paidBy }, expense.id);
             setPending(false);
             if (!res.ok) return setError(res.error);
             onClose();

@@ -40,9 +40,26 @@
   --color-bad-line: light-dark(#fecaca, #5c2226);
 
   /* data viz — categorical, CVD-checked in both themes */
-  --color-viz-1: light-dark(#2563eb, #5b93f5);
-  --color-viz-2: light-dark(#0d9488, #2bb3a6);
-  --color-viz-3: light-dark(#d97706, #e6a03c);
+  /* dark steps sit in the dataviz L 0.48–0.67 band for the dark surface (validated 2026-10-26) */
+  --color-viz-1: light-dark(#2563eb, #3b78d9);
+  --color-viz-2: light-dark(#0d9488, #1a9487);
+  --color-viz-3: light-dark(#d97706, #c98326);
+
+  /* crew — one per worker (employees.color 1–6): lane stripe + avatar ring, and a
+     wash for lane headers. Worker 1 is teal on purpose: brand blue is the owner's. Text on the wash uses --color-ink (≥4.5:1 both themes);
+     the solid colors are used as 3px stripes / rings only, never as text. */
+  --color-worker-1: light-dark(#0d9488, #2bb3a6);
+  --color-worker-2: light-dark(#7c3aed, #a78bfa);
+  --color-worker-3: light-dark(#d97706, #e6a03c);
+  --color-worker-4: light-dark(#db2777, #f472b6);
+  --color-worker-5: light-dark(#4d7c0f, #a3e635);
+  --color-worker-6: light-dark(#2563eb, #5b93f5);
+  --color-worker-1-wash: light-dark(#ecfdf8, #0e2320);
+  --color-worker-2-wash: light-dark(#f5f3ff, #1e1533);
+  --color-worker-3-wash: light-dark(#fff7ed, #261c0c);
+  --color-worker-4-wash: light-dark(#fdf2f8, #2a1220);
+  --color-worker-5-wash: light-dark(#f7fee7, #16220a);
+  --color-worker-6-wash: light-dark(#eff4ff, #13203a);
 
   /* "pit lane" — always dark, theme-independent: where the white logo lives */
   --color-pit: #0a0e14;
@@ -51,6 +68,10 @@
   --color-pit-text: #98a4b5;
   --color-pit-bright: #e8edf4;
   --color-brand-glow: #7fb0ff;
+  /* status tones on the pit surface (toast): ≥7:1 on #0a0e14, both themes */
+  --color-pit-ok: #4ccb7f;
+  --color-pit-warn: #f0ae4c;
+  --color-pit-bad: #f47a7a;
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 
@@ -348,7 +369,7 @@
     .btn-sm.btn-icon { width: 34px; }
   }
 
-  /* Option pills (pick one / pick many). Toggle with aria-pressed or data-on. */
+  /* Option pills (pick one / pick many). Toggle with aria-pressed, aria-checked or data-on. */
   .choice {
     display: inline-flex;
     align-items: center;
@@ -374,7 +395,8 @@
   .choice:hover { border-color: var(--color-faint); }
   .choice:active { transform: scale(0.97); }
   /* Selected: soft brand wash + a 2px-feel brand edge (inset ring keeps size fixed) */
-  .choice[aria-pressed="true"], .choice[data-on="true"] {
+  .choice[aria-pressed="true"],
+  .choice[aria-checked="true"], .choice[data-on="true"] {
     background: var(--color-brand-wash);
     border-color: var(--color-brand);
     color: var(--color-brand-deep);
@@ -571,6 +593,46 @@
   @media (prefers-reduced-transparency: reduce) {
     .glass { background: var(--color-card); backdrop-filter: none; -webkit-backdrop-filter: none; }
   }
+
+  /* Toast — one at a time, on the always-dark pit surface so it reads over any content
+     in both themes (brand-glow on pit = 7.6:1). Sits above the floating tab bar +
+     New/Search stack on phones (they take the right ~72px). */
+  .toast {
+    position: fixed;
+    z-index: 60;
+    left: 12px;
+    right: 84px;
+    bottom: calc(env(safe-area-inset-bottom) + 84px);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 48px;
+    padding: 10px 12px 10px 14px;
+    border-radius: var(--radius-lg);
+    background: var(--color-pit);
+    color: var(--color-pit-bright);
+    box-shadow: var(--shadow-pop);
+    touch-action: pan-x;
+  }
+  @media (min-width: 768px) {
+    .toast { left: auto; right: 16px; bottom: 16px; width: 360px; }
+  }
+  .toast-icon { display: inline-flex; flex: none; }
+  .toast-action {
+    flex: none;
+    min-height: 38px;
+    padding: 0 12px;
+    margin: -4px -4px -4px 0;
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-brand-glow);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .toast-action:hover { background: color-mix(in oklab, var(--color-pit-bright) 10%, transparent); }
+  .toast-action:disabled { opacity: 0.6; }
 
   /* The rim spins; the tire doesn't. */
   .wheel-spin {

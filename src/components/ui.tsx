@@ -416,6 +416,91 @@ export function CopyButton({ text, label = "Copy", className = "btn btn-sm" }: {
   );
 }
 
+/**
+ * Save-type button driven by the caller's state machine: idle → Busy → a check "Saved"
+ * for a beat, errors inline beside it. The label swap is the CopyButton pattern.
+ */
+export function SuccessButton({
+  state,
+  onClick,
+  children,
+  doneLabel = "Saved",
+  busyLabel = "Saving…",
+  className = "btn btn-primary btn-sm",
+  disabled,
+}: {
+  state: "idle" | "saving" | "saved" | (string & {});
+  onClick: () => void;
+  children: ReactNode;
+  doneLabel?: string;
+  busyLabel?: string;
+  className?: string;
+  disabled?: boolean;
+}) {
+  const error = state !== "idle" && state !== "saving" && state !== "saved" ? state : null;
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <button type="button" className={className} onClick={onClick} disabled={disabled || state === "saving"} aria-busy={state === "saving"} aria-live="polite">
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.span
+            key={state === "saved" ? "done" : state === "saving" ? "busy" : "idle"}
+            className="inline-flex items-center gap-1.5"
+            initial={{ opacity: 0, scale: 0.85 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.85 }}
+            transition={{ duration: 0.16 }}
+          >
+            {state === "saving" ? (
+              <Busy>{busyLabel}</Busy>
+            ) : state === "saved" ? (
+              <>
+                <IconCheck width={14} height={14} weight="bold" /> {doneLabel}
+              </>
+            ) : (
+              children
+            )}
+          </motion.span>
+        </AnimatePresence>
+      </button>
+      {error && (
+        <span role="alert" className="text-sm text-bad truncate">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A list that changes while you look at it (jobs done, reminders cleared): rows rise in
+ * and collapse out. Pair `LiveList` with `LiveRow` children keyed by id. First paint is
+ * left to the CSS `.stagger` entrance (`initial={false}`), so nothing animates twice.
+ * HIG motion.md: brief, purposeful, tied to the change — not decoration.
+ */
+export function LiveList({ children }: { children: ReactNode }) {
+  return (
+    <AnimatePresence mode="popLayout" initial={false}>
+      {children}
+    </AnimatePresence>
+  );
+}
+
+export function LiveRow({ children, className, ref }: { children: ReactNode; className?: string; ref?: React.Ref<HTMLDivElement> }) {
+  return (
+    <motion.div
+      ref={ref}
+      layout="position"
+      className={className}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.98 }}
+      transition={spring}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
 /** In-flight label for a button: the brand wheel + verb ("Saving…"). */
 export function Busy({ children }: { children: ReactNode }) {
   return (
@@ -450,6 +535,53 @@ export function ErrorNote({ children }: { children: ReactNode }) {
     >
       {children}
     </motion.p>
+  );
+}
+
+/**
+ * Inline confirmation for an action with consequences: title, one line on what happens,
+ * optional extras (a checkbox row), Cancel + a verb-labelled primary. Two buttons, no
+ * "OK" (HIG alerts.md › Best practices). Destructive = red primary.
+ */
+export function ConfirmPanel({
+  title,
+  consequence,
+  confirmLabel,
+  busyLabel = "Working…",
+  destructive,
+  pending,
+  onConfirm,
+  onCancel,
+  cancelLabel = "Cancel",
+  children,
+}: {
+  title: string;
+  consequence?: string;
+  confirmLabel: string;
+  busyLabel?: string;
+  destructive?: boolean;
+  pending?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+  cancelLabel?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="well p-4 flex flex-col gap-3" role="group" aria-label={title}>
+      <div>
+        <p className="h-card">{title}</p>
+        {consequence && <p className="mt-1 text-sm text-ink-2">{consequence}</p>}
+      </div>
+      {children}
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" className="btn" onClick={onCancel} disabled={pending}>
+          {cancelLabel}
+        </button>
+        <button type="button" className={`btn ${destructive ? "btn-danger" : "btn-primary"}`} onClick={onConfirm} disabled={pending} aria-busy={pending}>
+          {pending ? <Busy>{busyLabel}</Busy> : confirmLabel}
+        </button>
+      </div>
+    </div>
   );
 }
 

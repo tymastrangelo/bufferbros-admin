@@ -6,10 +6,12 @@ import { AppointmentSheet } from "@/components/appointment-sheet";
 import { BlockSheet } from "@/components/block-sheet";
 import { IconBlock, IconChevronLeft, IconChevronRight, IconPlus } from "@/components/icons";
 import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
-import { Busy, Segmented, Sheet } from "@/components/ui";
-import { deleteBlock } from "@/lib/actions/settings";
+import { Avatar, Busy, Segmented, Sheet } from "@/components/ui";
+import { addBlock, deleteBlock } from "@/lib/actions/settings";
+import { useToast } from "@/components/toast";
 import { saveMyCalendarFeed, syncCalendarNow } from "@/lib/actions/employees";
 import type { Catalog } from "@/lib/catalog";
+import { hoursFor, lanesOf, workerColor, workerWash } from "@/lib/crew";
 import { money } from "@/lib/format";
 import type { ProjectedVisit } from "@/lib/plan-projection";
 import { addDays, addMonths, fmtDateLong, fmtDateShort, fmtMonth, minToLabel, monthGridStart, nowMinutes, weekdayOf, WEEKDAYS_SHORT, ymOf } from "@/lib/time";
@@ -18,6 +20,11 @@ import type { Block, Employee, WeeklyHours } from "@/lib/types";
 export type CalView = "month" | "week" | "day";
 
 const HOUR_PX = 56;
+
+/** A worker as the calendar needs them: lane color + their own hours. */
+export type CrewLane = Pick<Employee, "id" | "name" | "color" | "hours">;
+
+const assigneesOf = (j: JobWithCustomer) => j.appointment_employees?.map((a) => a.employee_id) ?? (j.employee_id ? [j.employee_id] : []);
 
 export function CalendarClient({
   view,
@@ -34,6 +41,9 @@ export function CalendarClient({
   owner,
   myEmployee,
   employeeNames,
+  crew,
+  who,
+  lanes,
 }: {
   view: CalView;
   anchor: string;
@@ -52,13 +62,19 @@ export function CalendarClient({
   /** The signed-in worker's employee row (null for the owner) — powers "My other job". */
   myEmployee: Employee | null;
   employeeNames: Record<string, string>;
+  /** Active workers (owner only; workers get []). */
+  crew: CrewLane[];
+  /** Crew filter from the URL: "all" | "me" | employee id. */
+  who: string;
+  /** Day view split into one column per worker. */
+  lanes: boolean;
 }) {
   const router = useRouter();
   // Store the tapped job, but always render the fresh copy from server props —
   // after an action refreshes the route, the open sheet updates in place.
   const [selected, setSelected] = useState<JobWithCustomer | null>(null);
   const selectedJob = selected ? (jobs.find((j) => j.id === selected.id) ?? selected) : null;
-  const [newSheet, setNewSheet] = useState<{ date: string; startMin?: number; kind?: "car" | "boat" } | null>(
+  const [newSheet, setNewSheet] = useState<{ date: string; startMin?: number; kind?: "car" | "boat"; assignees?: string[] } | null>(
     openNew ? { date: anchor, kind: newKind } : null
   );
   const [blockSheet, setBlockSheet] = useState(openBlock);
@@ -77,13 +93,17 @@ export function CalendarClient({
     setPrevOpenBlock(openBlock);
     if (openBlock) setBlockSheet(true);
   }
+  const crewQuery = useCallback(
+    (v: CalView, w: string = who, l: boolean = lanes) => `${w !== "all" ? `&who=${w}` : ""}${l && v === "day" ? "&lanes=1" : ""}`,
+    [who, lanes]
+  );
   const stripParams = useCallback(() => {
-    window.history.replaceState(null, "", `/calendar?view=${view}&d=${anchor}`);
-  }, [view, anchor]);
+    window.history.replaceState(null, "", `/calendar?view=${view}&d=${anchor}${crewQuery(view)}`);
+  }, [view, anchor, crewQuery]);
 
   const nav = useCallback(
-    (v: CalView, d: string) => router.push(`/calendar?view=${v}&d=${d}`),
-    [router]
+    (v: CalView, d: string, w?: string, l?: boolean) => router.push(`/calendar?view=${v}&d=${d}${crewQuery(v, w, l)}`),
+    [router, crewQuery]
   );
 
   const step = (dir: 1 | -1) => {
@@ -99,8 +119,34 @@ export function CalendarClient({
         : fmtDateLong(anchor);
 
   const hoursByDow = useMemo(() => new Map(hours.map((h) => [h.weekday, h])), [hours]);
-  const jobsByDate = useMemo(() => groupBy(jobs, (j) => j.date), [jobs]);
-  const blocksByDate = useMemo(() => groupBy(blocks, (b) => b.date), [blocks]);
+  // Crew filter: "me" = jobs nobody's assigned to (the owner's), a worker = jobs they're on.
+  const visibleJobs = useMemo(() => (who === "all" ? jobs : jobs.filter((j) => lanesOf(assigneesOf(j)).includes(who))), [jobs, who]);
+  const visibleBlocks = useMemo(
+    () => (who === "all" ? blocks : blocks.filter((b) => b.employee_id == null || b.employee_id === who)),
+    [blocks, who]
+  );
+  const jobsByDate = useMemo(() => groupBy(visibleJobs, (j) => j.date), [visibleJobs]);
+  const blocksByDate = useMemo(() => groupBy(visibleBlocks, (b) => b.date), [visibleBlocks]);
+  const crewById = useMemo(() => new Map(crew.map((c) => [c.id, c])), [crew]);
+  const showCrew = owner && crew.length > 0 && view !== "month";
+  const laneMode = showCrew && view === "day" && lanes;
+  // One column per worker + the owner; each gets the jobs they're on and their own hours.
+  const dayLanes = useMemo<Lane[] | undefined>(() => {
+    if (!laneMode) return undefined;
+    const d = anchor;
+    const dayJobs = jobs.filter((j) => j.date === d);
+    const dayBlocks = blocks.filter((b) => b.date === d);
+    const biz = hoursByDow.get(weekdayOf(d));
+    const mk = (key: string, label: string, color: number | null, h: CrewLane["hours"]): Lane => ({
+      key,
+      label,
+      color,
+      hours: hoursFor(h, weekdayOf(d), biz),
+      jobs: dayJobs.filter((j) => lanesOf(assigneesOf(j)).includes(key)),
+      blocks: dayBlocks.filter((b) => b.employee_id == null || b.employee_id === key),
+    });
+    return [mk("me", "Me", null, null), ...crew.map((c) => mk(c.id, c.name, c.color, c.hours))];
+  }, [laneMode, anchor, jobs, blocks, crew, hoursByDow]);
   const projectedByDate = useMemo(
     () => groupBy(showProjected ? projected : [], (p) => p.date),
     [projected, showProjected]
@@ -168,6 +214,31 @@ export function CalendarClient({
         <LegendDot className="hatch border border-line-2" label="closed" />
       </div>
 
+      {showCrew && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Show jobs for">
+            {[{ id: "all", name: "All" }, { id: "me", name: "Me" }, ...crew].map((c) => (
+              <button key={c.id} type="button" className="chip px-3 text-dense" aria-pressed={who === c.id} onClick={() => nav(view, anchor, c.id)}>
+                {"color" in c && <span className="mr-1.5 inline-block h-2 w-2 rounded-full" style={{ background: workerColor(c.color) }} aria-hidden />}
+                {c.name}
+              </button>
+            ))}
+          </div>
+          {view === "day" && (
+            <Segmented
+              label="Day layout"
+              className="ml-auto"
+              value={lanes ? "lanes" : "timeline"}
+              onChange={(v) => nav(view, anchor, who, v === "lanes")}
+              options={[
+                { value: "timeline", label: "Timeline" },
+                { value: "lanes", label: "By worker" },
+              ]}
+            />
+          )}
+        </div>
+      )}
+
       <div key={view} className="mt-3 page-in">
         {view === "month" && (
           <MonthGrid
@@ -191,9 +262,11 @@ export function CalendarClient({
             onJob={setSelected}
             onProjected={(p) => router.push(`/plans/${p.plan_id}`)}
             onBlock={setBlockDetail}
-            onEmpty={(date, min) => setNewSheet({ date, startMin: min })}
+            onEmpty={(date, min, lane) => setNewSheet({ date, startMin: min, assignees: lane ? (lane === "me" ? [] : [lane]) : undefined })}
             onDayHeader={view === "week" ? (d) => nav("day", d) : undefined}
             owner={owner}
+            crewById={crewById}
+            lanes={dayLanes}
           />
         )}
       </div>
@@ -210,6 +283,7 @@ export function CalendarClient({
           defaultDate={newSheet.date}
           defaultStartMin={newSheet.startMin}
           defaultKind={newSheet.kind}
+          defaultAssignees={newSheet.assignees}
         />
       )}
       <BlockSheet
@@ -354,6 +428,26 @@ function MonthGrid({
 
 /* ---------------- Week / Day time grid ---------------- */
 
+/** One column in "By worker" mode: a person, their hours, and only their items. */
+interface Lane {
+  key: string; // "me" or an employee id
+  label: string;
+  color: number | null;
+  hours: [number, number] | null;
+  jobs: JobWithCustomer[];
+  blocks: Block[];
+}
+
+interface Col {
+  key: string;
+  date: string;
+  lane?: Lane;
+  hours: [number, number] | null;
+  jobs: JobWithCustomer[];
+  proj: ProjectedVisit[];
+  blocks: Block[];
+}
+
 function TimeGrid({
   dates,
   today,
@@ -367,6 +461,8 @@ function TimeGrid({
   onEmpty,
   onDayHeader,
   owner,
+  crewById,
+  lanes,
 }: {
   dates: string[];
   today: string;
@@ -377,28 +473,37 @@ function TimeGrid({
   onJob: (j: JobWithCustomer) => void;
   onProjected: (p: ProjectedVisit) => void;
   onBlock: (b: Block) => void;
-  onEmpty: (date: string, startMin: number) => void;
+  onEmpty: (date: string, startMin: number, lane?: string) => void;
   onDayHeader?: (d: string) => void;
   owner: boolean;
+  crewById: Map<string, CrewLane>;
+  /** Day view split per worker; columns become people instead of dates. */
+  lanes?: Lane[];
 }) {
+  const cols: Col[] = lanes
+    ? lanes.map((l) => ({ key: l.key, date: dates[0], lane: l, hours: l.hours, jobs: l.jobs, proj: l.key === "me" ? projectedByDate.get(dates[0]) ?? [] : [], blocks: l.blocks }))
+    : dates.map((d) => {
+        const h = hoursByDow.get(weekdayOf(d));
+        return { key: d, date: d, hours: h?.enabled ? [h.open_min, h.close_min] : null, jobs: jobsByDate.get(d) ?? [], proj: projectedByDate.get(d) ?? [], blocks: blocksByDate.get(d) ?? [] };
+      });
+
   // Window: business hours padded, expanded to fit anything scheduled outside them.
   let start = 7 * 60;
   let end = 19 * 60;
-  for (const d of dates) {
-    const h = hoursByDow.get(weekdayOf(d));
-    if (h?.enabled) {
-      start = Math.min(start, h.open_min);
-      end = Math.max(end, h.close_min);
+  for (const c of cols) {
+    if (c.hours) {
+      start = Math.min(start, c.hours[0]);
+      end = Math.max(end, c.hours[1]);
     }
-    for (const j of jobsByDate.get(d) ?? []) {
+    for (const j of c.jobs) {
       start = Math.min(start, j.start_min);
       end = Math.max(end, j.start_min + j.duration_min);
     }
-    for (const p of projectedByDate.get(d) ?? []) {
+    for (const p of c.proj) {
       start = Math.min(start, p.start_min);
       end = Math.max(end, p.start_min + p.duration_min);
     }
-    for (const b of blocksByDate.get(d) ?? []) {
+    for (const b of c.blocks) {
       if (!(b.start_min === 0 && b.end_min === 1440)) {
         start = Math.min(start, b.start_min);
         end = Math.max(end, b.end_min);
@@ -418,29 +523,45 @@ function TimeGrid({
     () => null
   );
   const y = (min: number) => ((min - start) / 60) * HOUR_PX;
+  const stripeOf = (j: JobWithCustomer) => {
+    const first = crewById.get(assigneesOf(j)[0] ?? "");
+    return first ? workerColor(first.color) : "var(--color-brand)";
+  };
 
   return (
     <div className="card overflow-x-auto">
-      <div className="min-w-full" style={{ minWidth: dates.length > 1 ? 640 : undefined }}>
+      <div className="min-w-full" style={{ minWidth: cols.length > 1 ? Math.max(640, cols.length * 160) : undefined }}>
         {/* headers */}
-        {dates.length > 1 && (
-          <div className="grid border-b border-line bg-subtle" style={{ gridTemplateColumns: `48px repeat(${dates.length}, 1fr)` }}>
+        {cols.length > 1 && (
+          <div className="grid border-b border-line bg-subtle" style={{ gridTemplateColumns: `48px repeat(${cols.length}, 1fr)` }}>
             <div />
-            {dates.map((d) => (
-              <button
-                key={d}
-                onClick={() => onDayHeader?.(d)}
-                className={`py-1.5 text-center border-l border-line ${d === today ? "text-brand-deep" : "text-ink-2"}`}
-              >
-                <span className="label block">{WEEKDAYS_SHORT[weekdayOf(d)]}</span>
-                <span className={`text-md font-semibold num ${d === today ? "text-brand-deep" : ""}`}>
-                  {parseInt(d.slice(8), 10)}
-                </span>
-              </button>
-            ))}
+            {cols.map((c) =>
+              c.lane ? (
+                <div
+                  key={c.key}
+                  className="py-1.5 px-1 border-l border-line flex items-center justify-center gap-1.5 min-w-0"
+                  style={c.lane.color ? { background: workerWash(c.lane.color) } : undefined}
+                >
+                  <Avatar name={c.lane.label} size={20} className="ring-2 ring-card" />
+                  <span className="text-dense font-semibold truncate">{c.lane.label}</span>
+                  {!c.hours && <span className="text-micro text-faint">off</span>}
+                </div>
+              ) : (
+                <button
+                  key={c.key}
+                  onClick={() => onDayHeader?.(c.date)}
+                  className={`py-1.5 text-center border-l border-line ${c.date === today ? "text-brand-deep" : "text-ink-2"}`}
+                >
+                  <span className="label block">{WEEKDAYS_SHORT[weekdayOf(c.date)]}</span>
+                  <span className={`text-md font-semibold num ${c.date === today ? "text-brand-deep" : ""}`}>
+                    {parseInt(c.date.slice(8), 10)}
+                  </span>
+                </button>
+              )
+            )}
           </div>
         )}
-        <div className="grid" style={{ gridTemplateColumns: `48px repeat(${dates.length}, 1fr)` }}>
+        <div className="grid" style={{ gridTemplateColumns: `48px repeat(${cols.length}, 1fr)` }}>
           {/* hour rail */}
           <div className="relative" style={{ height: totalH }}>
             {Array.from({ length: (end - start) / 60 }, (_, i) => (
@@ -453,22 +574,19 @@ function TimeGrid({
               </span>
             ))}
           </div>
-          {dates.map((d) => {
-            const h = hoursByDow.get(weekdayOf(d));
-            const closed = !(h?.enabled ?? true);
-            const dayJobs = jobsByDate.get(d) ?? [];
-            const dayProj = projectedByDate.get(d) ?? [];
-            const dayBlocks = blocksByDate.get(d) ?? [];
+          {cols.map((c) => {
+            const d = c.date;
+            const closed = !c.hours;
             return (
               <div
-                key={d}
+                key={c.key}
                 className={`relative border-l border-line ${closed ? "hatch" : ""}`}
                 style={{ height: totalH }}
                 onClick={(e) => {
                   if ((e.target as HTMLElement).closest("[data-item]")) return;
                   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                   const min = start + Math.floor(((e.clientY - rect.top) / HOUR_PX) * 60);
-                  onEmpty(d, Math.round(min / 30) * 30);
+                  onEmpty(d, Math.round(min / 30) * 30, c.lane?.key);
                 }}
               >
                 {d === today && now != null && now >= start && now <= end && (
@@ -481,17 +599,17 @@ function TimeGrid({
                 {Array.from({ length: (end - start) / 60 }, (_, i) => (
                   <span key={i} className="absolute inset-x-0 border-t border-line/70" style={{ top: i * HOUR_PX }} />
                 ))}
-                {!closed && h && (
+                {c.hours && (
                   <>
-                    {h.open_min > start && (
-                      <span className="absolute inset-x-0 bg-subtle" style={{ top: 0, height: y(h.open_min) }} />
+                    {c.hours[0] > start && (
+                      <span className="absolute inset-x-0 bg-subtle" style={{ top: 0, height: y(c.hours[0]) }} />
                     )}
-                    {h.close_min < end && (
-                      <span className="absolute inset-x-0 bg-subtle" style={{ top: y(h.close_min), height: totalH - y(h.close_min) }} />
+                    {c.hours[1] < end && (
+                      <span className="absolute inset-x-0 bg-subtle" style={{ top: y(c.hours[1]), height: totalH - y(c.hours[1]) }} />
                     )}
                   </>
                 )}
-                {dayBlocks.map((b) => {
+                {c.blocks.map((b) => {
                   const bs = b.start_min === 0 && b.end_min === 1440 ? start : Math.max(b.start_min, start);
                   const be = b.start_min === 0 && b.end_min === 1440 ? end : Math.min(b.end_min, end);
                   return (
@@ -509,7 +627,7 @@ function TimeGrid({
                     </button>
                   );
                 })}
-                {dayProj.map((p, i) => (
+                {c.proj.map((p, i) => (
                   <button
                     key={`${p.plan_id}-${i}`}
                     data-item
@@ -525,31 +643,50 @@ function TimeGrid({
                     <span className="text-micro num block leading-tight text-ink-2">{minToLabel(p.start_min)} · plan slot</span>
                   </button>
                 ))}
-                {dayJobs.map((j) => (
-                  <button
-                    key={j.id}
-                    data-item
-                    onClick={() => onJob(j)}
-                    className={`absolute rounded-md border px-1.5 py-1 text-left overflow-hidden transition-[box-shadow,transform] duration-150 hover:z-10 hover:shadow-[var(--shadow-raise)] active:scale-[0.98] ${
-                      j.status === "completed"
-                        ? "bg-ok-wash border-ok/40"
-                        : j.status === "no_show"
-                          ? "bg-warn-wash border-warn/40"
-                          : j.plan_id
-                            ? "bg-brand-wash border-brand/50"
-                            : "bg-brand/95 border-brand text-white"
-                    }`}
-                    style={{ top: y(j.start_min) + 1, height: Math.max((j.duration_min / 60) * HOUR_PX - 2, 22), left: 2, right: 2 }}
-                  >
-                    <span className="text-label font-semibold truncate block leading-tight">
-                      {(j.customers?.name ?? j.contact_name ?? "?").split(" ")[0]}
-                      {owner ? ` · ${money(Number(j.price))}` : ""}
-                    </span>
-                    <span className={`text-micro num block leading-tight ${j.status === "scheduled" && !j.plan_id ? "text-white/80" : "text-ink-2"}`}>
-                      {minToLabel(j.start_min)} · {j.duration_min}m
-                    </span>
-                  </button>
-                ))}
+                {c.jobs.map((j) => {
+                  const ids = assigneesOf(j);
+                  const people = ids.map((id) => crewById.get(id)).filter(Boolean) as CrewLane[];
+                  return (
+                    <button
+                      key={j.id}
+                      data-item
+                      onClick={() => onJob(j)}
+                      className={`absolute rounded-md border px-1.5 py-1 text-left overflow-hidden transition-[box-shadow,transform] duration-150 hover:z-10 hover:shadow-[var(--shadow-raise)] active:scale-[0.98] ${
+                        j.status === "completed"
+                          ? "bg-ok-wash border-ok/40"
+                          : j.status === "no_show"
+                            ? "bg-warn-wash border-warn/40"
+                            : j.plan_id
+                              ? "bg-brand-wash border-brand/50"
+                              : "bg-brand/95 border-brand text-white"
+                      }`}
+                      style={{
+                        top: y(j.start_min) + 1,
+                        height: Math.max((j.duration_min / 60) * HOUR_PX - 2, 22),
+                        left: 2,
+                        right: 2,
+                        borderLeft: crewById.size ? `3px solid ${stripeOf(j)}` : undefined,
+                      }}
+                    >
+                      {people.length > 0 && !c.lane && (
+                        <span className="absolute top-1 right-1 hidden md:flex -space-x-1" aria-hidden>
+                          {people.slice(0, 2).map((p) => (
+                            <Avatar key={p.id} name={p.name} size={16} className="ring-1 ring-card" />
+                          ))}
+                          {people.length > 2 && <span className="text-micro num font-semibold pl-1.5">+{people.length - 2}</span>}
+                        </span>
+                      )}
+                      <span className="text-label font-semibold truncate block leading-tight pr-8">
+                        {(j.customers?.name ?? j.contact_name ?? "?").split(" ")[0]}
+                        {owner ? ` · ${money(Number(j.price))}` : ""}
+                      </span>
+                      <span className={`text-micro num block leading-tight ${j.status === "scheduled" && !j.plan_id ? "text-white/80" : "text-ink-2"}`}>
+                        {minToLabel(j.start_min)} · {j.duration_min}m
+                        {people.length > 0 && <span className="sr-only"> · {people.map((p) => p.name).join(", ")}</span>}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             );
           })}
@@ -558,8 +695,6 @@ function TimeGrid({
     </div>
   );
 }
-
-/* ---------------- Blocks ---------------- */
 
 function BlockDetailSheet({
   block,
@@ -571,6 +706,7 @@ function BlockDetailSheet({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, setPending] = useState(false);
   const who = block.employee_id ? employeeNames[block.employee_id] : null;
   return (
@@ -601,9 +737,21 @@ function BlockDetailSheet({
             disabled={pending}
             onClick={async () => {
               setPending(true);
-              await deleteBlock(block.id);
+              const res = await deleteBlock(block.id);
+              setPending(false);
+              if (!res.ok) return toast({ title: "Couldn't remove the block", detail: res.error, tone: "bad" });
               onClose();
               router.refresh();
+              const allDay = block.start_min === 0 && block.end_min === 1440;
+              toast({
+                title: "Block removed",
+                detail: `${fmtDateShort(block.date)} · ${allDay ? "all day" : `${minToLabel(block.start_min)} – ${minToLabel(block.end_min)}`}`,
+                undo: async () => {
+                  const back = await addBlock({ dateFrom: block.date, allDay, startMin: block.start_min, endMin: block.end_min, reason: block.reason });
+                  if (back.ok) router.refresh();
+                  return back;
+                },
+              });
             }}
           >
             {pending ? <Busy>Removing…</Busy> : "Remove block"}

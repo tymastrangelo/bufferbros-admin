@@ -19,7 +19,7 @@ import {
 } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
-import { todayYmd } from "@/lib/time";
+import { minToLabel, todayYmd } from "@/lib/time";
 import { useOwner } from "@/lib/use-owner";
 import { SIZES, sizeLabel, vehicleLabel, type Employee, type SizeId, type Vehicle } from "@/lib/types";
 import { CustomerPicker, type PickedCustomer } from "./customer-picker";
@@ -35,6 +35,7 @@ export function AppointmentSheet({
   defaultStartMin,
   defaultCustomer,
   defaultKind = "car",
+  defaultAssignees,
 }: {
   open: boolean;
   onClose: () => void;
@@ -44,6 +45,8 @@ export function AppointmentSheet({
   defaultCustomer?: PickedCustomer | null;
   /** "boat" opens the boat-detail flow: boats preselected, per-foot pricing, no car add-ons. */
   defaultKind?: "car" | "boat";
+  /** Pre-picked workers (tapping inside a worker's calendar lane). [] = Me. */
+  defaultAssignees?: string[];
 }) {
   const boatMode = defaultKind === "boat";
   /** The vehicle a picked customer starts with — their first boat in boat mode, first car otherwise. */
@@ -54,7 +57,7 @@ export function AppointmentSheet({
   // Who's doing the job: [] = "Me" (the owner books against the business calendar
   // only); worker ids narrow the slot grid to times they're ALL free. A washer
   // booking is auto-assigned to themselves (their RLS-visible row is just their own).
-  const [assignees, setAssignees] = useState<string[]>([]);
+  const [assignees, setAssignees] = useState<string[]>(defaultAssignees ?? []);
   const [workers, setWorkers] = useState<Pick<Employee, "id" | "name" | "active" | "user_id">[]>([]);
   useEffect(() => {
     let stale = false;
@@ -83,6 +86,13 @@ export function AppointmentSheet({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState(defaultCustomer?.addresses?.[0]?.address ?? "");
+  const [siteNotes, setSiteNotes] = useState(defaultCustomer?.site_notes ?? "");
+  // One-off new customer: the car they booked, created with them.
+  const [nvMake, setNvMake] = useState("");
+  const [nvModel, setNvModel] = useState("");
+  const [nvYear, setNvYear] = useState("");
+  const [nvColor, setNvColor] = useState("");
+  const [nvPlate, setNvPlate] = useState("");
   const [sizeId, setSizeId] = useState<SizeId>(defaultCustomer?.vehicles?.[0]?.size_id ?? "sedan");
   const [boatFt, setBoatFt] = useState("");
   // The boat side of the visit: which per-foot services, condition, in-water vs trailer.
@@ -98,6 +108,23 @@ export function AppointmentSheet({
   const [garageOk, setGarageOk] = useState(false);
   const [addonIds, setAddonIds] = useState<string[]>([]);
   const [date, setDate] = useState(defaultDate ?? todayYmd());
+  // Who's free that day (crew_day_status, 0029): "free" / "off" / "busy till 2:00 PM" under each chip.
+  const [dayStatus, setDayStatus] = useState<Record<string, { status: string; free_from_min: number | null }>>({});
+  useEffect(() => {
+    if (!owner || !date) return;
+    let stale = false;
+    createClient()
+      .rpc("crew_day_status", { p_date: date })
+      .then(({ data }) => {
+        if (stale) return;
+        const next: Record<string, { status: string; free_from_min: number | null }> = {};
+        for (const r of (data ?? []) as { employee_id: string; status: string; free_from_min: number | null }[]) next[r.employee_id] = r;
+        setDayStatus(next);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [owner, date]);
   const [startMin, setStartMin] = useState<number | null>(defaultStartMin ?? null);
   const [offGrid, setOffGrid] = useState(false);
   const [priceOverride, setPriceOverride] = useState<string>("");
@@ -135,6 +162,7 @@ export function AppointmentSheet({
   function pickCustomer(c: PickedCustomer | null) {
     setCustomer(c);
     setVehicles(c?.vehicles ?? []);
+    setSiteNotes(c?.site_notes ?? "");
     const v = preferredVehicle(c?.vehicles);
     setVehicleIds(v ? [v.id] : []);
     if (c) {
@@ -194,6 +222,13 @@ export function AppointmentSheet({
       notes: ceramic ? [notes.trim(), "Ceramic: garage confirmed — car stays garaged 24h after coating."].filter(Boolean).join("\n") : notes,
       customerId: customer?.id ?? null,
       vehicleIds,
+      siteNotes,
+      newVehicle:
+        !customer && oneOff
+          ? boatMode
+            ? { size_id: "large", kind: "boat", length_ft: Number(boatFt) > 0 ? Number(boatFt) : null }
+            : { size_id: sizeId, kind: "car", make: nvMake, model: nvModel, year: Number(nvYear) >= 1900 ? Number(nvYear) : null, color: nvColor, plate: nvPlate }
+          : null,
       employeeIds: assignees,
       force: offGrid,
       notify: notify && !!contactEmail,
@@ -227,6 +262,15 @@ export function AppointmentSheet({
                 <input className="input num" type="tel" placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
                 <input className="input" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
               </div>
+              {!boatMode && (
+                <div className="grid grid-cols-2 gap-2">
+                  <input className="input" placeholder="Make" value={nvMake} onChange={(e) => setNvMake(e.target.value)} aria-label="Vehicle make" />
+                  <input className="input" placeholder="Model" value={nvModel} onChange={(e) => setNvModel(e.target.value)} aria-label="Vehicle model" />
+                  <input className="input num" inputMode="numeric" placeholder="Year" value={nvYear} onChange={(e) => setNvYear(e.target.value)} aria-label="Vehicle year" />
+                  <input className="input" placeholder="Color" value={nvColor} onChange={(e) => setNvColor(e.target.value)} aria-label="Vehicle color" />
+                  <input className="input col-span-2" placeholder="Plate (optional)" value={nvPlate} onChange={(e) => setNvPlate(e.target.value)} aria-label="Plate" />
+                </div>
+              )}
               <p className="text-xs text-faint -mt-0.5">
                 Saved to your client list automatically (matched by phone/email if they already exist). Add an email if
                 they&apos;ll pay by Stripe link.
@@ -240,6 +284,9 @@ export function AppointmentSheet({
 
         <Field label="Address">
           <input className="input" placeholder="Where's the car?" value={address} onChange={(e) => setAddress(e.target.value)} />
+        </Field>
+        <Field label="Getting in" hint="Gate code, parking, water and power. Saved on the customer — shows on every job.">
+          <input className="input" placeholder="Gate 4412 · park on the street · hose on the left" value={siteNotes} onChange={(e) => setSiteNotes(e.target.value)} />
         </Field>
 
         {customer ? (
@@ -435,6 +482,21 @@ export function AppointmentSheet({
           </Field>
         )}
 
+        {(() => {
+          const steps = ceramic ? catalog.checklists.ceramic : boatish ? [] : catalog.checklists.standard;
+          const names = [...steps, ...catalog.addons.filter((a) => addonIds.includes(a.id)).map((a) => a.name)];
+          return names.length > 0 ? (
+            <details className="disclose">
+              <summary className="text-dense text-ink-2 cursor-pointer">What&apos;s included · {names.length} steps to tick on site</summary>
+              <ul className="mt-1.5 text-xs text-ink-2 list-disc pl-5 flex flex-col gap-0.5">
+                {names.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+            </details>
+          ) : null;
+        })()}
+
         {owner && workers.length > 0 && (
           <Field
             label="Who's doing it?"
@@ -457,19 +519,34 @@ export function AppointmentSheet({
               >
                 Me
               </button>
-              {workers.map((w) => (
-                <button
-                  key={w.id}
-                  type="button"
-                  onClick={() => {
-                    setAssignees((ids) => (ids.includes(w.id) ? ids.filter((i) => i !== w.id) : [...ids, w.id]));
-                    setStartMin(null);
-                  }}
-                  className="choice h-9 px-3 text-dense" aria-pressed={assignees.includes(w.id)}
-                >
-                  {w.name}
-                </button>
-              ))}
+              {workers.map((w) => {
+                const st = dayStatus[w.id];
+                const note = !st
+                  ? null
+                  : st.status === "off"
+                    ? "off"
+                    : st.status === "busy" && st.free_from_min != null
+                      ? `busy till ${minToLabel(st.free_from_min)}`
+                      : "free";
+                return (
+                  <button
+                    key={w.id}
+                    type="button"
+                    onClick={() => {
+                      setAssignees((ids) => (ids.includes(w.id) ? ids.filter((i) => i !== w.id) : [...ids, w.id]));
+                      setStartMin(null);
+                    }}
+                    className="choice h-auto min-h-9 px-3 py-1 text-dense flex-col gap-0 leading-tight" aria-pressed={assignees.includes(w.id)}
+                  >
+                    <span>{w.name}</span>
+                    {note && (
+                      <span className={`text-micro font-normal ${st?.status === "free" ? "text-ok" : st?.status === "busy" ? "text-warn" : "text-faint"}`}>
+                        {note}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </Field>
         )}

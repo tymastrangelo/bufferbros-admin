@@ -25,6 +25,7 @@ const catalog: Catalog = {
     ],
     dockPct: 15,
   },
+  checklists: { standard: [], ceramic: [] },
   addons: [
     { id: "pet-hair", name: "Pet hair", price: 40, minutes: 30 },
     {

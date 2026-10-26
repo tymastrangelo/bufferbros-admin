@@ -23,7 +23,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
     db.from("plans").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
     db
       .from("appointments")
-      .select("*, customers(id,name,phone,email,stripe_payments)")
+      .select("*, customers(id,name,phone,email,stripe_payments,site_notes), appointment_employees(employee_id), appointment_vehicles(vehicles(*))")
       .eq("customer_id", id)
       .order("date", { ascending: false })
       .order("start_min"),

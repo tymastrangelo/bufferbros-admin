@@ -90,6 +90,8 @@ export async function getCatalog(): Promise<Catalog> {
       return { id: s.id, name: s.name, price: Number(flat?.price ?? 0), minutes: flat?.minutes ?? 0, bySize };
     });
 
+  const stepsOf = (id: string) =>
+    (((services ?? []) as { id: string; checklist?: unknown }[]).find((r) => r.id === id)?.checklist as string[] | undefined)?.filter((x) => typeof x === "string") ?? [];
   return {
     detail,
     ceramic,
@@ -102,6 +104,7 @@ export async function getCatalog(): Promise<Catalog> {
       prepayDiscountPct: num("prepay_discount_pct", 5),
       multiCarDiscountPct: num("multi_car_discount_pct", 5),
     },
+    checklists: { standard: stepsOf("standard"), ceramic: stepsOf("ceramic-coating") },
     planPricing: ((planPricing ?? []) as { cadence: PlanCadence; size_id: string; price: number }[]).map((p) => ({
       ...p,
       price: Number(p.price),

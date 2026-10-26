@@ -49,6 +49,8 @@ export interface Catalog {
     dockPct: number;
   } | null;
   addons: CatalogAddon[];
+  /** What each base service includes (services.checklist) — seeds every job's checklist. */
+  checklists: Record<BaseService, string[]>;
   planPricing: { cadence: PlanCadence; size_id: string; price: number }[];
   /** Business rules from the settings table (with sane defaults). */
   rules: {

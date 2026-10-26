@@ -7,14 +7,13 @@ import { IconCalendar, IconFlag, IconPhone, IconPin } from "@/components/icons";
 import { TextsToSendCard, TextSyncBar } from "@/components/client-texts";
 import type { Suggestion } from "@/lib/suggestions";
 import { RemindersCard, type ReminderRow } from "@/components/reminders-card";
-import { EmptyState, PageHeader, SectionLabel, Stat } from "@/components/ui";
+import { EmptyState, LiveList, LiveRow, PageHeader, SectionLabel, Stat } from "@/components/ui";
 import type { Catalog } from "@/lib/catalog";
 import type { TextSyncRun } from "@/lib/types";
 import { fmtPhone, mapsHref, money, telHref } from "@/lib/format";
 import { fmtDateShort, minToLabel, nowMinutes } from "@/lib/time";
 
 export interface AttentionData {
-  pending: JobWithCustomer[];
   unlinked: JobWithCustomer[];
   owed: { customer_id: string; name: string; balance: number }[];
   plansWithoutVisit: { id: string; customerName: string; cadence: string }[];
@@ -57,7 +56,7 @@ export function TodayClient({
   // sheet updates in place after any action refreshes the route.
   const [selected, setSelected] = useState<JobWithCustomer | null>(null);
   const selectedJob = selected
-    ? ([...jobs, ...(attention?.pending ?? []), ...(attention?.unlinked ?? [])].find((j) => j.id === selected.id) ??
+    ? ([...jobs, ...(attention?.unlinked ?? [])].find((j) => j.id === selected.id) ??
       selected)
     : null;
   // "Now" marker — null on the server (hydration-safe), ticks every minute on the client.
@@ -72,8 +71,7 @@ export function TodayClient({
 
   const active = jobs.filter((j) => j.status === "scheduled" || j.status === "completed" || j.status === "no_show");
   const attentionCount = attention
-    ? attention.pending.length +
-      attention.unlinked.length +
+    ? attention.unlinked.length +
       attention.owed.length +
       attention.plansWithoutVisit.length +
       (attention.duplicates.length ? 1 : 0)
@@ -95,7 +93,7 @@ export function TodayClient({
       {stats && (
         <div className="stat-grid grid-cols-2 md:grid-cols-5">
           <Stat label="Collected this week" value={money(stats.weekCollected)} />
-          <Stat label="Collected this month" value={money(stats.monthCollected)} />
+          <Stat label="Collected this month" value={money(stats.monthCollected)}  href="/insights" />
           <Stat label="Jobs done this month" value={String(stats.jobsCompleted)} />
           <Stat
             label={stats.payoutNet > 0 ? `${stats.workerLabel} owes you` : stats.payoutNet < 0 ? `You owe ${stats.workerLabel}` : "Payouts"}
@@ -125,6 +123,7 @@ export function TodayClient({
           />
         ) : (
           <div className="stagger relative flex flex-col gap-2">
+            <LiveList>
             {active.map((job, i) => {
               const showNowBefore =
                 now != null &&
@@ -132,12 +131,13 @@ export function TodayClient({
                 (i === 0 || active[i - 1].start_min <= now);
               const inProgress = now != null && now >= job.start_min && now < job.start_min + job.duration_min && job.status === "scheduled";
               return (
-                <div key={job.id}>
+                <LiveRow key={job.id}>
                   {showNowBefore && <NowLine />}
                   <JobCard job={job} inProgress={inProgress} onOpen={() => setSelected(job)} />
-                </div>
+                </LiveRow>
               );
             })}
+            </LiveList>
             {now != null && active.length > 0 && now >= active[active.length - 1].start_min && now >= (active[active.length - 1].start_min + active[active.length - 1].duration_min) && <NowLine />}
           </div>
         )}
@@ -148,27 +148,10 @@ export function TodayClient({
         <section className="mt-8">
           <SectionLabel trailing={attentionCount}>Needs attention</SectionLabel>
           <div className="card divide-y divide-line overflow-hidden">
-            {attention.pending.map((a) => (
-              <button
-                key={a.id}
-                onClick={() => setSelected(a)}
-                className="row row-link justify-between"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">
-                    {a.contact_name ?? a.customers?.name ?? "Unknown"}{" "}
-                    <span className="text-faint font-normal">· web booking · {money(Number(a.price))}</span>
-                  </p>
-                  <p className="text-xs text-faint num">
-                    {fmtDateShort(a.date)} at {minToLabel(a.start_min)} · {a.service_name}
-                  </p>
-                </div>
-                <span className="chip chip-warn shrink-0">approve</span>
-              </button>
-            ))}
+            <LiveList>
             {attention.unlinked.map((a) => (
+              <LiveRow key={a.id}>
               <button
-                key={a.id}
                 onClick={() => setSelected(a)}
                 className="row row-link justify-between"
               >
@@ -182,18 +165,21 @@ export function TodayClient({
                 </div>
                 <span className="chip chip-warn shrink-0">link</span>
               </button>
+              </LiveRow>
             ))}
             {attention.owed.map((b) => (
+              <LiveRow key={`owed-${b.customer_id}`}>
               <Link
-                key={b.customer_id}
                 href={`/customers/${b.customer_id}`}
                 className="row row-link justify-between"
               >
                 <p className="text-sm font-medium truncate">{b.name}</p>
                 <span className="text-sm font-medium text-bad num shrink-0">owes {money(Math.abs(b.balance))}</span>
               </Link>
+              </LiveRow>
             ))}
             {attention.duplicates.length > 0 && (
+              <LiveRow key="dupes">
               <Link href="/customers?dupes=1" className="row row-link justify-between">
                 <p className="text-sm font-medium truncate">
                   {attention.duplicates.length === 1
@@ -202,10 +188,11 @@ export function TodayClient({
                 </p>
                 <span className="chip chip-brand shrink-0">merge</span>
               </Link>
+              </LiveRow>
             )}
             {attention.plansWithoutVisit.map((p) => (
+              <LiveRow key={`plan-${p.id}`}>
               <Link
-                key={p.id}
                 href={`/plans/${p.id}`}
                 className="row row-link justify-between"
               >
@@ -214,7 +201,9 @@ export function TodayClient({
                 </p>
                 <span className="chip chip-warn shrink-0">no visit scheduled</span>
               </Link>
+              </LiveRow>
             ))}
+            </LiveList>
           </div>
         </section>
       )}

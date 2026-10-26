@@ -56,6 +56,21 @@ export function PlanFormSheet({
   const [notes, setNotes] = useState(plan?.notes ?? "");
   const [emailConf, setEmailConf] = useState(plan?.email_confirmations ?? false);
   const [skipEntry, setSkipEntry] = useState(plan?.skip_entry ?? false);
+  const [employeeId, setEmployeeId] = useState<string | null>(plan?.employee_id ?? null);
+  const [workers, setWorkers] = useState<{ id: string; name: string; active: boolean }[]>([]);
+  useEffect(() => {
+    let stale = false;
+    supabase
+      .from("employees")
+      .select("id,name,active")
+      .order("created_at")
+      .then(({ data }) => {
+        if (!stale) setWorkers((data as { id: string; name: string; active: boolean }[]) ?? []);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [supabase]);
   const [prepay, setPrepay] = useState(false);
   const [prepayVisits, setPrepayVisits] = useState("");
   const [prepayMethod, setPrepayMethod] = useState<PaymentMethod>("zelle");
@@ -179,6 +194,7 @@ export function PlanFormSheet({
       notes,
       emailConfirmations: emailConf,
       skipEntry,
+      employeeId,
       prepay: !plan && prepay ? { visits: prepayN, method: prepayMethod } : null,
     };
   }
@@ -429,6 +445,23 @@ export function PlanFormSheet({
             <input className="input num" placeholder="9:00 AM" value={time} onChange={(e) => setTime(e.target.value)} />
           </Field>
         </div>
+
+        {workers.some((w) => w.active || w.id === employeeId) && (
+          <Field label="Who does it" hint="New visits are assigned to them and their cut applies to the plan's payments.">
+            <div className="flex flex-wrap gap-1.5">
+              <button type="button" onClick={() => setEmployeeId(null)} className="choice h-9 px-3 text-dense" aria-pressed={employeeId === null}>
+                Me
+              </button>
+              {workers
+                .filter((w) => w.active || w.id === employeeId)
+                .map((w) => (
+                  <button key={w.id} type="button" onClick={() => setEmployeeId(w.id)} className="choice h-9 px-3 text-dense" aria-pressed={employeeId === w.id}>
+                    {w.name}
+                  </button>
+                ))}
+            </div>
+          </Field>
+        )}
 
         <Field label="Address">
           <input className="input" value={address} onChange={(e) => setAddress(e.target.value)} />

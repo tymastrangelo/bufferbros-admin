@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { Shell } from "@/components/nav";
+import { InactiveScreen } from "@/components/inactive";
+import { ToastProvider } from "@/components/toast";
 import { getRealRole, getViewAs } from "@/lib/auth";
 import { LARP_COOKIE } from "@/lib/larp/client";
 import { createClient } from "@/lib/supabase/server";
@@ -16,8 +18,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   // Employees table is real in every mode — it's who's on the crew, not money.
   const { data: emps } = await supabase.from("employees").select("id,name,user_id,active").order("created_at");
-  const crew = ((emps ?? []) as { id: string; name: string; user_id: string | null; active: boolean }[]).filter((e) => e.active);
-  const me = crew.find((e) => e.user_id === user.id);
+  const all = (emps ?? []) as { id: string; name: string; user_id: string | null; active: boolean }[];
+  const crew = all.filter((e) => e.active);
+  const me = all.find((e) => e.user_id === user.id);
+  // Deactivated worker: no schedule, no pay — just a sign-out screen until reactivated.
+  if (realRole !== "owner" && me && !me.active) return <InactiveScreen name={me.name} />;
   const previewing = viewAs ? crew.find((e) => e.id === viewAs) ?? null : null;
 
   const name =
@@ -26,7 +31,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       : me?.name ?? user.email?.split("@")[0] ?? "Crew";
 
   return (
-    <>
+    <ToastProvider>
       <Shell
         role={previewing ? "washer" : realRole}
         me={{ name, roleLabel: realRole === "owner" ? "Owner" : "Crew" }}
@@ -37,7 +42,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {children}
       </Shell>
       <VersionTag />
-    </>
+    </ToastProvider>
   );
 }
 

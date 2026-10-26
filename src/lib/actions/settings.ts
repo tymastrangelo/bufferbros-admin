@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getRole } from "@/lib/auth";
 import { confirmedEmail, sendEmail } from "@/lib/email";
 import { logActivity } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
@@ -51,6 +52,18 @@ export interface AddonInput {
   name: string;
   note: string | null;
   pricing: { size_id: string; price: number; minutes: number }[]; // one '*' row, or one row per size
+}
+
+/** Owner-only: the steps a base service includes — seeds every new job's checklist. */
+export async function saveServiceChecklist(serviceId: "standard" | "ceramic-coating", steps: string[]): Promise<ActionResult> {
+  if ((await getRole()) !== "owner") return { ok: false, error: "Owner only." };
+  const clean = steps.map((x) => x.trim()).filter(Boolean).slice(0, 30);
+  const db = await createClient();
+  const { error } = await db.from("services").update({ checklist: clean }).eq("id", serviceId);
+  if (error) return { ok: false, error: error.message };
+  await logActivity(`changed what's included in ${serviceId === "standard" ? "the Standard Detail" : "Ceramic Coating"}`, [`${clean.length} steps`], "/settings", { tags: ["gear"], priority: 4 });
+  refresh();
+  return { ok: true };
 }
 
 export async function saveAddons(addons: AddonInput[]): Promise<ActionResult> {
