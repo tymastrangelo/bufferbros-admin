@@ -19,7 +19,7 @@ import {
 } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
-import { minToLabel, todayYmd } from "@/lib/time";
+import { fmtDateShort, minToLabel, todayYmd } from "@/lib/time";
 import { useOwner } from "@/lib/use-owner";
 import { SIZES, sizeLabel, vehicleLabel, type Employee, type SizeId, type Vehicle } from "@/lib/types";
 import { CustomerPicker, type PickedCustomer } from "./customer-picker";
@@ -612,7 +612,7 @@ export function AppointmentSheet({
               <Wheel size={18} /> Booking…
             </>
           ) : (
-            `Book — ${money(price)}`
+            `Book ${startMin == null ? "" : `${fmtDateShort(date)} · ${minToLabel(startMin)} `}— ${money(price)}`
           )}
         </button>
       </div>
