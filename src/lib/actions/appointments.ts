@@ -505,6 +505,17 @@ export async function completeAppointment(
   }
 
   if (appt.customer_id) {
+    // Re-completing a reopened job: its payments survived the reopen, so don't book another.
+    if (payment && payment.amount > 0) {
+      const { data: paid } = await db.from("ledger_entries").select("amount").eq("appointment_id", id).eq("kind", "payment");
+      const already = (paid ?? []).reduce((s, r) => s + Number(r.amount), 0);
+      if (already > 0) {
+        return {
+          ok: false,
+          error: `${usd(already)} was already collected on this job. Pick "Put on balance" to complete it without a second payment, or adjust the existing one on the customer's ledger.`,
+        };
+      }
+    }
     const { error: chargeErr } = await db.from("ledger_entries").insert({
       customer_id: appt.customer_id,
       appointment_id: id,
@@ -694,6 +705,16 @@ export async function updateAppointment(
     })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
+  // A completed job's charge follows its price — no need to reopen (which drops the charge)
+  // and re-complete (which books a second payment) just to fix a number.
+  if (before.status === "completed" && "price" in fields && fields.price != null && Number(fields.price) !== Number(before.price)) {
+    const { error: chargeErr } = await db
+      .from("ledger_entries")
+      .update({ amount: -Math.abs(Number(fields.price)) })
+      .eq("appointment_id", id)
+      .eq("kind", "charge");
+    if (chargeErr) return { ok: false, error: `Price saved, but the charge on the ledger didn't follow: ${chargeErr.message}` };
+  }
   if (before) {
     const contact = await resolveContact(before);
     const diffs = [

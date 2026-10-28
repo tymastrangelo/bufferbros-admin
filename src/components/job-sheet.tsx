@@ -289,8 +289,8 @@ export function JobSheet({
         {job.status === "completed" && panel === "none" && (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-ink-2">
-              Completed {job.completed_at ? `· charged ${money(Number(job.price))}` : ""}. Adjust money on the
-              customer&apos;s ledger if needed.
+              Completed {job.completed_at ? `· charged ${money(Number(job.price))}` : ""}.
+              {owner ? " Edit the job to change the price — the charge follows. Payments live on the customer's ledger." : ""}
             </p>
             {job.completed_at && (
               <p className="note text-dense num">
@@ -323,7 +323,10 @@ export function JobSheet({
                       ? "You — kept in full, no worker split"
                       : "You — split still applies"}
                 </p>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <button className="btn btn-sm" onClick={() => setPanel("edit")}>
+                    Edit
+                  </button>
                   <button className="btn btn-sm" onClick={() => setPanel("who")}>
                     Who did it
                   </button>
