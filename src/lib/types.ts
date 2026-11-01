@@ -119,6 +119,8 @@ export interface Employee {
   phone: string | null;
   /** 1–6 → --color-worker-N (calendar lane stripe, avatar ring). */
   color: number;
+  /** Weekdays (0=Sun..6=Sat) they'd rather not work — a hint on the calendar and when assigning, never a block. */
+  prefers_off: number[];
 }
 
 export type EmployeeHours = Record<string, false | [number, number] | null>;

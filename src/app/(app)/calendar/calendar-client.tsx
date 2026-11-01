@@ -1,12 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AppointmentSheet } from "@/components/appointment-sheet";
 import { BlockSheet } from "@/components/block-sheet";
 import { IconBlock, IconChevronLeft, IconChevronRight, IconPlus } from "@/components/icons";
 import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { Avatar, Busy, Segmented, Sheet } from "@/components/ui";
+import { rescheduleAppointment } from "@/lib/actions/appointments";
 import { addBlock, deleteBlock } from "@/lib/actions/settings";
 import { useToast } from "@/components/toast";
 import { saveMyCalendarFeed, syncCalendarNow } from "@/lib/actions/employees";
@@ -20,9 +21,12 @@ import type { Block, Employee, WeeklyHours } from "@/lib/types";
 export type CalView = "month" | "week" | "day";
 
 const HOUR_PX = 56;
+const DRAG_SNAP_MIN = 15;
+const DRAG_HOLD_MS = 350; // touch: hold to pick a job up (a quick tap still opens it)
+const DRAG_SLOP_PX = 4;
 
 /** A worker as the calendar needs them: lane color + their own hours. */
-export type CrewLane = Pick<Employee, "id" | "name" | "color" | "hours">;
+export type CrewLane = Pick<Employee, "id" | "name" | "color" | "hours" | "prefers_off">;
 
 const assigneesOf = (j: JobWithCustomer) => j.appointment_employees?.map((a) => a.employee_id) ?? (j.employee_id ? [j.employee_id] : []);
 
@@ -70,10 +74,46 @@ export function CalendarClient({
   lanes: boolean;
 }) {
   const router = useRouter();
+  const toast = useToast();
   // Store the tapped job, but always render the fresh copy from server props —
   // after an action refreshes the route, the open sheet updates in place.
   const [selected, setSelected] = useState<JobWithCustomer | null>(null);
   const selectedJob = selected ? (jobs.find((j) => j.id === selected.id) ?? selected) : null;
+  // A dragged job shows at its new time right away; the override drops as soon as fresh
+  // server props arrive (every action ends in router.refresh()).
+  const [moved, setMoved] = useState<Record<string, { date: string; start_min: number }>>({});
+  const [prevJobs, setPrevJobs] = useState(jobs);
+  if (prevJobs !== jobs) {
+    setPrevJobs(jobs);
+    setMoved({});
+  }
+  const moveJob = useCallback(
+    async (j: JobWithCustomer, date: string, startMin: number) => {
+      if (j.date === date && j.start_min === startMin) return;
+      setMoved((m) => ({ ...m, [j.id]: { date, start_min: startMin } }));
+      // ponytail: drag never emails the customer — the toast says so; the sheet's Reschedule still offers it.
+      const res = await rescheduleAppointment(j.id, { date, startMin, durationMin: j.duration_min }, false);
+      if (!res.ok) {
+        setMoved((m) => {
+          const rest = { ...m };
+          delete rest[j.id];
+          return rest;
+        });
+        return toast({ title: "Couldn't move that job", detail: res.error, tone: "bad" });
+      }
+      router.refresh();
+      toast({
+        title: `Moved to ${fmtDateShort(date)} · ${minToLabel(startMin)}`,
+        detail: `${(j.customers?.name ?? j.contact_name ?? "Customer").split(" ")[0]} hasn't been told — text them the new time`,
+        undo: async () => {
+          const back = await rescheduleAppointment(j.id, { date: j.date, startMin: j.start_min, durationMin: j.duration_min }, false);
+          if (back.ok) router.refresh();
+          return back;
+        },
+      });
+    },
+    [router, toast]
+  );
   const [newSheet, setNewSheet] = useState<{ date: string; startMin?: number; kind?: "car" | "boat"; assignees?: string[] } | null>(
     openNew ? { date: anchor, kind: newKind } : null
   );
@@ -120,7 +160,10 @@ export function CalendarClient({
 
   const hoursByDow = useMemo(() => new Map(hours.map((h) => [h.weekday, h])), [hours]);
   // Crew filter: "me" = jobs nobody's assigned to (the owner's), a worker = jobs they're on.
-  const visibleJobs = useMemo(() => (who === "all" ? jobs : jobs.filter((j) => lanesOf(assigneesOf(j)).includes(who))), [jobs, who]);
+  const shownJobs = useMemo(() => jobs.map((j) => (moved[j.id] ? { ...j, ...moved[j.id] } : j)), [jobs, moved]);
+  const visibleJobs = useMemo(() => (who === "all" ? shownJobs : shownJobs.filter((j) => lanesOf(assigneesOf(j)).includes(who))), [shownJobs, who]);
+  // Workers who'd rather not work a given date (employees.prefers_off) — a hint, never a block.
+  const softNames = useCallback((d: string) => crew.filter((c) => (c.prefers_off ?? []).includes(weekdayOf(d))).map((c) => c.name.split(" ")[0]), [crew]);
   const visibleBlocks = useMemo(
     () => (who === "all" ? blocks : blocks.filter((b) => b.employee_id == null || b.employee_id === who)),
     [blocks, who]
@@ -134,19 +177,20 @@ export function CalendarClient({
   const dayLanes = useMemo<Lane[] | undefined>(() => {
     if (!laneMode) return undefined;
     const d = anchor;
-    const dayJobs = jobs.filter((j) => j.date === d);
+    const dayJobs = shownJobs.filter((j) => j.date === d);
     const dayBlocks = blocks.filter((b) => b.date === d);
     const biz = hoursByDow.get(weekdayOf(d));
-    const mk = (key: string, label: string, color: number | null, h: CrewLane["hours"]): Lane => ({
+    const mk = (key: string, label: string, color: number | null, h: CrewLane["hours"], soft = false): Lane => ({
       key,
       label,
       color,
       hours: hoursFor(h, weekdayOf(d), biz),
+      soft,
       jobs: dayJobs.filter((j) => lanesOf(assigneesOf(j)).includes(key)),
       blocks: dayBlocks.filter((b) => b.employee_id == null || b.employee_id === key),
     });
-    return [mk("me", "Me", null, null), ...crew.map((c) => mk(c.id, c.name, c.color, c.hours))];
-  }, [laneMode, anchor, jobs, blocks, crew, hoursByDow]);
+    return [mk("me", "Me", null, null), ...crew.map((c) => mk(c.id, c.name, c.color, c.hours, (c.prefers_off ?? []).includes(weekdayOf(d))))];
+  }, [laneMode, anchor, shownJobs, blocks, crew, hoursByDow]);
   const projectedByDate = useMemo(
     () => groupBy(showProjected ? projected : [], (p) => p.date),
     [projected, showProjected]
@@ -221,6 +265,9 @@ export function CalendarClient({
               <button key={c.id} type="button" className="chip px-3 text-dense" aria-pressed={who === c.id} onClick={() => nav(view, anchor, c.id)}>
                 {"color" in c && <span className="mr-1.5 inline-block h-2 w-2 rounded-full" style={{ background: workerColor(c.color) }} aria-hidden />}
                 {c.name}
+                {view === "day" && "prefers_off" in c && (c.prefers_off ?? []).includes(weekdayOf(anchor)) && (
+                  <span className="ml-1.5 text-micro font-normal text-warn">rather not</span>
+                )}
               </button>
             ))}
           </div>
@@ -264,6 +311,8 @@ export function CalendarClient({
             onBlock={setBlockDetail}
             onEmpty={(date, min, lane) => setNewSheet({ date, startMin: min, assignees: lane ? (lane === "me" ? [] : [lane]) : undefined })}
             onDayHeader={view === "week" ? (d) => nav("day", d) : undefined}
+            onMove={owner ? moveJob : undefined}
+            softNames={owner ? softNames : undefined}
             owner={owner}
             crewById={crewById}
             lanes={dayLanes}
@@ -434,6 +483,8 @@ interface Lane {
   label: string;
   color: number | null;
   hours: [number, number] | null;
+  /** They'd rather not work this day (employees.prefers_off) — shown, not enforced. */
+  soft: boolean;
   jobs: JobWithCustomer[];
   blocks: Block[];
 }
@@ -460,6 +511,8 @@ function TimeGrid({
   onBlock,
   onEmpty,
   onDayHeader,
+  onMove,
+  softNames,
   owner,
   crewById,
   lanes,
@@ -475,6 +528,10 @@ function TimeGrid({
   onBlock: (b: Block) => void;
   onEmpty: (date: string, startMin: number, lane?: string) => void;
   onDayHeader?: (d: string) => void;
+  /** Owner only: a scheduled job was dragged to a new date/time (snapped to 15 min). */
+  onMove?: (j: JobWithCustomer, date: string, startMin: number) => void;
+  /** Owner only: first names of workers who'd rather not work that date. */
+  softNames?: (d: string) => string[];
   owner: boolean;
   crewById: Map<string, CrewLane>;
   /** Day view split per worker; columns become people instead of dates. */
@@ -528,6 +585,78 @@ function TimeGrid({
     return first ? workerColor(first.color) : "var(--color-brand)";
   };
 
+  // ── drag a scheduled job to a new time (and, in week view, a new day) ──
+  // Pointer events on the tile; the grid's box tells us which column the pointer is over.
+  // Mouse: moving past the slop picks it up. Touch: hold DRAG_HOLD_MS first, so a tap still
+  // opens the job (tiles are touch-action:none only when dragging is on). Transform-only
+  // while moving; the drop commits through onMove. Keyboard users reschedule from the sheet.
+  const gridRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    job: JobWithCustomer;
+    col: number;
+    pointerId: number;
+    x: number;
+    y: number;
+    armed: boolean;
+    moved: boolean;
+    timer: ReturnType<typeof setTimeout> | null;
+  } | null>(null);
+  // colW is captured on each move so render never reads the ref (react-hooks/refs).
+  const [drag, setDrag] = useState<{ id: string; col: number; min: number; colW: number } | null>(null);
+  const suppressClick = useRef(false);
+  const canDrag = (j: JobWithCustomer) => !!onMove && j.status === "scheduled";
+  const snap = (min: number) => Math.round(min / DRAG_SNAP_MIN) * DRAG_SNAP_MIN;
+  const clampMin = (j: JobWithCustomer, min: number) => Math.min(Math.max(snap(min), start), end - j.duration_min);
+  const colW = () => {
+    const rect = gridRef.current?.getBoundingClientRect();
+    return rect ? (rect.width - 48) / cols.length : 0;
+  };
+  const colAt = (clientX: number, fallback: number) => {
+    const rect = gridRef.current?.getBoundingClientRect();
+    if (!rect || lanes) return fallback; // by-worker lanes: time only, no lane hopping
+    return Math.min(cols.length - 1, Math.max(0, Math.floor((clientX - rect.left - 48) / colW())));
+  };
+  const endDrag = () => {
+    const d = dragRef.current;
+    if (d?.timer) clearTimeout(d.timer);
+    dragRef.current = null;
+    setDrag(null);
+  };
+  const onTilePointerDown = (e: React.PointerEvent<HTMLButtonElement>, j: JobWithCustomer, col: number) => {
+    if (!canDrag(j) || e.button !== 0) return;
+    const d = { job: j, col, pointerId: e.pointerId, x: e.clientX, y: e.clientY, armed: e.pointerType === "mouse", moved: false, timer: null as ReturnType<typeof setTimeout> | null };
+    if (!d.armed) d.timer = setTimeout(() => {
+      if (dragRef.current === d) {
+        d.armed = true;
+        setDrag({ id: j.id, col, min: j.start_min, colW: colW() });
+      }
+    }, DRAG_HOLD_MS);
+    dragRef.current = d;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onTilePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const d = dragRef.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    const dx = e.clientX - d.x;
+    const dy = e.clientY - d.y;
+    if (!d.armed) {
+      if (Math.hypot(dx, dy) > DRAG_SLOP_PX) endDrag(); // touch started scrolling before the hold landed
+      return;
+    }
+    if (!d.moved && Math.hypot(dx, dy) <= DRAG_SLOP_PX) return;
+    d.moved = true;
+    setDrag({ id: d.job.id, col: colAt(e.clientX, d.col), min: clampMin(d.job, d.job.start_min + (dy / HOUR_PX) * 60), colW: colW() });
+  };
+  const onTilePointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const d = dragRef.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    if (d.moved && drag) {
+      suppressClick.current = true;
+      onMove?.(d.job, cols[drag.col].date, drag.min);
+    }
+    endDrag();
+  };
+
   return (
     <div className="card overflow-x-auto">
       <div className="min-w-full" style={{ minWidth: cols.length > 1 ? Math.max(640, cols.length * 160) : undefined }}>
@@ -544,7 +673,7 @@ function TimeGrid({
                 >
                   <Avatar name={c.lane.label} size={20} className="ring-2 ring-card" />
                   <span className="text-dense font-semibold truncate">{c.lane.label}</span>
-                  {!c.hours && <span className="text-micro text-faint">off</span>}
+                  {!c.hours ? <span className="text-micro text-faint">off</span> : c.lane.soft ? <span className="text-micro text-warn">rather not</span> : null}
                 </div>
               ) : (
                 <button
@@ -556,12 +685,16 @@ function TimeGrid({
                   <span className={`text-md font-semibold num ${c.date === today ? "text-brand-deep" : ""}`}>
                     {parseInt(c.date.slice(8), 10)}
                   </span>
+                  {(() => {
+                    const names = c.hours ? softNames?.(c.date) ?? [] : [];
+                    return names.length > 0 ? <span className="block text-micro text-warn truncate px-0.5">{names.join(", ")} rather not</span> : null;
+                  })()}
                 </button>
               )
             )}
           </div>
         )}
-        <div className="grid" style={{ gridTemplateColumns: `48px repeat(${cols.length}, 1fr)` }}>
+        <div ref={gridRef} className="grid" style={{ gridTemplateColumns: `48px repeat(${cols.length}, 1fr)` }}>
           {/* hour rail */}
           <div className="relative" style={{ height: totalH }}>
             {Array.from({ length: (end - start) / 60 }, (_, i) => (
@@ -574,7 +707,7 @@ function TimeGrid({
               </span>
             ))}
           </div>
-          {cols.map((c) => {
+          {cols.map((c, ci) => {
             const d = c.date;
             const closed = !c.hours;
             return (
@@ -646,12 +779,24 @@ function TimeGrid({
                 {c.jobs.map((j) => {
                   const ids = assigneesOf(j);
                   const people = ids.map((id) => crewById.get(id)).filter(Boolean) as CrewLane[];
+                  const dragging = drag?.id === j.id;
+                  const shift = dragging ? { x: (drag!.col - ci) * drag!.colW, y: y(drag!.min) - y(j.start_min) } : null;
                   return (
                     <button
                       key={j.id}
                       data-item
-                      onClick={() => onJob(j)}
+                      onClick={() => {
+                        if (suppressClick.current) return void (suppressClick.current = false);
+                        onJob(j);
+                      }}
+                      onPointerDown={(e) => onTilePointerDown(e, j, ci)}
+                      onPointerMove={onTilePointerMove}
+                      onPointerUp={onTilePointerUp}
+                      onPointerCancel={endDrag}
+                      aria-grabbed={dragging || undefined}
                       className={`absolute rounded-md border px-1.5 py-1 text-left overflow-hidden transition-[box-shadow,transform] duration-150 hover:z-10 hover:shadow-[var(--shadow-raise)] active:scale-[0.98] ${
+                        dragging ? "z-30 shadow-[var(--shadow-raise)] cursor-grabbing transition-none" : canDrag(j) ? "cursor-grab" : ""
+                      } ${
                         j.status === "completed"
                           ? "bg-ok-wash border-ok/40"
                           : j.status === "no_show"
@@ -666,6 +811,8 @@ function TimeGrid({
                         left: 2,
                         right: 2,
                         borderLeft: crewById.size ? `3px solid ${stripeOf(j)}` : undefined,
+                        touchAction: canDrag(j) ? "none" : undefined,
+                        transform: shift ? `translate(${shift.x}px, ${shift.y}px)` : undefined,
                       }}
                     >
                       {people.length > 0 && !c.lane && (
@@ -681,7 +828,8 @@ function TimeGrid({
                         {owner ? ` · ${money(Number(j.price))}` : ""}
                       </span>
                       <span className={`text-micro num block leading-tight ${j.status === "scheduled" && !j.plan_id ? "text-white/80" : "text-ink-2"}`}>
-                        {minToLabel(j.start_min)} · {j.duration_min}m
+                        {minToLabel(dragging ? drag!.min : j.start_min)} · {j.duration_min}m
+                        {dragging && !lanes && drag!.col !== ci && ` · ${fmtDateShort(cols[drag!.col].date)}`}
                         {people.length > 0 && <span className="sr-only"> · {people.map((p) => p.name).join(", ")}</span>}
                       </span>
                     </button>

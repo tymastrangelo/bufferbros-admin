@@ -19,7 +19,7 @@ import {
 } from "@/lib/catalog";
 import { money } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
-import { fmtDateShort, minToLabel, todayYmd } from "@/lib/time";
+import { fmtDateShort, minToLabel, todayYmd, weekdayOf, WEEKDAYS_SHORT } from "@/lib/time";
 import { useOwner } from "@/lib/use-owner";
 import { SIZES, sizeLabel, vehicleLabel, type Employee, type SizeId, type Vehicle } from "@/lib/types";
 import { CustomerPicker, type PickedCustomer } from "./customer-picker";
@@ -58,17 +58,17 @@ export function AppointmentSheet({
   // only); worker ids narrow the slot grid to times they're ALL free. A washer
   // booking is auto-assigned to themselves (their RLS-visible row is just their own).
   const [assignees, setAssignees] = useState<string[]>(defaultAssignees ?? []);
-  const [workers, setWorkers] = useState<Pick<Employee, "id" | "name" | "active" | "user_id">[]>([]);
+  const [workers, setWorkers] = useState<Pick<Employee, "id" | "name" | "active" | "user_id" | "prefers_off">[]>([]);
   useEffect(() => {
     let stale = false;
     (async () => {
       const db = createClient();
       const [{ data: rows }, { data: sess }] = await Promise.all([
-        db.from("employees").select("id,name,active,user_id").eq("active", true).order("created_at"),
+        db.from("employees").select("id,name,active,user_id,prefers_off").eq("active", true).order("created_at"),
         db.auth.getSession(),
       ]);
       if (stale) return;
-      const list = (rows as Pick<Employee, "id" | "name" | "active" | "user_id">[]) ?? [];
+      const list = (rows as Pick<Employee, "id" | "name" | "active" | "user_id" | "prefers_off">[]) ?? [];
       setWorkers(list);
       // A washer booking a job is the one doing it — self-assign their row.
       const mine = list.find((w) => w.user_id === sess.session?.user.id);
@@ -521,13 +521,16 @@ export function AppointmentSheet({
               </button>
               {workers.map((w) => {
                 const st = dayStatus[w.id];
-                const note = !st
+                // "Rather not" (employees.prefers_off) is a soft flag: still bookable, just said out loud.
+                const soft = !!date && st?.status !== "off" && (w.prefers_off ?? []).includes(weekdayOf(date));
+                const avail = !st
                   ? null
                   : st.status === "off"
                     ? "off"
                     : st.status === "busy" && st.free_from_min != null
                       ? `busy till ${minToLabel(st.free_from_min)}`
                       : "free";
+                const note = [avail, soft && `rather not ${WEEKDAYS_SHORT[weekdayOf(date)]}`].filter(Boolean).join(" · ") || null;
                 return (
                   <button
                     key={w.id}
@@ -540,7 +543,7 @@ export function AppointmentSheet({
                   >
                     <span>{w.name}</span>
                     {note && (
-                      <span className={`text-micro font-normal ${st?.status === "free" ? "text-ok" : st?.status === "busy" ? "text-warn" : "text-faint"}`}>
+                      <span className={`text-micro font-normal ${soft || st?.status === "busy" ? "text-warn" : st?.status === "free" ? "text-ok" : "text-faint"}`}>
                         {note}
                       </span>
                     )}

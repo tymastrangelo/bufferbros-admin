@@ -7,7 +7,7 @@ import { normalizeEmail, phoneDigits } from "@/lib/format";
 import { change, logActivity, usd } from "@/lib/notify";
 import { payeeOf, transfer } from "@/lib/payouts";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { todayYmd } from "@/lib/time";
+import { todayYmd, WEEKDAYS_SHORT } from "@/lib/time";
 import type { EmployeeHours } from "@/lib/types";
 import type { ActionResult } from "./appointments";
 
@@ -75,6 +75,7 @@ export async function updateEmployee(
     color: number;
     takes_web_bookings: boolean;
     hours: EmployeeHours | null;
+    prefers_off: number[];
   }>
 ): Promise<ActionResult> {
   if ((await getRole()) !== "owner") return { ok: false, error: "Owner only." };
@@ -84,6 +85,7 @@ export async function updateEmployee(
   if (fields.name != null && !fields.name.trim()) return { ok: false, error: "Name can't be blank." };
   if (fields.color != null && !(fields.color >= 1 && fields.color <= 6)) return { ok: false, error: "Pick one of the six colors." };
   if ("hours" in fields && fields.hours != null && !validHours(fields.hours)) return { ok: false, error: "Hours need an open time before the close time." };
+  if (fields.prefers_off && !fields.prefers_off.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) return { ok: false, error: "Days need to be Sunday–Saturday." };
   if ("phone" in fields && fields.phone?.trim() && phoneDigits(fields.phone).length !== 10) return { ok: false, error: "Phone needs 10 digits." };
   const db = await createClient();
   const { data: before } = await db.from("employees").select("*").eq("id", id).maybeSingle();
@@ -98,6 +100,7 @@ export async function updateEmployee(
     "active" in fields && fields.active !== before.active && (fields.active ? "Reactivated" : "Deactivated — no new jobs, pay history kept"),
     "takes_web_bookings" in fields && fields.takes_web_bookings !== before.takes_web_bookings && `Website bookings: ${fields.takes_web_bookings ? "on" : "off"}`,
     "hours" in fields && "Hours changed",
+    "prefers_off" in fields && `Rather-not days: ${fields.prefers_off?.length ? fields.prefers_off.map((d) => WEEKDAYS_SHORT[d]).join(", ") : "none"}`,
     "ical_url" in fields && (fields.ical_url ? "Calendar feed set" : "Calendar feed removed"),
   ].filter(Boolean) as string[];
   if (facts.length) await logActivity(`updated ${before.name}`, facts, `/team/${id}`, { tags: ["busts_in_silhouette"], priority: 3 });

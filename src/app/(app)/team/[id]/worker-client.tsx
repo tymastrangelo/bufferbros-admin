@@ -228,7 +228,7 @@ function Schedule({ employee, business, blocks }: { employee: Employee; business
     <div className="flex flex-col gap-6">
       <section>
         <h2 className="label mb-2">Working hours</h2>
-        <HoursEditor employeeId={employee.id} hours={employee.hours} business={business} />
+        <HoursEditor employeeId={employee.id} hours={employee.hours} prefersOff={employee.prefers_off ?? []} business={business} />
       </section>
       <section className="flex flex-col gap-2">
         <h2 className="label">Other-job calendar</h2>

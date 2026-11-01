@@ -4,8 +4,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { confirmedEmail, sendEmail } from "@/lib/email";
 import { syncAppointmentToGcal } from "@/lib/gcal";
-import { stepDays } from "@/lib/plan-projection";
-import { addDays, todayYmd, weekdayOf, whenLabel } from "@/lib/time";
+import { firstPlanDate, stepDays } from "@/lib/plan-projection";
+import { addDays, todayYmd, whenLabel } from "@/lib/time";
 import { seedChecklist } from "@/lib/checklist";
 import { vehicleLabel, type Appointment, type Plan, type Vehicle } from "@/lib/types";
 
@@ -62,20 +62,9 @@ export async function generateOccurrences(
       .eq("plan_id", plan.id);
     // Any existing appointment (even cancelled) means that date was handled by a human.
     const handled = new Set((appts ?? []).map((a) => a.date));
-    const activeDates = (appts ?? [])
-      .filter((a) => a.status !== "cancelled")
-      .map((a) => a.date)
-      .sort();
+    const activeDates = (appts ?? []).filter((a) => a.status !== "cancelled").map((a) => a.date);
 
-    let cursor: string;
-    if (activeDates.length) {
-      cursor = addDays(activeDates[activeDates.length - 1], step);
-    } else {
-      cursor = plan.starts_on > today ? plan.starts_on : today;
-      if (plan.preferred_dow != null) {
-        while (weekdayOf(cursor) !== plan.preferred_dow) cursor = addDays(cursor, 1);
-      }
-    }
+    let cursor = firstPlanDate(plan, activeDates, today);
 
     while (cursor <= horizon && (!plan.ends_on || cursor <= plan.ends_on)) {
       if (cursor >= today && !handled.has(cursor)) {

@@ -13,7 +13,7 @@ import { Avatar, ErrorNote, Field, LiveList, LiveRow, PageHeader, Stat } from "@
 import { addEmployee } from "@/lib/actions/employees";
 import { workerColor } from "@/lib/crew";
 import { money, smsHref } from "@/lib/format";
-import { fmtDateShort, minToLabel } from "@/lib/time";
+import { fmtDateShort, minToLabel, WEEKDAYS_SHORT } from "@/lib/time";
 import type { Employee } from "@/lib/types";
 
 export interface WorkerStats {
@@ -110,6 +110,9 @@ function WorkerRow({ employee, stats }: { employee: Employee; stats?: WorkerStat
           {stats ? `This week: ${stats.jobsWeek} job${stats.jobsWeek === 1 ? "" : "s"} · ${money(stats.revenueWeek)}` : "—"}
           {stats?.nextJob && ` · next ${fmtDateShort(stats.nextJob.date)} ${minToLabel(stats.nextJob.start_min)} ${stats.nextJob.name.split(" ")[0]}`}
         </span>
+        {employee.prefers_off?.length > 0 && (
+          <span className="block text-xs text-faint truncate">Rather not {employee.prefers_off.map((d) => WEEKDAYS_SHORT[d]).join(", ")}</span>
+        )}
       </span>
       {unsettled && (
         <span className={`chip shrink-0 ${stats.net < 0 ? "chip-warn" : "chip-ok"}`}>

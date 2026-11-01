@@ -468,7 +468,7 @@ export function PlanFormSheet({
         </Field>
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Starts">
+          <Field label="First visit week" hint="Sets the rhythm: every-2-weeks and monthly count from this week.">
             <input type="date" className="input num" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} />
           </Field>
           <Field label="Ends (optional)">

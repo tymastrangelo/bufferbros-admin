@@ -1,5 +1,5 @@
 // Pure projection of a plan's future visit dates — the TS mirror of
-// plan_projection_busy (migration 0017) and generateOccurrences' stepping.
+// plan_projection_busy (migrations 0017 + 0034) and generateOccurrences' stepping.
 // Client-safe: string date math only.
 import { addDays, weekdayOf } from "./time";
 import type { Plan } from "./types";
@@ -28,10 +28,30 @@ export interface ProjectedVisit {
 }
 
 /**
+ * The first date a plan's visit chain continues from. With non-cancelled visits on file,
+ * step from the last one (a moved visit moves the chain with it). With none, the chain is
+ * anchored to starts_on advanced to the preferred weekday — so "every 2 weeks starting
+ * Nov 10" lands on Nov 10, 24, … no matter when it's generated — then stepped up to today.
+ * Shared by projectPlanDates and generateOccurrences; mirrored by plan_projection_busy (0034).
+ */
+export function firstPlanDate(
+  plan: Pick<Plan, "cadence" | "interval_days" | "preferred_dow" | "starts_on">,
+  activeDates: string[],
+  today: string
+): string {
+  const step = stepDays(plan);
+  if (activeDates.length) return addDays([...activeDates].sort()[activeDates.length - 1], step);
+  let cursor = plan.starts_on;
+  if (plan.preferred_dow != null) {
+    while (weekdayOf(cursor) !== plan.preferred_dow) cursor = addDays(cursor, 1);
+  }
+  while (cursor < today) cursor = addDays(cursor, step);
+  return cursor;
+}
+
+/**
  * Dates this plan would claim in [from, to), beyond what's already materialized.
- * Continues from the last non-cancelled visit in step increments; with no visits yet,
- * starts at max(starts_on, today) advanced to the preferred weekday. Dates that have
- * any appointment row (even cancelled) were handled by a human and are skipped.
+ * Dates that have any appointment row (even cancelled) were handled by a human and are skipped.
  */
 export function projectPlanDates(
   plan: Pick<Plan, "cadence" | "interval_days" | "preferred_dow" | "starts_on" | "ends_on">,
@@ -42,20 +62,11 @@ export function projectPlanDates(
 ): string[] {
   const step = stepDays(plan);
   const handled = new Set(appts.map((a) => a.date));
-  const active = appts
-    .filter((a) => a.status !== "cancelled")
-    .map((a) => a.date)
-    .sort();
-
-  let cursor: string;
-  if (active.length) {
-    cursor = addDays(active[active.length - 1], step);
-  } else {
-    cursor = plan.starts_on > today ? plan.starts_on : today;
-    if (plan.preferred_dow != null) {
-      while (weekdayOf(cursor) !== plan.preferred_dow) cursor = addDays(cursor, 1);
-    }
-  }
+  let cursor = firstPlanDate(
+    plan,
+    appts.filter((a) => a.status !== "cancelled").map((a) => a.date),
+    today
+  );
 
   const out: string[] = [];
   while (cursor < to && (!plan.ends_on || cursor <= plan.ends_on)) {
