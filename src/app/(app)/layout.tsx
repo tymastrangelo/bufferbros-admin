@@ -1,9 +1,11 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { Shell } from "@/components/nav";
 import { InactiveScreen } from "@/components/inactive";
 import { ToastProvider } from "@/components/toast";
 import { getRealRole, getViewAs } from "@/lib/auth";
+import { reconcileGcal } from "@/lib/gcal";
 import { LARP_COOKIE } from "@/lib/larp/client";
 import { createClient } from "@/lib/supabase/server";
 
@@ -13,6 +15,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+  // Website bookings land straight in Supabase: put any job missing from Google Calendar on it.
+  after(() => reconcileGcal(true));
   const realRole = await getRealRole();
   const viewAs = await getViewAs();
 
@@ -21,8 +25,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const all = (emps ?? []) as { id: string; name: string; user_id: string | null; active: boolean }[];
   const crew = all.filter((e) => e.active);
   const me = all.find((e) => e.user_id === user.id);
-  // Deactivated worker: no schedule, no pay — just a sign-out screen until reactivated.
-  if (realRole !== "owner" && me && !me.active) return <InactiveScreen name={me.name} />;
+  // Deactivated worker, or a login not linked to anyone on the crew (the DB shows them nothing
+  // either): no schedule, no pay — just a sign-out screen until Tyler adds/reactivates them.
+  if (realRole !== "owner" && !me?.active) return <InactiveScreen name={me?.name ?? user.email?.split("@")[0] ?? "there"} />;
   const previewing = viewAs ? crew.find((e) => e.id === viewAs) ?? null : null;
 
   const name =

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getRole } from "@/lib/auth";
+import { getRole, ownerOnly } from "@/lib/auth";
 import { confirmedEmail, sendEmail } from "@/lib/email";
 import { logActivity } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
@@ -12,6 +12,8 @@ import type { ActionResult } from "./appointments";
 const refresh = () => revalidatePath("/", "layout");
 
 export async function saveWeeklyHours(rows: WeeklyHours[]): Promise<ActionResult> {
+  const denied = await ownerOnly("change business hours");
+  if (denied) return denied;
   for (const r of rows) {
     if (r.enabled && r.open_min >= r.close_min) {
       return { ok: false, error: "Open time must be before close time." };
@@ -26,6 +28,8 @@ export async function saveWeeklyHours(rows: WeeklyHours[]): Promise<ActionResult
 }
 
 export async function saveSettings(entries: Record<string, string>): Promise<ActionResult> {
+  const denied = await ownerOnly("change settings");
+  if (denied) return denied;
   const db = await createClient();
   const { error } = await db
     .from("settings")
@@ -39,6 +43,8 @@ export async function saveSettings(entries: Record<string, string>): Promise<Act
 export async function saveServicePricing(
   rows: { service_id: string; size_id: string; price: number; minutes: number }[]
 ): Promise<ActionResult> {
+  const denied = await ownerOnly("change prices");
+  if (denied) return denied;
   const db = await createClient();
   const { error } = await db.from("service_pricing").upsert(rows);
   if (error) return { ok: false, error: error.message };
@@ -67,6 +73,8 @@ export async function saveServiceChecklist(serviceId: "standard" | "ceramic-coat
 }
 
 export async function saveAddons(addons: AddonInput[]): Promise<ActionResult> {
+  const denied = await ownerOnly("change add-ons");
+  if (denied) return denied;
   if (addons.some((a) => !a.name.trim())) return { ok: false, error: "Every add-on needs a name." };
   const ids = addons.map((a) => a.id);
   if (new Set(ids).size !== ids.length) return { ok: false, error: "Two add-ons ended up with the same id — rename one." };
@@ -91,6 +99,8 @@ export async function saveAddons(addons: AddonInput[]): Promise<ActionResult> {
 }
 
 export async function deleteAddon(id: string): Promise<ActionResult> {
+  const denied = await ownerOnly("change add-ons");
+  if (denied) return denied;
   const db = await createClient();
   // kind guard keeps 'standard' (the detail) undeletable; pricing rows cascade.
   const { error } = await db.from("services").delete().eq("id", id).eq("kind", "addon");
@@ -103,6 +113,8 @@ export async function deleteAddon(id: string): Promise<ActionResult> {
 export async function savePlanPricing(
   rows: { cadence: string; size_id: string; price: number }[]
 ): Promise<ActionResult> {
+  const denied = await ownerOnly("change plan prices");
+  if (denied) return denied;
   const db = await createClient();
   const { error } = await db.from("plan_pricing").upsert(rows);
   if (error) return { ok: false, error: error.message };

@@ -92,7 +92,9 @@ export async function createAppointment(input: NewAppointment): Promise<ActionRe
   if (!customerId && input.name?.trim()) {
     const phone = normalizePhone(input.phone);
     const email = normalizeEmail(input.email);
-    const matches = [phone && `phone.eq.${phone}`, email && `email.eq.${email}`].filter(Boolean) as string[];
+    // Raw text that isn't a clean number/email can't go into a PostgREST filter (a comma adds a clause).
+    const safe = (v: string | null) => v && !/[,()"\\]/.test(v);
+    const matches = [safe(phone) && `phone.eq.${phone}`, safe(email) && `email.eq.${email}`].filter(Boolean) as string[];
     const { data: existing } = matches.length
       ? await db.from("customers").select("id").or(matches.join(",")).limit(1).maybeSingle()
       : { data: null };
@@ -245,6 +247,8 @@ export async function rescheduleAppointment(
   const db = await createClient();
   const before = await getAppt(id);
   if (!before) return { ok: false, error: "Appointment not found." };
+  // Rescheduling flips status to scheduled; on a completed job that would strand its ledger charge.
+  if (before.status === "completed") return { ok: false, error: "This job is already completed. Reopen it first to move it." };
 
   const changed =
     before.date !== next.date || before.start_min !== next.startMin || before.duration_min !== next.durationMin;
@@ -425,15 +429,22 @@ export async function completeAppointment(
   // A washer completing a job is the one who did it; only the owner assigns or keeps all.
   let empId: string | null = employeeId ?? null;
   if (role !== "owner") {
+    // Workers complete only their own scheduled jobs (the DB guard enforces the same) — so nobody
+    // can make themselves the payee on a job someone else did.
+    if (appt.status !== "scheduled") return { ok: false, error: "Only scheduled jobs can be completed." };
     const {
       data: { user },
     } = await db.auth.getUser();
     const { data: mine } = await db.from("employees").select("id").eq("user_id", user!.id).maybeSingle();
-    empId = mine?.id ?? appt.employee_id ?? null;
+    const { count } = mine
+      ? await db.from("appointment_employees").select("employee_id", { count: "exact", head: true }).eq("appointment_id", id).eq("employee_id", mine.id)
+      : { count: 0 };
+    if (!mine || !count) return { ok: false, error: "This job isn't assigned to you. Ask Tyler to add you to it, then complete it." };
+    empId = mine.id;
   }
   const self = keepAll && role === "owner" && !empId;
   // Whoever gets paid for it was on it: add them to the assignees (never drop the others).
-  await ensureAssignee(db, id, empId);
+  if (role === "owner") await ensureAssignee(db, id, empId);
   const completedAt = new Date();
   // self_done/employee_id land before the payment insert so the mirror trigger splits it right.
   const { error } = await db
@@ -630,6 +641,7 @@ export async function setAssignees(id: string, employeeIds: string[]): Promise<A
     `/calendar?view=day&d=${appt.date}`,
     { tags: ["calendar"] }
   );
+  after(() => syncAppointmentToGcal(id)); // event lists the crew
   refresh();
   return { ok: true, id };
 }
@@ -686,6 +698,8 @@ export async function updateAppointment(
   const db = await createClient();
   const before = await getAppt(id);
   if (!before) return { ok: false, error: "Appointment not found." };
+  // A completed job's price is on the ledger and in the payout split.
+  if (before.status === "completed" && (await getRole()) !== "owner") return { ok: false, error: "Only Tyler can edit a completed job." };
   const { error } = await db
     .from("appointments")
     .update({

@@ -4,7 +4,7 @@
 // confirmed in the UI first and pushed to Tyler's phone here.
 import { revalidatePath } from "next/cache";
 import { gadsCredential, syncGoogleAds, type SyncResult } from "@/lib/ads-sync";
-import { getRealRole } from "@/lib/auth";
+import { getRole } from "@/lib/auth";
 import { gadsEnv, listAccessibleCustomers, mutateCampaignBudget, mutateCampaignStatus } from "@/lib/google-ads";
 import { slugify } from "@/lib/marketing";
 import { change, logActivity, usd } from "@/lib/notify";
@@ -12,7 +12,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import type { ActionResult } from "./appointments";
 
 const refresh = () => revalidatePath("/marketing", "layout");
-const ownerOnly = async () => (await getRealRole()) === "owner";
+const ownerOnly = async () => (await getRole()) === "owner"; // view-as preview stays read-only
 
 export async function syncGoogleAdsNow(): Promise<ActionResult & { result?: SyncResult }> {
   // activity: a sync changes nothing Tyler chose — the Ads page shows the result

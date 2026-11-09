@@ -1,5 +1,6 @@
 "use server";
 
+import { ownerOnly } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { normalizeEmail, normalizePhone } from "@/lib/format";
 import { change, customerName, logActivity } from "@/lib/notify";
@@ -75,6 +76,8 @@ export async function updateCustomer(id: string, fields: CustomerFields): Promis
 }
 
 export async function setCustomerArchived(id: string, archived: boolean): Promise<ActionResult> {
+  const denied = await ownerOnly("archive customers");
+  if (denied) return denied;
   const db = await createClient();
   const { error } = await db.from("customers").update({ archived }).eq("id", id);
   if (error) return { ok: false, error: error.message };
@@ -145,6 +148,8 @@ export interface ImportRow {
 
 /** Bulk-insert selected contact rows (already deduped client-side in the preview). */
 export async function importCustomers(rows: ImportRow[]): Promise<ActionResult & { count?: number }> {
+  const denied = await ownerOnly("import customers");
+  if (denied) return denied;
   const valid = rows.filter((r) => r.name?.trim());
   if (!valid.length) return { ok: false, error: "Nothing to import." };
   const db = await createClient();
@@ -179,6 +184,8 @@ export async function getDedupeKeys(): Promise<{ phones: string[]; emails: strin
 
 /** Fold duplicates into `keepId` (one atomic RPC — migration 0021). Owner-only in SQL. */
 export async function mergeCustomers(keepId: string, mergeIds: string[]): Promise<ActionResult> {
+  const denied = await ownerOnly("merge customers");
+  if (denied) return denied;
   const ids = mergeIds.filter((id) => id && id !== keepId);
   if (ids.length === 0) return { ok: false, error: "Pick at least one other customer to merge in." };
   const db = await createClient();
@@ -191,6 +198,8 @@ export async function mergeCustomers(keepId: string, mergeIds: string[]): Promis
 
 /** "Not duplicates" — remember every pair in the group so the suggestion never returns. */
 export async function dismissDuplicates(ids: string[]): Promise<ActionResult> {
+  const denied = await ownerOnly("manage duplicates");
+  if (denied) return denied;
   const rows: { a: string; b: string }[] = [];
   for (let i = 0; i < ids.length; i++)
     for (let j = i + 1; j < ids.length; j++) {

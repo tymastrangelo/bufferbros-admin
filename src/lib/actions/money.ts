@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getRole } from "@/lib/auth";
+import { getRole, ownerOnly } from "@/lib/auth";
 import { change, customerName, logActivity, usd } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
 import { todayYmd } from "@/lib/time";
@@ -40,7 +40,15 @@ export async function addLedgerEntry(fields: LedgerFields): Promise<ActionResult
   if (!fields.amount || fields.amount <= 0) return { ok: false, error: "Enter an amount greater than zero." };
   const db = await createClient();
   const role = await getRole();
-  const collectedBy = isCashIn(fields.kind) ? fields.collectedBy ?? role : "owner";
+  // Workers record cash/checks they were handed, as theirs; credits, discounts, refunds and
+  // owner-collected money are Tyler's (the DB policy enforces the same).
+  let workerId: string | null = null;
+  if (role !== "owner") {
+    if (fields.kind !== "payment") return { ok: false, error: "Only Tyler can add credits, discounts, or refunds." };
+    workerId = (await db.from("employees").select("id").eq("user_id", (await db.auth.getUser()).data.user!.id).maybeSingle()).data?.id ?? null;
+    if (!workerId) return { ok: false, error: "Your account isn't linked to a crew member. Ask Tyler." };
+  }
+  const collectedBy = role !== "owner" ? "washer" : isCashIn(fields.kind) ? fields.collectedBy ?? role : "owner";
   const { data, error } = await db
     .from("ledger_entries")
     .insert({
@@ -54,6 +62,7 @@ export async function addLedgerEntry(fields: LedgerFields): Promise<ActionResult
       plan_id: fields.planId || null,
       collected_by: collectedBy,
       tip: fields.kind === "payment" ? Math.max(0, Number(fields.tip ?? 0)) : 0,
+      ...(workerId ? { employee_id: workerId } : {}),
     })
     .select("id")
     .single();
@@ -77,6 +86,8 @@ export async function updateLedgerEntry(
   id: string,
   fields: Pick<LedgerFields, "kind" | "amount" | "method" | "occurredOn" | "memo" | "collectedBy" | "tip">
 ): Promise<ActionResult> {
+  const denied = await ownerOnly("edit money entries");
+  if (denied) return denied;
   if (!fields.amount || fields.amount <= 0) return { ok: false, error: "Enter an amount greater than zero." };
   const db = await createClient();
   const { data: before } = await db.from("ledger_entries").select("*").eq("id", id).maybeSingle();
@@ -160,6 +171,8 @@ export async function attributeLedgerEntry(ledgerEntryId: string, employeeId: st
 }
 
 export async function deleteLedgerEntry(id: string): Promise<ActionResult> {
+  const denied = await ownerOnly("delete money entries");
+  if (denied) return denied;
   const db = await createClient();
   const { data: before } = await db.from("ledger_entries").select("*").eq("id", id).maybeSingle();
   const { error } = await db.from("ledger_entries").delete().eq("id", id);
@@ -187,6 +200,8 @@ export interface ExpenseFields {
 }
 
 export async function saveExpense(fields: ExpenseFields, id?: string | null): Promise<ActionResult> {
+  const denied = await ownerOnly("log expenses");
+  if (denied) return denied;
   if (!fields.amount || fields.amount <= 0) return { ok: false, error: "Enter an amount greater than zero." };
   const db = await createClient();
   const row = {
@@ -224,6 +239,8 @@ export async function setExpenseReimbursed(expenseId: string, reimbursed: boolea
 }
 
 export async function deleteExpense(id: string): Promise<ActionResult> {
+  const denied = await ownerOnly("delete expenses");
+  if (denied) return denied;
   const db = await createClient();
   const { data: before } = await db.from("expenses").select("*").eq("id", id).maybeSingle();
   const { error } = await db.from("expenses").delete().eq("id", id);
@@ -240,6 +257,8 @@ export interface CapitalFields {
 }
 
 export async function addCapital(fields: CapitalFields): Promise<ActionResult> {
+  const denied = await ownerOnly("record capital");
+  if (denied) return denied;
   if (!fields.amount || fields.amount <= 0) return { ok: false, error: "Enter an amount greater than zero." };
   const db = await createClient();
   const { error } = await db.from("company_ledger").insert({
@@ -259,6 +278,8 @@ export async function updateCompanyEntry(
   id: string,
   fields: { kind: "capital" | "payout"; occurredOn: string; amount: number; memo?: string | null }
 ): Promise<ActionResult> {
+  const denied = await ownerOnly("edit company entries");
+  if (denied) return denied;
   if (!fields.amount || fields.amount <= 0) return { ok: false, error: "Enter an amount greater than zero." };
   const db = await createClient();
   const { error } = await db
@@ -277,6 +298,8 @@ export async function updateCompanyEntry(
 }
 
 export async function deleteCompanyEntry(id: string): Promise<ActionResult> {
+  const denied = await ownerOnly("delete company entries");
+  if (denied) return denied;
   const db = await createClient();
   const { data: before } = await db.from("company_ledger").select("*").eq("id", id).maybeSingle();
   const { error } = await db.from("company_ledger").delete().eq("id", id).in("kind", ["capital", "payout"]);
@@ -297,6 +320,8 @@ export interface RecurringFields {
 }
 
 export async function saveRecurring(fields: RecurringFields, id?: string | null): Promise<ActionResult> {
+  const denied = await ownerOnly("edit recurring expenses");
+  if (denied) return denied;
   if (!fields.name.trim()) return { ok: false, error: "Give it a name." };
   const db = await createClient();
   const row = {
@@ -318,6 +343,8 @@ export async function saveRecurring(fields: RecurringFields, id?: string | null)
 }
 
 export async function deleteRecurring(id: string): Promise<ActionResult> {
+  const denied = await ownerOnly("delete recurring expenses");
+  if (denied) return denied;
   const db = await createClient();
   const { data: before } = await db.from("recurring_expenses").select("name").eq("id", id).maybeSingle();
   const { error } = await db.from("recurring_expenses").delete().eq("id", id);

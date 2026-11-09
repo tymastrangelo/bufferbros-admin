@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { reconcileGcal } from "@/lib/gcal";
 import { syncAllCalendars } from "@/lib/ical";
 
 // Daily Vercel cron (see vercel.json): refresh every employee's iCal feed into
@@ -10,5 +11,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
   await syncAllCalendars();
-  return NextResponse.json({ ok: true });
+  const gcal = await reconcileGcal(); // and push every job back out to Google Calendar
+  return NextResponse.json({ ok: true, gcal });
 }

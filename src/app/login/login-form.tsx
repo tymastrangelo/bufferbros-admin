@@ -35,7 +35,9 @@ export function LoginForm() {
       return;
     }
     // Full navigation so the fresh session cookie reaches the server layout.
-    window.location.href = params.get("next") || "/";
+    // Same-site paths only: `?next=javascript:…` or `//evil.com` would run/redirect off a login link.
+    const next = params.get("next") ?? "";
+    window.location.href = next.startsWith("/") && !/^\/[/\\]/.test(next) ? next : "/";
   }
 
   async function onForgot(email: string) {

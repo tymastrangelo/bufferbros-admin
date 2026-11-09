@@ -1,5 +1,6 @@
 "use server";
 
+import { ownerOnly } from "@/lib/auth";
 // Stripe payment requests: create a checkout link, email it, track it until the
 // webhook (src/app/api/stripe/webhook) books the money on the ledger.
 import { revalidatePath } from "next/cache";
@@ -28,6 +29,10 @@ export interface PaymentRequestFields {
 export async function sendPaymentRequest(fields: PaymentRequestFields): Promise<ActionResult & { url?: string }> {
   if (!stripeConfigured()) return { ok: false, error: "Stripe isn't set up yet (STRIPE_SECRET_KEY missing)." };
   if (!fields.amount || fields.amount <= 0) return { ok: false, error: "Enter an amount greater than zero." };
+  // Workers can send a plain job link; prepay deals and discounts are Tyler's (DB policy agrees).
+  if ((fields.kind !== "job" || Number(fields.discount ?? 0) > 0) && (await ownerOnly())) {
+    return { ok: false, error: "Only Tyler can send prepay or discounted links. Send a plain job link instead." };
+  }
 
   const db = await createClient();
   const { data: customer } = await db.from("customers").select("name,email").eq("id", fields.customerId).single();
@@ -89,6 +94,8 @@ export async function sendPaymentRequest(fields: PaymentRequestFields): Promise<
 }
 
 export async function cancelPaymentRequest(id: string): Promise<ActionResult> {
+  const denied = await ownerOnly("cancel payment links");
+  if (denied) return denied;
   const db = await createClient();
   const { data: request } = await db.from("payment_requests").select("stripe_session_id,status,amount,customers(name)").eq("id", id).single();
   if (!request) return { ok: false, error: "Request not found." };

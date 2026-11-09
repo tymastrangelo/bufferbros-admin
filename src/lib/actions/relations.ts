@@ -1,5 +1,6 @@
 "use server";
 
+import { ownerOnly } from "@/lib/auth";
 // Client relations: outreach touches, review tracking, referrals.
 // logOutreach is the workhorse — one call writes the log row AND moves the
 // customer's status/dates so the Today queue reacts immediately.
@@ -106,6 +107,8 @@ export async function setReferredBy(customerId: string, referrerId: string | nul
 
 /** One-shot: credits BOTH ledgers settings.referral_credit dollars. */
 export async function giveReferralCredit(customerId: string): Promise<ActionResult> {
+  const denied = await ownerOnly("give referral credit");
+  if (denied) return denied;
   const db = await createClient();
   const { data: cust, error } = await db
     .from("customers")

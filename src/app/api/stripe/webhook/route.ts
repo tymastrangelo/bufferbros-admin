@@ -19,7 +19,7 @@ export async function POST(request: Request) {
 
   const event = JSON.parse(payload) as {
     type: string;
-    data: { object: { id: string; amount?: number; reason?: string; payment_status?: string; metadata?: { request_id?: string } } };
+    data: { object: { id: string; amount?: number; amount_total?: number | null; reason?: string; payment_status?: string; metadata?: { request_id?: string } } };
   };
 
   // A disputed charge is rare and urgent — money is being clawed back.
@@ -83,7 +83,8 @@ export async function POST(request: Request) {
     .insert({
       ...base,
       kind: "payment",
-      amount: Number(req.amount),
+      // Book what Stripe actually collected, not the request row (which a DB edit could inflate).
+      amount: session.amount_total != null ? session.amount_total / 100 : Number(req.amount),
       method: "card",
       ...(selfDone ? { settled_on: todayYmd() } : {}),
       collected_by: "owner", // Stripe money lands in the company account

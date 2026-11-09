@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
-import { getRole } from "@/lib/auth";
+import { getRole, ownerOnly } from "@/lib/auth";
 import { initialDetailPrice, visitsPerQuarter } from "@/lib/catalog";
 import { syncAppointmentToGcal } from "@/lib/gcal";
 import { customerName, logActivity, usd } from "@/lib/notify";
@@ -74,6 +74,8 @@ async function setPlanVehicles(db: Awaited<ReturnType<typeof createClient>>, pla
 }
 
 export async function createPlan(fields: PlanFields): Promise<ActionResult & { prepayError?: string }> {
+  const denied = await ownerOnly("set up plans");
+  if (denied) return denied;
   if (fields.cadence === "custom" && !fields.intervalDays) {
     return { ok: false, error: "Custom cadence needs an every-N-days interval." };
   }
@@ -109,6 +111,8 @@ export async function updatePlan(
   /** also push price/duration/time/address onto this plan's future scheduled visits */
   applyToScheduled = false
 ): Promise<ActionResult & { updatedVisits?: number }> {
+  const denied = await ownerOnly("edit plans");
+  if (denied) return denied;
   const db = await createClient();
   const { data: before } = await db.from("plans").select("*").eq("id", id).maybeSingle();
   const { error } = await db.from("plans").update(toRow(fields)).eq("id", id);
@@ -154,6 +158,8 @@ export async function updatePlan(
 
 /** Pause/resume/end. Pausing or ending cancels this plan's future generated visits. */
 export async function setPlanStatus(id: string, status: PlanStatus): Promise<ActionResult> {
+  const denied = await ownerOnly("pause or end plans");
+  if (denied) return denied;
   const db = await createClient();
   const { error } = await db.from("plans").update({ status }).eq("id", id);
   if (error) return { ok: false, error: error.message };
@@ -200,6 +206,8 @@ export async function resumePlan(
   | { ok: true; result: GenerateResult; entry: { date: string; price: number } | null }
   | { ok: false; error: string }
 > {
+  const denied = await ownerOnly("resume plans");
+  if (denied) return denied;
   const db = await createClient();
   const { data: planData, error: planErr } = await db
     .from("plans")
@@ -279,6 +287,8 @@ export async function recordPlanPrepay(
   planId: string,
   input: { visits: number; method: PaymentMethod; occurredOn: string; memo?: string | null }
 ): Promise<ActionResult & { paid?: number; discount?: number }> {
+  const denied = await ownerOnly("record prepayments");
+  if (denied) return denied;
   if (!Number.isInteger(input.visits) || input.visits < 1) return { ok: false, error: "Enter how many visits they're prepaying." };
   const db = await createClient();
   const { data: planData, error: planErr } = await db.from("plans").select("*, customers(name)").eq("id", planId).single();
@@ -336,6 +346,8 @@ export async function schedulePlanVisits(
   planId?: string,
   untilYmd?: string
 ): Promise<{ ok: true; result: GenerateResult } | { ok: false; error: string }> {
+  const denied = await ownerOnly("schedule plan visits");
+  if (denied) return denied;
   if (untilYmd) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(untilYmd)) return { ok: false, error: "Pick a valid date." };
     const today = todayYmd();

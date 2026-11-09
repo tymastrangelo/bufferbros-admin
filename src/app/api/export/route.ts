@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getRealRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { todayYmd } from "@/lib/time";
 
@@ -10,6 +11,7 @@ export async function GET(request: Request) {
     data: { user },
   } = await db.auth.getUser();
   if (!user) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  if ((await getRealRole()) !== "owner") return NextResponse.json({ ok: false, error: "owner only" }, { status: 403 });
 
   const url = new URL(request.url);
   const type = url.searchParams.get("type") ?? "payments";
@@ -49,7 +51,8 @@ export async function GET(request: Request) {
   }
 
   const esc = (v: string | number | null) => {
-    const s = v == null ? "" : String(v);
+    // A leading = + - @ makes Excel run the cell as a formula (names come from web bookings).
+    const s = v == null ? "" : typeof v === "string" && /^[=+\-@\t\r]/.test(v) ? `'${v}` : String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const csv = [header, ...rows].map((r) => r.map(esc).join(",")).join("\r\n");

@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   const code = url.searchParams.get("code");
   const rawNext = url.searchParams.get("next") ?? "/";
   // only allow same-origin paths
-  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
+  const next = rawNext.startsWith("/") && !/^\/[/\\]/.test(rawNext) ? rawNext : "/"; // "/\evil.com" parses off-site
 
   if (code) {
     const supabase = await createClient();

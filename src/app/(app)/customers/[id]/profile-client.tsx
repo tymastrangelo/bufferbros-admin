@@ -73,6 +73,7 @@ export function CustomerProfile({
   const [stripeSheet, setStripeSheet] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [ledgerSheet, setLedgerSheet] = useState<{ entry?: LedgerEntry; kind?: EntryKind } | null>(null);
+  const owner = useOwner(); // workers record payments; credits, discounts and edits are Tyler's
 
   const balance = ledger.reduce((s, e) => s + e.amount, 0);
   const upcoming = appointments.filter((a) => a.status === "scheduled" && a.date >= today).reverse();
@@ -341,12 +342,16 @@ export function CustomerProfile({
             <button className="btn btn-primary btn-sm" onClick={() => setLedgerSheet({ kind: "payment" })}>
               Record payment
             </button>
-            <button className="btn btn-sm" onClick={() => setLedgerSheet({ kind: "credit" })}>
-              Add credit
-            </button>
-            <button className="btn btn-sm" onClick={() => setLedgerSheet({ kind: "discount" })}>
-              Discount
-            </button>
+            {owner && (
+              <>
+                <button className="btn btn-sm" onClick={() => setLedgerSheet({ kind: "credit" })}>
+                  Add credit
+                </button>
+                <button className="btn btn-sm" onClick={() => setLedgerSheet({ kind: "discount" })}>
+                  Discount
+                </button>
+              </>
+            )}
             <button className="btn btn-sm" onClick={() => setStripeSheet(true)}>
               Email Stripe link
             </button>
@@ -361,7 +366,7 @@ export function CustomerProfile({
                 Nothing on the books. Charges land here automatically when you complete a job.
               </p>
             ) : (
-              <LedgerTable ledger={ledger} onEdit={(e) => setLedgerSheet({ entry: e })} />
+              <LedgerTable ledger={ledger} onEdit={owner ? (e) => setLedgerSheet({ entry: e }) : undefined} />
             )}
           </div>
         </div>
@@ -494,7 +499,7 @@ function VisitList({
   );
 }
 
-function LedgerTable({ ledger, onEdit }: { ledger: LedgerEntry[]; onEdit: (e: LedgerEntry) => void }) {
+function LedgerTable({ ledger, onEdit }: { ledger: LedgerEntry[]; onEdit?: (e: LedgerEntry) => void }) {
   // A completed-and-paid detail books a charge + payment pair on the same appointment;
   // show it as one clean "paid" line. Tapping a combined line expands the raw entries.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -563,7 +568,7 @@ function LedgerTable({ ledger, onEdit }: { ledger: LedgerEntry[]; onEdit: (e: Le
               <td data-label="Balance" className="num text-right text-ink-2">{money(total)}</td>
             </tr>
           ) : (
-            <tr key={e.id} onClick={() => onEdit(e)}>
+            <tr key={e.id} onClick={onEdit ? () => onEdit(e) : undefined}>
               <td data-label="Date" className="num whitespace-nowrap">{fmtDateShort(e.occurred_on)}</td>
               <td data-label="Entry">
                 <span className="capitalize font-medium">{e.kind}</span>

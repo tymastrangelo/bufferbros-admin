@@ -27,6 +27,11 @@ export async function getRole(): Promise<Role> {
   return real;
 }
 
+/** Server-action gate: null when the caller may act as owner, else the error to return. */
+export async function ownerOnly(what = "do that"): Promise<{ ok: false; error: string } | null> {
+  return (await getRole()) === "owner" ? null : { ok: false, error: `Only Tyler can ${what}.` };
+}
+
 export async function requireOwner(): Promise<void> {
   if ((await getRole()) !== "owner") redirect("/");
 }
