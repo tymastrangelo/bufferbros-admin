@@ -39,3 +39,18 @@ export function normalizeEmail(e: string | null | undefined): string | null {
   const v = e?.trim().toLowerCase();
   return v || null;
 }
+
+/**
+ * A `?next=` value as a same-origin path, else "/". Parses the way the browser will (it strips
+ * tabs/newlines, so "/\t/evil.com" is really "//evil.com"), then keeps only path+query+hash with
+ * one leading slash — blocks javascript:, //host, /\host and "/.//host".
+ */
+export function safeNext(next: string | null | undefined, origin: string): string {
+  try {
+    const u = new URL(next || "/", origin);
+    if (u.origin !== origin) return "/";
+    return `/${u.pathname.replace(/^\/+/, "")}${u.search}${u.hash}`;
+  } catch {
+    return "/";
+  }
+}

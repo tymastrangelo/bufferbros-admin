@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeNext } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 
 // Lands here from Supabase auth emails (password recovery). Exchanges the
@@ -6,9 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
-  const rawNext = url.searchParams.get("next") ?? "/";
-  // only allow same-origin paths
-  const next = rawNext.startsWith("/") && !/^\/[/\\]/.test(rawNext) ? rawNext : "/"; // "/\evil.com" parses off-site
+  const next = safeNext(url.searchParams.get("next"), url.origin); // same-origin paths only
 
   if (code) {
     const supabase = await createClient();

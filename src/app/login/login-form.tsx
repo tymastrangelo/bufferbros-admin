@@ -3,6 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Wheel } from "@/components/brand";
+import { safeNext } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { ErrorNote, Field } from "@/components/ui";
 
@@ -36,8 +37,7 @@ export function LoginForm() {
     }
     // Full navigation so the fresh session cookie reaches the server layout.
     // Same-site paths only: `?next=javascript:…` or `//evil.com` would run/redirect off a login link.
-    const next = params.get("next") ?? "";
-    window.location.href = next.startsWith("/") && !/^\/[/\\]/.test(next) ? next : "/";
+    window.location.href = safeNext(params.get("next"), window.location.origin);
   }
 
   async function onForgot(email: string) {
