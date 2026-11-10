@@ -6,11 +6,11 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { markSuggestionSent, requestTextSync } from "@/lib/actions/texts";
-import { smsHref, telHref } from "@/lib/format";
+import { applyMakeGood, markSuggestionSent, requestClientHelp, requestTextSync } from "@/lib/actions/texts";
+import { money, smsHref, telHref } from "@/lib/format";
 import { GOAL_LABEL, type Suggestion, type SuggestionGoal } from "@/lib/suggestions";
 import { dateOfInstant, fmtDateLong, fmtDateShort, todayYmd } from "@/lib/time";
-import type { CustomerInsight, CustomerMessage, TextSyncRun } from "@/lib/types";
+import type { CustomerInsight, CustomerMessage, HelpResult, TextSyncRun } from "@/lib/types";
 import { IconCalendar, IconChats, IconCheckCircle, IconEquals, IconMessage, IconPhone, IconStar, IconWarning, IconWave, type IconComponent } from "./icons";
 import { Busy, CopyButton, EmptyState, ErrorNote, LiveList, LiveRow, SectionLabel, Sheet } from "./ui";
 
@@ -254,6 +254,130 @@ export function InsightCard({ insight, suggestion }: { insight: CustomerInsight;
       </div>
       {sending && suggestion && <SuggestionSheet s={suggestion} onClose={() => setSending(false)} />}
     </section>
+  );
+}
+
+/** "Handle an issue": Tyler says what's going on (a reschedule, a complaint, an odd ask); his Mac
+ *  syncs texts and drafts a short reply in his voice from the client's thread, visits, plan and
+ *  balance (scripts/client-texts/help.mjs). On us → the draft offers the make-good credit, added
+ *  here with one tap. The run row updates live, so the sheet fills in by itself. */
+export function HelpSheet({ customerId, name, phone, run, credit, onClose }: { customerId: string; name: string; phone: string | null; run: TextSyncRun | null; credit: number; onClose: () => void }) {
+  const router = useRouter();
+  const first = name.split(/\s+/)[0];
+  const [ask, setAsk] = useState(run?.ask ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const age = run ? now - Date.parse(run.requested_at) : Infinity;
+  const inFlight = !!run && (run.status === "pending" || run.status === "running") && age < 30 * 60_000;
+  const result = run?.status === "done" ? run.result : null;
+
+  return (
+    <Sheet open onClose={onClose} title={`Handle an issue with ${first}`}>
+      <div className="flex flex-col gap-4">
+        <label className="block">
+          <span className="label block mb-1.5">What&apos;s going on?</span>
+          <textarea
+            className="textarea text-md"
+            rows={3}
+            value={ask}
+            onChange={(e) => setAsk(e.target.value)}
+            placeholder="e.g. Gabe's out Thursday, moving her to Friday 10am"
+          />
+        </label>
+        <p className="text-xs text-faint">
+          Syncs your texts first, then drafts a reply in your voice from their texts, visits, plan and balance.
+          {credit > 0 && ` If it's on us, it offers ${money(credit)} off their next visit.`}
+        </p>
+        <button
+          className={result ? "btn" : "btn btn-primary"}
+          disabled={busy || inFlight}
+          onClick={async () => {
+            setError(null);
+            setBusy(true);
+            const res = await requestClientHelp(customerId, ask);
+            setBusy(false);
+            if (!res.ok) return setError(res.error);
+            router.refresh();
+          }}
+        >
+          {busy || inFlight ? <Busy>Drafting…</Busy> : result ? "Draft again" : "Draft a reply"}
+        </button>
+        {inFlight && (
+          <p className="text-xs text-faint" aria-live="polite">
+            {run!.status === "pending" && age > 3 * 60_000 ? "Waiting for your Mac. It drafts as soon as it's on and awake." : "Syncing texts and drafting, usually under a minute."}
+          </p>
+        )}
+        <ErrorNote>{error ?? (run?.status === "error" ? `That draft failed: ${run.error}. Try again.` : null)}</ErrorNote>
+        {result && run && <HelpDraft key={run.id} runId={run.id} result={result} first={first} phone={phone} />}
+      </div>
+    </Sheet>
+  );
+}
+
+function HelpDraft({ runId, result, first, phone }: { runId: string; result: HelpResult; first: string; phone: string | null }) {
+  const router = useRouter();
+  const [text, setText] = useState(result.text);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="flex flex-col gap-3 border-t border-line pt-4">
+      <label className="block">
+        <span className="label block mb-1.5">Reply to {first} (edit before sending)</span>
+        <textarea className="textarea text-md" rows={4} value={text} onChange={(e) => setText(e.target.value)} />
+      </label>
+      {result.credit > 0 && (
+        <div className="note note-brand text-sm flex flex-wrap items-center justify-between gap-2">
+          <span>It&apos;s on us, so the text offers {money(result.credit)} off their next visit.</span>
+          {result.credit_applied_at ? (
+            <span className="chip chip-ok">
+              <IconCheckCircle width={12} height={12} weight="fill" aria-hidden /> Credit added
+            </span>
+          ) : (
+            <button
+              className="btn btn-sm"
+              disabled={pending}
+              onClick={async () => {
+                setError(null);
+                setPending(true);
+                const res = await applyMakeGood(runId);
+                setPending(false);
+                if (!res.ok) return setError(res.error);
+                router.refresh();
+              }}
+            >
+              {pending ? <Busy>Adding…</Busy> : `Add ${money(result.credit)} credit`}
+            </button>
+          )}
+        </div>
+      )}
+      <ErrorNote>{error}</ErrorNote>
+      {result.notes.length > 0 && (
+        <div>
+          <p className="label mb-1.5">Heads up</p>
+          <ul className="flex flex-col gap-1.5 text-sm list-disc pl-5">
+            {result.notes.map((n, i) => (
+              <li key={i}>{n}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {phone ? (
+          <a className="btn btn-primary" href={`${smsHref(phone)}&body=${encodeURIComponent(text)}`}>
+            <IconMessage width={16} height={16} /> Open in Messages
+          </a>
+        ) : (
+          <p className="note text-sm">No phone number on file. Copy it instead.</p>
+        )}
+        <CopyButton text={text} label="Copy" className="btn" />
+      </div>
+    </div>
   );
 }
 

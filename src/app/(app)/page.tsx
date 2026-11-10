@@ -88,7 +88,7 @@ export default async function TodayPage() {
   const suggestions = owner ? liveSuggestions((cardsQ?.data ?? []) as never, outreachCustomers, nextVisit, today) : [];
   // Latest text-sync run for the home-page Sync button (syncs texts + regenerates the follow-ups).
   const textSyncRun = owner
-    ? (((await db.from("text_sync_runs").select("*").order("requested_at", { ascending: false }).limit(1).maybeSingle()).data as TextSyncRun | null) ?? null)
+    ? (((await db.from("text_sync_runs").select("*").is("customer_id", null).order("requested_at", { ascending: false }).limit(1).maybeSingle()).data as TextSyncRun | null) ?? null)
     : null;
 
   // Resolve vehicle_ids -> labels for the reminders card in one lookup.

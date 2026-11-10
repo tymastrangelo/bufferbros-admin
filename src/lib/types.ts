@@ -459,6 +459,21 @@ export interface TextSyncRun {
   texts_synced: number | null;
   cards_updated: number | null;
   error: string | null;
+  /** Set = a "Handle an issue" request for this client (0040); null = a plain sync. */
+  customer_id: string | null;
+  /** Tyler's note on what's going on. */
+  ask: string | null;
+  result: HelpResult | null;
+}
+
+/** What the Mac drafted for a "Handle an issue" request (scripts/client-texts/help.mjs). */
+export interface HelpResult {
+  text: string;
+  /** On us (we moved/cancelled, ran late, missed something) → credit = settings.make_good_credit. */
+  our_fault: boolean;
+  credit: number;
+  notes: string[];
+  credit_applied_at?: string;
 }
 
 export type CompanyLedgerKind = "revenue" | "payout" | "capital" | "expense";

@@ -4,13 +4,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AppointmentSheet } from "@/components/appointment-sheet";
-import { IconMail, IconMessage, IconPhone, IconPin, IconPlus, IconX } from "@/components/icons";
+import { IconMail, IconMessage, IconPhone, IconPin, IconPlus, IconWrench, IconX } from "@/components/icons";
 import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { LedgerEntrySheet } from "@/components/ledger-entry-sheet";
 import { RelationsCard } from "@/components/relations-card";
 import { CustomerPicker, type PickedCustomer } from "@/components/customer-picker";
 import { ChannelSelect } from "@/components/marketing-bits";
-import { InsightCard, TextThread } from "@/components/client-texts";
+import { HelpSheet, InsightCard, TextThread } from "@/components/client-texts";
 import { liveSuggestion } from "@/lib/suggestions";
 import { Avatar, Balance, Busy, CopyButton, ErrorNote, Field, PageHeader, Sheet, StatusChip, Tabs } from "@/components/ui";
 import { motion } from "motion/react";
@@ -43,6 +43,8 @@ export function CustomerProfile({
   texts,
   insight,
   textSync,
+  help,
+  makeGoodCredit,
 }: {
   customer: Customer;
   vehicles: Vehicle[];
@@ -60,8 +62,12 @@ export function CustomerProfile({
   texts: CustomerMessage[] | null;
   insight: CustomerInsight | null;
   textSync: TextSyncRun | null;
+  /** latest "Handle an issue" request for this client (owner only) */
+  help: TextSyncRun | null;
+  makeGoodCredit: number;
 }) {
   const [tab, setTab] = useState<Tab>("overview");
+  const [helpOpen, setHelpOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [vehicleEdit, setVehicleEdit] = useState<Vehicle | "new" | "new-boat" | null>(null);
   // Store the tapped job, render the fresh copy from server props so an open
@@ -158,6 +164,14 @@ export function CustomerProfile({
           newTab
         />
       </div>
+      {texts && (
+        <button className="btn btn-sm mt-3" onClick={() => setHelpOpen(true)}>
+          <IconWrench width={14} height={14} /> Handle an issue
+        </button>
+      )}
+      {helpOpen && (
+        <HelpSheet customerId={customer.id} name={customer.name} phone={customer.phone} run={help} credit={makeGoodCredit} onClose={() => setHelpOpen(false)} />
+      )}
 
       {/* Tabs */}
       <Tabs

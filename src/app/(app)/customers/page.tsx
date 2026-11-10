@@ -29,7 +29,7 @@ export default async function CustomersPage({
     db.from("appointments").select("customer_id").not("customer_id", "is", null),
     db.from("ledger_entries").select("customer_id"),
     db.from("customer_not_duplicates").select("a,b"),
-    db.from("text_sync_runs").select("*").order("requested_at", { ascending: false }).limit(1).maybeSingle(),
+    db.from("text_sync_runs").select("*").is("customer_id", null).order("requested_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
   const activity = new Map<string, number>();
   for (const r of [...(apptCustQ.data ?? []), ...(ledgerCustQ.data ?? [])] as { customer_id: string }[])

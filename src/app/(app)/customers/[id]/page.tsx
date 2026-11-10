@@ -47,7 +47,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
 
   // Texts are owner-only; a previewing owner ("view as Gabe") sees the worker's page.
   const owner = (await getRole()) === "owner";
-  const [logQ, referralsQ, settings, referrerQ, textsQ, insightQ, syncQ] = await Promise.all([
+  const [logQ, referralsQ, settings, referrerQ, textsQ, insightQ, syncQ, helpQ] = await Promise.all([
     db.from("outreach_log").select("*").eq("customer_id", id).order("occurred_on", { ascending: false }).order("created_at", { ascending: false }).limit(8),
     db.from("customers").select("id,name").eq("referred_by", id).order("created_at"),
     getSettingsMap(),
@@ -56,7 +56,9 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
       ? db.from("customer_messages").select("id,sent_at,from_me,body,has_attachment").eq("customer_id", id).order("sent_at", { ascending: false }).limit(300)
       : Promise.resolve(null),
     owner ? db.from("customer_insights").select("*").eq("customer_id", id).maybeSingle() : Promise.resolve(null),
-    owner ? db.from("text_sync_runs").select("*").order("requested_at", { ascending: false }).limit(1).maybeSingle() : Promise.resolve(null),
+    owner ? db.from("text_sync_runs").select("*").is("customer_id", null).order("requested_at", { ascending: false }).limit(1).maybeSingle() : Promise.resolve(null),
+    // latest "Handle an issue" draft for this client (0040)
+    owner ? db.from("text_sync_runs").select("*").eq("customer_id", id).order("requested_at", { ascending: false }).limit(1).maybeSingle() : Promise.resolve(null),
   ]);
 
   return (
@@ -76,6 +78,8 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
       texts={textsQ ? ((textsQ.data ?? []) as CustomerMessage[]).reverse() : null}
       insight={(insightQ?.data as CustomerInsight | null) ?? null}
       textSync={(syncQ?.data as TextSyncRun | null) ?? null}
+      help={(helpQ?.data as TextSyncRun | null) ?? null}
+      makeGoodCredit={Number(settings.make_good_credit ?? 0)}
     />
   );
 }

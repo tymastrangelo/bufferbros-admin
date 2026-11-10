@@ -3,7 +3,8 @@
 //   node run.mjs            one run now: sync new texts, then refresh the cards of customers who
 //                           have new texts (the 4am nightly job; also fine to run by hand)
 //   node run.mjs --listen   stay running and do a run whenever the dashboard's "Sync texts now"
-//                           button inserts a pending text_sync_runs row (Supabase Realtime)
+//                           button inserts a pending text_sync_runs row (Supabase Realtime); a row
+//                           with customer_id is "Handle an issue" (help.mjs): sync, then one draft
 //   node run.mjs --dry-run  count what would sync; writes nothing, no Claude
 // Every run is recorded in text_sync_runs so the dashboard can show its status. A lock file keeps
 // the nightly job and the listener from ever running at the same time.
@@ -11,6 +12,7 @@ import { createClient } from "@supabase/supabase-js";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { STATE_DIR, rest, supabaseEnv } from "./lib.mjs";
+import { helpWith } from "./help.mjs";
 import { summarizeChanged } from "./summarize.mjs";
 import { syncTexts } from "./sync.mjs";
 
@@ -45,28 +47,46 @@ const releaseLock = () => {
 
 const patchRuns = (ids, body) => call(`text_sync_runs?id=in.(${ids.join(",")})`, { method: "PATCH", body, prefer: "return=minimal" });
 
-/** Sync + refresh cards, reported on the given run rows (or a new row for `source`). false = locked. */
-async function runOnce(source, ids = []) {
+/** Sync texts, then answer each "Handle an issue" row (customer_id set) and refresh cards for the
+ *  plain sync rows, reported on the given rows (or a new row for `source`). false = locked. */
+async function runOnce(source, rows = []) {
   if (!takeLock()) return false;
+  const open = new Set(rows.map((r) => r.id)); // rows not reported yet
   try {
-    if (ids.length) await patchRuns(ids, { status: "running", started_at: now() });
+    if (rows.length) await patchRuns([...open], { status: "running", started_at: now() });
     else {
       const [row] = await call("text_sync_runs", { method: "POST", body: { source, status: "running", started_at: now() }, prefer: "return=representation" });
-      ids = [row.id];
+      rows = [row];
+      open.add(row.id);
     }
     try {
       const s = await syncTexts(call);
-      const c = await summarizeChanged(call, { log });
-      await patchRuns(ids, {
-        status: "done",
-        finished_at: now(),
-        texts_synced: s.synced,
-        cards_updated: c.updated,
-        error: c.failed ? `${c.failed} card${c.failed === 1 ? "" : "s"} failed; see ~/Library/Logs/bufferbros-texts.log` : null,
-      });
-      log(`${source} run: ${s.synced} new texts (${s.customers} customers), ${c.updated}/${c.due} cards updated`);
+      // Help requests first: Tyler is waiting on the profile, and they need one Claude call each.
+      for (const r of rows.filter((r) => r.customer_id)) {
+        open.delete(r.id);
+        try {
+          const result = await helpWith(call, r);
+          await patchRuns([r.id], { status: "done", finished_at: now(), texts_synced: s.synced, result });
+          log(`help drafted for ${r.customer_id}${result.credit ? ` ($${result.credit} make-good)` : ""}`);
+        } catch (e) {
+          await patchRuns([r.id], { status: "error", finished_at: now(), error: String(e.message).slice(0, 500) });
+          log(`help failed for ${r.customer_id}: ${e.message}`);
+        }
+      }
+      if (open.size) {
+        const c = await summarizeChanged(call, { log });
+        await patchRuns([...open], {
+          status: "done",
+          finished_at: now(),
+          texts_synced: s.synced,
+          cards_updated: c.updated,
+          error: c.failed ? `${c.failed} card${c.failed === 1 ? "" : "s"} failed; see ~/Library/Logs/bufferbros-texts.log` : null,
+        });
+        open.clear();
+        log(`${source} run: ${s.synced} new texts (${s.customers} customers), ${c.updated}/${c.due} cards updated`);
+      }
     } catch (e) {
-      await patchRuns(ids, { status: "error", finished_at: now(), error: String(e.message).slice(0, 500) });
+      if (open.size) await patchRuns([...open], { status: "error", finished_at: now(), error: String(e.message).slice(0, 500) });
       log(`${source} run failed: ${e.message}`);
     }
   } finally {
@@ -87,8 +107,8 @@ if (process.argv.includes("--dry-run")) {
     try {
       do {
         again = false;
-        const pending = await call("text_sync_runs?status=eq.pending&select=id&order=requested_at");
-        if (pending.length && !(await runOnce("requested", pending.map((p) => p.id)))) setTimeout(drain, 60_000); // nightly run holds the lock
+        const pending = await call("text_sync_runs?status=eq.pending&select=id,customer_id,ask&order=requested_at");
+        if (pending.length && !(await runOnce("requested", pending))) setTimeout(drain, 60_000); // nightly run holds the lock
       } while (again);
     } catch (e) {
       log(`listener: ${e.message}`);

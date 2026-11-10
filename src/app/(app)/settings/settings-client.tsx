@@ -754,6 +754,7 @@ function OutreachSection({ settings }: { settings: Record<string, string> }) {
   const [afterDays, setAfterDays] = useState(settings.outreach_after_days ?? "60");
   const [reviewDays, setReviewDays] = useState(settings.review_ask_window_days ?? "14");
   const [refCredit, setRefCredit] = useState(settings.referral_credit ?? "10");
+  const [makeGood, setMakeGood] = useState(settings.make_good_credit ?? "20");
   return (
     <Section
       title="Client outreach & referrals"
@@ -772,18 +773,23 @@ function OutreachSection({ settings }: { settings: Record<string, string> }) {
           <span className="label block mb-1">Referral credit ($ each)</span>
           <input type="number" min={0} className="input num" value={refCredit} onChange={(e) => setRefCredit(e.target.value)} />
         </label>
+        <label className="block">
+          <span className="label block mb-1">Make-good credit ($ off)</span>
+          <input type="number" min={0} className="input num" value={makeGood} onChange={(e) => setMakeGood(e.target.value)} />
+        </label>
       </div>
       <p className="text-dense text-ink-2 mt-1.5">
         Active clients surface on Today once their last detail and last touch are both older than the reach-out window
         and nothing is booked. Fresh details stay in the review-ask list this many days. Referral credit lands on both
-        ledgers when you tap “Credit both” on the new client&apos;s profile.
+        ledgers when you tap “Credit both” on the new client&apos;s profile. The make-good credit is what “Handle an issue”
+        offers off their next visit when it&apos;s on us (we moved them, ran late, or missed something). 0 turns it off.
       </p>
       <div className="mt-3">
         <SaveButton
           state={state}
           onClick={() =>
             run(() =>
-              saveSettings({ outreach_after_days: afterDays, review_ask_window_days: reviewDays, referral_credit: refCredit })
+              saveSettings({ outreach_after_days: afterDays, review_ask_window_days: reviewDays, referral_credit: refCredit, make_good_credit: makeGood })
             )
           }
         />

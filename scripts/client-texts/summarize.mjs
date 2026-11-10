@@ -89,7 +89,7 @@ Rules:
   - "call": a call would land better than a text — an unhappy or at-risk customer, a complaint to smooth over, something that needs a real back-and-forth. This only flags that calling is the better move; you STILL write a full text below as the fallback.
   - "none": they have a visit booked and nothing is pending, Tyler texted them very recently, they declined, or they're do_not_contact.
   send_on: YYYY-MM-DD. Today if it fits now; otherwise the best future day (when they're due again, back in town, or a day or two after a detail for a review).
-  text: for every goal except "none" (INCLUDING "call") write a complete, ready-to-send message. Match how Tyler writes in these texts (length, tone, capitalization, punctuation, emoji or not). Short, warm, specific to them (their car or last visit if it fits naturally), one clear ask. For a review include ${REVIEW_LINK}. For rebooking, offer to set a time or share bufferbros.org/booking (exactly that link), and when it fits suggest a recurring plan so they stay on the schedule. For "call", still write a warm text that fits the situation (it may gently offer to hop on a quick call). Never promise specific openings; if they said which days work for them, mention those days. Never invent prices, discounts, dates or facts. Empty string when goal is "none".
+  text: for every goal except "none" (INCLUDING "call") write a complete, ready-to-send message. Sound exactly like Tyler: "How Tyler texts" shows his real messages, so copy their length, tone, capitalization, punctuation and emoji habits; casual, never corporate or salesy. Keep it to 1 to 3 short sentences, under 280 characters not counting a link. Warm, specific to them (their car or last visit if it fits naturally), one clear ask. For a review include ${REVIEW_LINK}. For rebooking, offer to set a time or share bufferbros.org/booking (exactly that link), and when it fits suggest a recurring plan so they stay on the schedule. For "call", still write a warm text that fits the situation (it may gently offer to hop on a quick call). Never promise specific openings; if they said which days work for them, mention those days. Never invent prices, discounts, dates or facts. Empty string when goal is "none".
   why: one short sentence on why this follow-up, now.
 Write in plain, short sentences. No em dashes.`;
 
@@ -174,9 +174,76 @@ export function money({ ledger }) {
     .join("; ");
 }
 
+/** Tyler's own short, hand-typed texts, newest first, so every draft copies how he really writes.
+ *  Leaves out links and the drafted outreach batches ("it's Tyler with Buffer Bros…"). */
+export async function voiceSample(call, n = 40) {
+  const mine = await call("customer_messages?from_me=eq.true&body=not.is.null&select=body&order=sent_at.desc&limit=500");
+  const seen = new Set();
+  return mine
+    .map((m) => m.body.trim())
+    .filter((b) => b.length >= 8 && b.length <= 180 && !/:\/\/|\.(com|org)|g\.page|Tyler (with|from) Buffer Bros|This is Tyler/i.test(b) && !seen.has(b) && seen.add(b))
+    .slice(0, n);
+}
+export const voiceBlock = (voice) => ["How Tyler texts (his real messages, newest first):", ...voice.map((v) => `- ${v.replace(/\n+/g, " / ")}`)].join("\n");
+
+export const workerNames = async (call) => new Map((await getAll(call, "employees?select=id,name")).map((w) => [w.id, w.name.split(/\s+/)[0]]));
+
+/** Everything the dashboard knows about one customer, in prompt form: timing, the calendar,
+ *  money, open reminders, the CRM record with past jobs, and the latest 200 texts. */
+export async function customerBrief(call, customerId, workerName) {
+  const [[c], vehicles, appts, plans, thread, ledger, reminders] = await Promise.all([
+    call(`customers?id=eq.${customerId}&select=name,email,addresses,site_notes,notes,tags,outreach_status,resume_on,last_contacted_on,review_asked_on,review_left_on,acquired_via`),
+    call(`vehicles?customer_id=eq.${customerId}&select=kind,year,make,model,color,size_id,length_ft,notes`),
+    call(`appointments?customer_id=eq.${customerId}&select=date,start_min,duration_min,status,service_name,size_label,addons,price,address,notes,employee_id,plan_id,source&order=date.desc&limit=30`),
+    call(`plans?customer_id=eq.${customerId}&select=id,cadence,interval_days,status,per_visit_price,preferred_dow,preferred_min,duration_min,employee_id,starts_on,ends_on,billing_note,notes`),
+    call(`customer_messages?customer_id=eq.${customerId}&select=sent_at,from_me,body,has_attachment&order=sent_at.desc&limit=200`),
+    call(`ledger_entries?customer_id=eq.${customerId}&select=kind,amount,method,occurred_on,memo`),
+    call(`reminders?customer_id=eq.${customerId}&done_at=is.null&select=due_on,title,body`),
+  ]);
+  if (!c) throw new Error(`customer ${customerId} not found`);
+  const first = c.name.split(/\s+/)[0];
+  const lines = thread
+    .reverse()
+    .map((m) => `${stamp(m.sent_at)} ${m.from_me ? "Tyler" : first}: ${(m.body ?? "").slice(0, 1000)}${m.has_attachment ? " [photo or file]" : ""}`);
+  const today = day(new Date().toISOString());
+  const recent = appts.filter((a) => a.date < today || a.status !== "scheduled").map(({ date, start_min, status, service_name, size_label, addons, price, notes, employee_id, plan_id }) => ({ date, time: clock(start_min), status, service_name, size_label, addons: (addons ?? []).map((x) => x.name), price, notes, done_by: employee_id ? workerName.get(employee_id) ?? "worker" : "Tyler", plan_visit: !!plan_id }));
+  const input = [
+    `Today is ${dayLabel(today)} (${today}).`,
+    `Timing: ${timing({ today, appts, plans, c })}`,
+    `Schedule (the dashboard calendar, authoritative): ${schedule({ today, appts, plans, workerName })}`,
+    `Money: ${money({ ledger })}`,
+    reminders.length ? `Open reminders Tyler set: ${reminders.map((r) => `${r.due_on} ${r.title}${r.body ? ` (${r.body.slice(0, 160)})` : ""}`).join("; ")}` : null,
+    `CRM record: ${JSON.stringify({ customer: c, vehicles, past_jobs: recent })}`,
+    `Text messages, oldest first (${lines.length} most recent):`,
+    ...lines,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return { c, today, input };
+}
+
+/** Claude Code on Tyler's plan, isolated (no tools, MCP, settings or project context), with a
+ *  JSON schema. Returns the structured output or throws. */
+export function askClaude(system, input, schema, cwd) {
+  const run = spawnSync(
+    CLAUDE,
+    ["-p", "--model", "sonnet", "--tools", "", "--strict-mcp-config", "--setting-sources", "local", "--no-session-persistence",
+      "--system-prompt", system, "--output-format", "json", "--json-schema", JSON.stringify(schema)],
+    { input, cwd: cwd ?? mkdtempSync(join(tmpdir(), "bb-texts-")), encoding: "utf8", timeout: 240000, maxBuffer: 16 * 1024 * 1024 }
+  );
+  let res;
+  try {
+    res = JSON.parse(run.stdout);
+  } catch {
+    throw new Error(run.stderr?.trim() || run.error?.message || "no output from claude");
+  }
+  if (res.is_error || !res.structured_output) throw new Error(res.result || res.subtype || "claude returned no answer");
+  return res.structured_output;
+}
+
 /** @returns {Promise<{ updated: number, due: number, failed: number }>} */
 export async function summarizeChanged(call, { limit = 40, only = null, log = console.log } = {}) {
-  const [msgs, insights, oneOffs, custs, visits, reviewReminders, workers] = await Promise.all([
+  const [msgs, insights, oneOffs, custs, visits, reviewReminders, workerName, voice] = await Promise.all([
     getAll(call, `customer_messages?select=customer_id,sent_at&order=sent_at.desc${only ? `&customer_id=eq.${only}` : ""}`),
     getAll(call, "customer_insights?select=customer_id,through_message_at,updated_at,suggestion_goal,suggestion_done_at"),
     // one-off visits (weekly plan washes shouldn't re-read a customer every week) + any cancellation
@@ -187,9 +254,9 @@ export async function summarizeChanged(call, { limit = 40, only = null, log = co
     getAll(call, "appointments?select=customer_id,date,status&customer_id=not.is.null"),
     // open review-ask reminders (created on detail completion) own the review nudge — don't also draft one
     getAll(call, "reminders?select=customer_id&done_at=is.null&body=like.*g.page/r/*"),
-    getAll(call, "employees?select=id,name"),
+    workerNames(call),
+    voiceSample(call),
   ]);
-  const workerName = new Map(workers.map((w) => [w.id, w.name.split(/\s+/)[0]]));
   const reviewReminderSet = new Set(reviewReminders.map((r) => r.customer_id));
   const newest = new Map();
   const counts = new Map();
@@ -237,47 +304,13 @@ export async function summarizeChanged(call, { limit = 40, only = null, log = co
   const work = mkdtempSync(join(tmpdir(), "bb-texts-")); // empty cwd: no project context for Claude
   let updated = 0;
   for (const [customerId, through] of due) {
-    const [[c], vehicles, appts, plans, thread, ledger, reminders] = await Promise.all([
-      call(`customers?id=eq.${customerId}&select=name,email,addresses,site_notes,notes,tags,outreach_status,resume_on,last_contacted_on,review_asked_on,review_left_on,acquired_via`),
-      call(`vehicles?customer_id=eq.${customerId}&select=kind,year,make,model,color,size_id,length_ft,notes`),
-      call(`appointments?customer_id=eq.${customerId}&select=date,start_min,duration_min,status,service_name,size_label,addons,price,address,notes,employee_id,plan_id,source&order=date.desc&limit=30`),
-      call(`plans?customer_id=eq.${customerId}&select=id,cadence,interval_days,status,per_visit_price,preferred_dow,preferred_min,duration_min,employee_id,starts_on,ends_on,billing_note,notes`),
-      call(`customer_messages?customer_id=eq.${customerId}&select=sent_at,from_me,body,has_attachment&order=sent_at.desc&limit=200`),
-      call(`ledger_entries?customer_id=eq.${customerId}&select=kind,amount,method,occurred_on,memo`),
-      call(`reminders?customer_id=eq.${customerId}&done_at=is.null&select=due_on,title,body`),
-    ]);
-    const first = c.name.split(/\s+/)[0];
-    const lines = thread
-      .reverse()
-      .map((m) => `${stamp(m.sent_at)} ${m.from_me ? "Tyler" : first}: ${(m.body ?? "").slice(0, 1000)}${m.has_attachment ? " [photo or file]" : ""}`);
-    const today = day(new Date().toISOString());
-    const recent = appts.filter((a) => a.date < today || a.status !== "scheduled").map(({ date, start_min, status, service_name, size_label, addons, price, notes, employee_id, plan_id }) => ({ date, time: clock(start_min), status, service_name, size_label, addons: (addons ?? []).map((x) => x.name), price, notes, done_by: employee_id ? workerName.get(employee_id) ?? "worker" : "Tyler", plan_visit: !!plan_id }));
-    const input = [
-      `Today is ${dayLabel(today)} (${today}).`,
-      `Timing: ${timing({ today, appts, plans, c })}`,
-      `Schedule (the dashboard calendar, authoritative): ${schedule({ today, appts, plans, workerName })}`,
-      `Money: ${money({ ledger })}`,
-      reminders.length ? `Open reminders Tyler set: ${reminders.map((r) => `${r.due_on} ${r.title}${r.body ? ` (${r.body.slice(0, 160)})` : ""}`).join("; ")}` : null,
-      `CRM record: ${JSON.stringify({ customer: c, vehicles, past_jobs: recent })}`,
-      `Text messages, oldest first (${lines.length} most recent):`,
-      ...lines,
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    const run = spawnSync(
-      CLAUDE,
-      ["-p", "--model", "sonnet", "--tools", "", "--strict-mcp-config", "--setting-sources", "local", "--no-session-persistence",
-        "--system-prompt", SYSTEM, "--output-format", "json", "--json-schema", JSON.stringify(SCHEMA)],
-      { input, cwd: work, encoding: "utf8", timeout: 240000, maxBuffer: 16 * 1024 * 1024 }
-    );
-    let card;
+    let c, today, card;
     try {
-      const res = JSON.parse(run.stdout);
-      if (res.is_error || !res.structured_output) throw new Error(res.result || res.subtype);
-      card = res.structured_output;
+      const brief = await customerBrief(call, customerId, workerName);
+      ({ c, today } = brief);
+      card = askClaude(SYSTEM, `${voiceBlock(voice)}\n${brief.input}`, SCHEMA, work);
     } catch (e) {
-      log(`card failed for ${c.name}: ${e.message || run.stderr || run.error?.message || "no output from claude"}`);
+      log(`card failed for ${c?.name ?? customerId}: ${e.message}`);
       continue;
     }
     const { suggestion: s, ...rest } = card;
