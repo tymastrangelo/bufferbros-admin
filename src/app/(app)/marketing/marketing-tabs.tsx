@@ -5,7 +5,6 @@ import { Tabs } from "@/components/ui";
 
 const TABS = [
   { href: "/marketing", label: "Overview" },
-  { href: "/marketing/leads", label: "Leads" },
   { href: "/marketing/campaigns", label: "Campaigns" },
   { href: "/marketing/ads", label: "Ads" },
   { href: "/marketing/playbook", label: "Playbook" },

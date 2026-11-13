@@ -50,6 +50,22 @@ export interface MarketingData {
   signups: { total: number; redeemed: number };
 }
 
+const toMkLead = (l: Lead, refs: CampaignRef[]): MkLead => {
+  const r = leadChannel(l, refs);
+  return { ...l, est_value: l.est_value == null ? null : Number(l.est_value), resolvedChannel: r.channel, resolvedCampaignId: r.campaignId };
+};
+
+/** Just what the Leads page needs (it's opened far more often than the Marketing tabs). */
+export async function loadLeads(): Promise<{ today: string; leads: MkLead[]; campaigns: MarketingCampaign[] }> {
+  const db = await createClient({ realData: true }); // leads are always the real ones
+  const [campQ, leadQ] = await Promise.all([
+    db.from("marketing_campaigns").select("*").order("created_at"),
+    db.from("leads").select("*").order("created_at", { ascending: false }).limit(2000),
+  ]);
+  const campaigns = (campQ.data ?? []) as MarketingCampaign[];
+  return { today: todayYmd(), leads: ((leadQ.data ?? []) as Lead[]).map((l) => toMkLead(l, campaigns)), campaigns };
+}
+
 export async function loadMarketing(): Promise<MarketingData> {
   const db = await createClient({ realData: true }); // never demo numbers here
   const today = todayYmd();
@@ -121,10 +137,7 @@ export async function loadMarketing(): Promise<MarketingData> {
     channel: e.campaign_id ? channelOfCampaign.get(e.campaign_id) ?? null : null,
   }));
 
-  const leads: MkLead[] = ((leadQ.data ?? []) as Lead[]).map((l) => {
-    const r = leadChannel(l, refs);
-    return { ...l, est_value: l.est_value == null ? null : Number(l.est_value), resolvedChannel: r.channel, resolvedCampaignId: r.campaignId };
-  });
+  const leads: MkLead[] = ((leadQ.data ?? []) as Lead[]).map((l) => toMkLead(l, refs));
 
   // Unit economics from real data, with sane fallbacks while the books are thin.
   const avgTicket = firstTickets.length ? firstTickets.reduce((s, n) => s + n, 0) / firstTickets.length : 249;

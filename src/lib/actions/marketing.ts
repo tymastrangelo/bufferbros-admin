@@ -5,7 +5,7 @@
 import { revalidatePath } from "next/cache";
 import { getRole } from "@/lib/auth";
 import { normalizeEmail, normalizePhone, phoneDigits } from "@/lib/format";
-import { isChannel, slugify } from "@/lib/marketing";
+import { isChannel, nextFollowUp, slugify } from "@/lib/marketing";
 import { createClient } from "@/lib/supabase/server";
 import { todayYmd } from "@/lib/time";
 import type { CampaignStatus, ChannelId, LeadKind, LeadStatus, TaskPhase } from "@/lib/types";
@@ -134,19 +134,34 @@ export async function saveLead(fields: LeadFields, id?: string | null): Promise<
   return { ok: true, id: res.data.id };
 }
 
-/** Moving a lead past "new" stamps the first reply time (speed to lead), once. */
+/**
+ * Moving a lead past "new" stamps the first reply time (speed to lead), once. Contacted /
+ * quoted also schedules the next follow-up; booked / lost / new clears it.
+ */
 export async function setLeadStatus(id: string, status: LeadStatus, lostReason?: string | null): Promise<ActionResult> {
   if (!(await isOwner())) return NOT_OWNER;
   const db = await createClient({ realData: true });
-  const { data: before } = await db.from("leads").select("contacted_at").eq("id", id).maybeSingle();
+  const { data: before } = await db.from("leads").select("contacted_at,follow_up_on").eq("id", id).maybeSingle();
   const { error } = await db
     .from("leads")
     .update({
       status,
       lost_reason: status === "lost" ? lostReason?.trim() || null : null,
+      follow_up_on: nextFollowUp(status, before?.follow_up_on ?? null, todayYmd()),
       ...(status !== "new" && !before?.contacted_at && { contacted_at: new Date().toISOString() }),
     })
     .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  refresh();
+  return { ok: true, id };
+}
+
+/** When to chase an open lead next (ymd), or null for no reminder. */
+export async function setLeadFollowUp(id: string, on: string | null): Promise<ActionResult> {
+  if (!(await isOwner())) return NOT_OWNER;
+  if (on !== null && !/^\d{4}-\d{2}-\d{2}$/.test(on)) return { ok: false, error: "Pick a date to follow up." };
+  const db = await createClient({ realData: true });
+  const { error } = await db.from("leads").update({ follow_up_on: on }).eq("id", id);
   if (error) return { ok: false, error: error.message };
   refresh();
   return { ok: true, id };
@@ -194,7 +209,7 @@ export async function convertLead(id: string, channel: ChannelId | null, campaig
 
   const { error: lErr } = await db
     .from("leads")
-    .update({ customer_id: customerId, status: "booked", contacted_at: lead.contacted_at ?? new Date().toISOString() })
+    .update({ customer_id: customerId, status: "booked", follow_up_on: null, contacted_at: lead.contacted_at ?? new Date().toISOString() })
     .eq("id", id);
   if (lErr) return { ok: false, error: lErr.message };
   refresh();

@@ -8,11 +8,14 @@ import {
   channelRows,
   economics,
   leadChannel,
+  leadQueue,
+  nextFollowUp,
   slugify,
   totals,
   trackingLink,
   type ChannelRow,
 } from "./marketing";
+import type { LeadKind, LeadStatus } from "./types";
 
 // Every tracking link we hand out reads back as its own channel.
 for (const { id } of CHANNELS) {
@@ -95,5 +98,20 @@ assert.equal(call({ spend: 120, leads: 5, customers: 2, cac: 60 }), "learning");
 assert.equal(call({ spend: 150, leads: 8, customers: 3, cac: 50 }), "scale");
 assert.equal(call({ spend: 240, leads: 8, customers: 3, cac: 80 }), "hold");
 assert.equal(call({ spend: 330, leads: 8, customers: 3, cac: 110 }), "fix");
+
+// The lead inbox.
+const lq = (status: LeadStatus, kind: LeadKind = "call", follow_up_on: string | null = null) => leadQueue({ status, kind, follow_up_on }, "2026-11-13");
+assert.equal(lq("new"), "reply");
+assert.equal(lq("new", "email_signup"), "signup"); //            took the code, asked for nothing
+assert.equal(lq("contacted"), "waiting");
+assert.equal(lq("contacted", "call", "2026-11-14"), "waiting");
+assert.equal(lq("quoted", "call", "2026-11-13"), "follow_up"); // due today
+assert.equal(lq("quoted", "call", "2026-11-01"), "follow_up"); // overdue
+assert.equal(lq("booked", "call", "2026-11-01"), "closed");
+assert.equal(nextFollowUp("contacted", null, "2026-11-13"), "2026-11-15");
+assert.equal(nextFollowUp("quoted", "2026-11-20", "2026-11-13"), "2026-11-20"); // a later date stays
+assert.equal(nextFollowUp("quoted", "2026-11-10", "2026-11-13"), "2026-11-15"); // an overdue one moves out
+assert.equal(nextFollowUp("lost", "2026-11-20", "2026-11-13"), null);
+assert.equal(nextFollowUp("new", "2026-11-20", "2026-11-13"), null);
 
 console.log("marketing.check: ok");

@@ -16,6 +16,7 @@ import {
   IconCheck,
   IconChevronRight,
   IconEye,
+  IconInbox,
   IconDollar,
   IconLogout,
   IconMarketing,
@@ -40,6 +41,7 @@ const NAV = [
   { href: "/", label: "Today", icon: IconToday },
   { href: "/calendar", label: "Calendar", icon: IconCalendar },
   { href: "/customers", label: "Customers", icon: IconUsers },
+  { href: "/leads", label: "Leads", icon: IconInbox },
   { href: "/plans", label: "Plans", icon: IconRepeat },
   { href: "/quote", label: "Quote", icon: IconSparkle },
   { href: "/money", label: "Money", icon: IconDollar },
@@ -64,7 +66,7 @@ const NEW_ACTIONS = [
   { href: "/quote", label: "New quote", icon: IconSparkle },
   { href: "/customers?new=1", label: "New customer", icon: IconUsers },
   { href: "/money/payments?new=1", label: "Record payment", icon: IconDollar },
-  { href: "/marketing/leads?new=1", label: "New lead", icon: IconMarketing },
+  { href: "/leads?new=1", label: "New lead", icon: IconInbox },
   { href: "/calendar?block=1", label: "Block time", icon: IconBlock },
 ];
 
@@ -92,6 +94,7 @@ export function Shell({
   crew,
   previewing,
   larp,
+  leadsDue,
 }: {
   children: React.ReactNode;
   role: "owner" | "washer";
@@ -102,6 +105,8 @@ export function Shell({
   previewing: CrewRef | null;
   /** Demo dataset on — only signalled by a tiny dot on the logo plate. */
   larp: boolean;
+  /** Owner only: leads waiting on a first reply or due a follow-up — the Leads badge. */
+  leadsDue: number;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -202,6 +207,7 @@ export function Shell({
                   )}
                   <Icon width={17} height={17} weight={active ? "fill" : "regular"} className="relative" />
                   <span className="relative">{label}</span>
+                  {href === "/leads" && <CountBadge n={leadsDue} className="relative ml-auto" />}
                 </Link>
               );
             })}
@@ -232,13 +238,15 @@ export function Shell({
             ))}
             <TabItem
               label="More"
-              active={moreOpen || ["/plans", "/insights", "/marketing", "/settings", "/team", "/customers/import"].some((h) => isActive(pathname, h))}
+              active={moreOpen || ["/leads", "/plans", "/insights", "/marketing", "/settings", "/team", "/customers/import"].some((h) => isActive(pathname, h))}
               onClick={() => setMoreOpen(true)}
             >
               {(on) => (
                 <span className="relative block">
                   <IconMore width={22} height={22} weight={on ? "fill" : "regular"} />
                   {larp && <span className="absolute -top-0.5 -right-1 h-1 w-1 rounded-full bg-brand-glow" aria-hidden />}
+                  {/* tab-bars.md › Best practices: a badge only for information that warrants attention */}
+                  <CountBadge n={leadsDue} className="absolute -top-1.5 left-3.5" />
                 </span>
               )}
             </TabItem>
@@ -266,6 +274,7 @@ export function Shell({
           <div className="flex flex-col gap-0.5 -mx-1">
             {owner &&
               [
+                { href: "/leads", label: "Leads", icon: IconInbox, badge: leadsDue },
                 { href: "/insights", label: "Insights", icon: IconChart },
                 { href: "/plans", label: "Plans", icon: IconRepeat },
                 { href: "/marketing", label: "Marketing", icon: IconMarketing },
@@ -273,7 +282,9 @@ export function Shell({
                 { href: "/team", label: "Team", icon: IconTeam },
                 { href: "/settings", label: "Settings", icon: IconSettings },
                 { href: "/customers/import", label: "Import contacts", icon: IconUpload },
-              ].map(({ href, label, icon: Icon }) => <MenuLink key={href} href={href} label={label} icon={Icon} />)}
+              ].map(({ href, label, icon: Icon, badge }: { href: string; label: string; icon: typeof IconPlus; badge?: number }) => (
+                <MenuLink key={href} href={href} label={label} icon={Icon} badge={badge} />
+              ))}
             <div className="border-t border-line mt-2 pt-3 px-2 flex flex-col gap-3">
               <div className="flex items-center gap-3">
                 <Avatar name={me.name} size={34} />
@@ -338,7 +349,18 @@ function TabItem({
   );
 }
 
-function MenuLink({ href, label, icon: Icon }: { href: string; label: string; icon: typeof IconPlus }) {
+/** Count of things waiting on the owner. Fill + ink pair keeps ≥4.5:1 in both themes. */
+function CountBadge({ n, className = "" }: { n: number; className?: string }) {
+  if (n <= 0) return null;
+  return (
+    <span className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-bad px-1 text-micro font-semibold leading-none text-on-ink num ${className}`}>
+      {n > 99 ? "99+" : n}
+      <span className="sr-only"> need attention</span>
+    </span>
+  );
+}
+
+function MenuLink({ href, label, icon: Icon, badge = 0 }: { href: string; label: string; icon: typeof IconPlus; badge?: number }) {
   return (
     <Link
       href={href}
@@ -348,7 +370,8 @@ function MenuLink({ href, label, icon: Icon }: { href: string; label: string; ic
         <Icon width={17} height={17} />
       </span>
       {label}
-      <IconChevronRight width={16} height={16} className="ml-auto text-faint transition-transform duration-150 group-hover:translate-x-0.5" />
+      <CountBadge n={badge} className="ml-auto" />
+      <IconChevronRight width={16} height={16} className={`${badge > 0 ? "" : "ml-auto "}text-faint transition-transform duration-150 group-hover:translate-x-0.5`} />
     </Link>
   );
 }

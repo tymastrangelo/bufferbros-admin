@@ -382,6 +382,33 @@ export function channelCall(row: ChannelRow, e: Pick<Economics, "target" | "brea
   return { call: "fix", why: `${usd(cac!)} per customer, over your ${usd(ceiling)} break-even. Fix keywords, offer or landing page, or cut the budget.` };
 }
 
+// ── Lead inbox ───────────────────────────────────────────────────────────────
+
+/** Days until an answered or quoted lead comes back up to be chased. */
+export const FOLLOW_UP_DAYS = 2;
+
+/** Where an open lead sits in the inbox, most urgent first. */
+export type LeadQueue = "reply" | "follow_up" | "waiting" | "signup" | "closed";
+export const LEAD_QUEUES: LeadQueue[] = ["reply", "follow_up", "waiting", "signup", "closed"];
+
+/**
+ * reply: nobody has answered yet. follow_up: answered, and its next-touch date is here.
+ * waiting: answered, ball in their court. signup: took the website's 5% code, never asked
+ * for anything (no reply owed).
+ */
+export function leadQueue(l: { status: LeadStatus; kind: LeadKind; follow_up_on: string | null }, today: string): LeadQueue {
+  if (!OPEN_LEAD.includes(l.status)) return "closed";
+  if (l.status === "new") return l.kind === "email_signup" ? "signup" : "reply";
+  return l.follow_up_on && l.follow_up_on <= today ? "follow_up" : "waiting";
+}
+
+/** The date to chase a lead after touching it today: never pulls an already-later date in. */
+export function nextFollowUp(status: LeadStatus, current: string | null, today: string): string | null {
+  if (status !== "contacted" && status !== "quoted") return null;
+  const auto = addDays(today, FOLLOW_UP_DAYS);
+  return current && current > auto ? current : auto;
+}
+
 // ── Speed to lead ────────────────────────────────────────────────────────────
 
 export const minutesBetween = (a: string, b: string) => Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 60000));

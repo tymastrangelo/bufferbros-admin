@@ -74,7 +74,7 @@ export function OverviewClient({ data }: { data: MarketingData }) {
       </div>
 
       {waiting.length > 0 && (
-        <Link href="/marketing/leads" className="note note-warn flex flex-wrap items-center justify-between gap-2 text-sm">
+        <Link href="/leads" className="note note-warn flex flex-wrap items-center justify-between gap-2 text-sm">
           <span>
             <span className="font-semibold">
               {waiting.length} new lead{waiting.length === 1 ? "" : "s"} waiting
@@ -147,7 +147,7 @@ export function OverviewClient({ data }: { data: MarketingData }) {
               label="Open leads"
               value={data.leads.filter((l) => ["new", "contacted", "quoted"].includes(l.status)).length}
               hint="to follow up"
-              href="/marketing/leads"
+              href="/leads"
             />
           </div>
         </section>

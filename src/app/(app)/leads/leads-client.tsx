@@ -3,21 +3,29 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { IconMail, IconMarketing, IconMessage, IconPhone, IconPlus } from "@/components/icons";
-import { Busy, EmptyState, ErrorNote, Field, Segmented, Sheet, Stat } from "@/components/ui";
-import { convertLead, deleteLead, saveLead, setLeadStatus } from "@/lib/actions/marketing";
-import { fmtPhone, smsHref, telHref } from "@/lib/format";
-import { LEAD_KINDS, LEAD_STATUSES, OPEN_LEAD, channelLabel, fmtMinutes, leadKindLabel, minutesBetween } from "@/lib/marketing";
-import { dateOfInstant, fmtDateShort } from "@/lib/time";
+import { IconInbox, IconMail, IconMessage, IconPhone, IconPlus } from "@/components/icons";
+import { Busy, EmptyState, ErrorNote, Field, PageHeader, SectionLabel, Segmented, Sheet, Stat } from "@/components/ui";
+import { convertLead, deleteLead, saveLead, setLeadFollowUp, setLeadStatus } from "@/lib/actions/marketing";
+import { fmtPhone, money, phoneDigits, smsHref, telHref } from "@/lib/format";
+import { LEAD_KINDS, LEAD_STATUSES, channelLabel, fmtMinutes, leadKindLabel, leadQueue, minutesBetween, type LeadQueue } from "@/lib/marketing";
+import { addDays, dateOfInstant, diffDays, fmtDateShort } from "@/lib/time";
 import type { ChannelId, LeadKind, LeadStatus, MarketingCampaign } from "@/lib/types";
 import { CampaignSelect, ChannelSelect, KindIcon } from "@/components/marketing-bits";
-import type { MkLead } from "../data";
+import type { MkLead } from "../marketing/data";
 
-type Filter = "open" | "booked" | "lost" | "all";
+type Filter = "inbox" | "booked" | "lost" | "all";
 
 const STATUS_TONE: Record<LeadStatus, string> = { new: "chip-warn", contacted: "chip-brand", quoted: "chip-brand", booked: "chip-ok", lost: "" };
 const statusLabel = (s: LeadStatus) => LEAD_STATUSES.find((x) => x.id === s)!.label;
 const leadTitle = (l: Pick<MkLead, "name" | "phone" | "email">) => l.name || fmtPhone(l.phone) || l.email || "Unnamed lead";
+
+/** The inbox, most urgent group first. Closed leads live under the Booked / Lost filters. */
+const GROUPS: { queue: LeadQueue; title: string; hint: string }[] = [
+  { queue: "reply", title: "Reply now", hint: "Most people book whoever answers first" },
+  { queue: "follow_up", title: "Follow up", hint: "You answered; time to check back in" },
+  { queue: "waiting", title: "Waiting on them", hint: "Comes back up on its follow-up date" },
+  { queue: "signup", title: "Email signups", hint: "Took the 5% code, haven't asked for anything" },
+];
 
 function median(ns: number[]) {
   if (!ns.length) return null;
@@ -25,8 +33,18 @@ function median(ns: number[]) {
   return s[Math.floor(s.length / 2)];
 }
 
-export function LeadsClient({ leads, campaigns, openNew }: { leads: MkLead[]; campaigns: MarketingCampaign[]; openNew: boolean }) {
-  const [filter, setFilter] = useState<Filter>("open");
+/** "today", "tomorrow", "2 days overdue", else the date. */
+function followUpLabel(on: string, today: string): string {
+  const d = diffDays(today, on);
+  if (d === 0) return "today";
+  if (d === 1) return "tomorrow";
+  if (d < 0) return `${-d} day${d === -1 ? "" : "s"} overdue`;
+  return fmtDateShort(on);
+}
+
+export function LeadsClient({ today, leads, campaigns, openNew }: { today: string; leads: MkLead[]; campaigns: MarketingCampaign[]; openNew: boolean }) {
+  const [filter, setFilter] = useState<Filter>("inbox");
+  const [q, setQ] = useState("");
   const [edit, setEdit] = useState<MkLead | "new" | null>(openNew ? "new" : null);
   // re-arm when the ＋New menu navigates here with ?new=1
   const [prevOpenNew, setPrevOpenNew] = useState(openNew);
@@ -36,86 +54,160 @@ export function LeadsClient({ leads, campaigns, openNew }: { leads: MkLead[]; ca
   }
   const close = () => {
     setEdit(null);
-    if (openNew) window.history.replaceState(null, "", "/marketing/leads");
+    if (openNew) window.history.replaceState(null, "", "/leads");
   };
   const now = new Date().toISOString();
 
-  const open = leads.filter((l) => OPEN_LEAD.includes(l.status));
-  const shown = [...(filter === "open" ? open : filter === "all" ? leads : leads.filter((l) => l.status === filter))].sort(
-    (a, b) => (filter === "open" ? OPEN_LEAD.indexOf(a.status) - OPEN_LEAD.indexOf(b.status) : 0) || b.created_at.localeCompare(a.created_at)
-  );
-  const replies = leads.filter((l) => l.contacted_at && l.kind !== "email_signup").map((l) => minutesBetween(l.created_at, l.contacted_at!));
-  const reply = median(replies);
+  const queued = leads.map((l) => ({ l, queue: leadQueue(l, today) }));
+  const inQueue = (queue: LeadQueue) => queued.filter((x) => x.queue === queue).map((x) => x.l);
+  const reply = inQueue("reply");
+  const due = inQueue("follow_up");
+  const open = queued.filter((x) => x.queue !== "closed" && x.queue !== "signup").map((x) => x.l);
+  const openValue = open.reduce((s, l) => s + (l.est_value ?? 0), 0);
+  const replyTime = median(leads.filter((l) => l.contacted_at && l.kind !== "email_signup").map((l) => minutesBetween(l.created_at, l.contacted_at!)));
   const booked = leads.filter((l) => l.status === "booked").length;
   const lost = leads.filter((l) => l.status === "lost").length;
+
+  // Search looks across every lead, whatever the filter, so an old one is still findable.
+  const term = q.trim().toLowerCase();
+  const digits = phoneDigits(term);
+  const matches = (l: MkLead) =>
+    [l.name, l.email, l.notes].some((v) => v?.toLowerCase().includes(term)) || (digits.length >= 3 && phoneDigits(l.phone).includes(digits));
+  const flat = term ? leads.filter(matches) : filter === "all" ? leads : filter === "inbox" ? null : leads.filter((l) => l.status === filter);
+  // Longest wait first for replies, soonest date first for follow-ups; the rest newest first.
+  const groups = GROUPS.map((g) => ({
+    ...g,
+    rows: inQueue(g.queue).sort((a, b) =>
+      g.queue === "reply"
+        ? a.created_at.localeCompare(b.created_at)
+        : g.queue === "signup"
+          ? 0
+          : (a.follow_up_on ?? "9999").localeCompare(b.follow_up_on ?? "9999")
+    ),
+  })).filter((g) => g.rows.length > 0);
+
   // Re-read the open lead from fresh props so the sheet shows its new status after a save.
   const current = edit && edit !== "new" ? leads.find((l) => l.id === edit.id) ?? edit : edit;
 
+  const row = (l: MkLead) => {
+    const queue = leadQueue(l, today);
+    return (
+      <button key={l.id} type="button" className="row row-link w-full text-left" onClick={() => setEdit(l)}>
+        <KindIcon kind={l.kind} />
+        <span className="min-w-0 grow">
+          <span className="block truncate text-md font-medium">{leadTitle(l)}</span>
+          <span className="block truncate text-dense text-ink-2">
+            {leadKindLabel(l.kind)} · {channelLabel(l.resolvedChannel)} · <span className="num">{fmtDateShort(dateOfInstant(l.created_at))}</span>
+            {l.est_value ? (
+              <>
+                {" · "}
+                <span className="num">{money(l.est_value)}</span>
+              </>
+            ) : null}
+          </span>
+        </span>
+        <span className="shrink-0 flex flex-col items-end gap-1">
+          <span className={`chip ${STATUS_TONE[l.status]}`}>{statusLabel(l.status)}</span>
+          {queue === "reply" && <span className="text-xs text-warn num">waiting {fmtMinutes(minutesBetween(l.created_at, now))}</span>}
+          {queue === "follow_up" && <span className="text-xs text-warn num">follow up {followUpLabel(l.follow_up_on!, today)}</span>}
+          {queue === "waiting" && l.follow_up_on && <span className="text-xs text-faint num">follow up {followUpLabel(l.follow_up_on, today)}</span>}
+        </span>
+      </button>
+    );
+  };
+
   return (
-    <div className="mt-5 flex flex-col gap-5">
-      <div className="stat-grid grid-cols-3">
-        <Stat label="Open" value={open.length} hint={`${open.filter((l) => l.status === "new").length} unanswered`} tone={open.some((l) => l.status === "new") ? "warn" : undefined} />
-        <Stat label="Reply time" value={reply == null ? "—" : fmtMinutes(reply)} hint="goal 15 min" tone={reply == null ? undefined : reply <= 15 ? "ok" : reply > 60 ? "bad" : "warn"} />
-        <Stat label="Won" value={booked + lost ? `${Math.round((booked / (booked + lost)) * 100)}%` : "—"} hint={`${booked} of ${booked + lost} closed`} />
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Segmented
-          label="Show"
-          value={filter}
-          onChange={setFilter}
-          options={[
-            { value: "open", label: `Open${open.length ? ` ${open.length}` : ""}` },
-            { value: "booked", label: "Booked" },
-            { value: "lost", label: "Lost" },
-            { value: "all", label: "All" },
-          ]}
-        />
-        <button className="btn btn-primary" onClick={() => setEdit("new")}>
-          <IconPlus width={16} height={16} /> Add lead
-        </button>
-      </div>
-
-      {shown.length === 0 ? (
-        <EmptyState
-          icon={<IconMarketing width={20} height={20} />}
-          title={filter === "open" ? "No open leads." : "Nothing here yet."}
-          hint="Every call, text, DM or quote request that isn't a customer yet goes here, so you can see how fast you answer and which channel sends people who book. Website email signups land here automatically."
-          action={
-            <button className="btn btn-primary" onClick={() => setEdit("new")}>
-              Add a lead
-            </button>
-          }
-        />
-      ) : (
-        <div className="card divide-y divide-line">
-          {shown.map((l) => {
-            const waited = l.status === "new" ? minutesBetween(l.created_at, now) : null;
-            return (
-              <button key={l.id} type="button" className="row row-link w-full text-left" onClick={() => setEdit(l)}>
-                <KindIcon kind={l.kind} />
-                <span className="min-w-0 grow">
-                  <span className="block truncate text-md font-medium">{leadTitle(l)}</span>
-                  <span className="block truncate text-dense text-ink-2">
-                    {leadKindLabel(l.kind)} · {channelLabel(l.resolvedChannel)} · <span className="num">{fmtDateShort(dateOfInstant(l.created_at))}</span>
-                  </span>
-                </span>
-                <span className="shrink-0 flex flex-col items-end gap-1">
-                  <span className={`chip ${STATUS_TONE[l.status]}`}>{statusLabel(l.status)}</span>
-                  {waited != null && l.kind !== "email_signup" && <span className="text-xs text-warn num">waiting {fmtMinutes(waited)}</span>}
-                </span>
-              </button>
-            );
-          })}
+    <>
+      <PageHeader
+        title="Leads"
+        sub="Everyone who asked about a detail and hasn't booked yet."
+        actions={
+          <button className="btn btn-primary" onClick={() => setEdit("new")}>
+            <IconPlus width={16} height={16} /> Add lead
+          </button>
+        }
+      />
+      <div className="flex flex-col gap-5">
+        <div className="stat-grid grid-cols-2 sm:grid-cols-4">
+          <Stat
+            label="Need a reply"
+            value={reply.length}
+            hint={replyTime == null ? "goal: answer in 15 min" : `you usually answer in ${fmtMinutes(replyTime)}`}
+            tone={reply.length ? "warn" : undefined}
+          />
+          <Stat label="Follow-ups due" value={due.length} hint={due.length ? "check back in today" : "nothing due"} tone={due.length ? "warn" : undefined} />
+          <Stat label="Open value" value={money(openValue)} hint={`${open.length} open lead${open.length === 1 ? "" : "s"}`} />
+          <Stat label="Won" value={booked + lost ? `${Math.round((booked / (booked + lost)) * 100)}%` : "—"} hint={`${booked} of ${booked + lost} closed`} />
         </div>
-      )}
 
-      {current && <LeadSheet lead={current === "new" ? null : current} campaigns={campaigns} onClose={close} />}
-    </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Segmented
+            label="Show"
+            value={filter}
+            onChange={setFilter}
+            options={[
+              { value: "inbox", label: "Inbox" },
+              { value: "booked", label: "Booked" },
+              { value: "lost", label: "Lost" },
+              { value: "all", label: "All" },
+            ]}
+          />
+          <input
+            type="search"
+            className="input w-full sm:w-64"
+            placeholder="Search name, phone, email or notes"
+            aria-label="Search leads"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+
+        {flat ? (
+          flat.length === 0 ? (
+            <EmptyState
+              icon={<IconInbox width={20} height={20} />}
+              title={term ? `No lead matches “${q.trim()}”.` : "Nothing here yet."}
+              hint={term ? "Search looks at names, phone numbers, emails and notes across every lead." : "Leads you mark booked or lost show up here."}
+              action={
+                term ? (
+                  <button className="btn" onClick={() => setQ("")}>
+                    Clear search
+                  </button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <div className="card divide-y divide-line">{flat.map(row)}</div>
+          )
+        ) : groups.length === 0 ? (
+          <EmptyState
+            icon={<IconInbox width={20} height={20} />}
+            title="Inbox clear."
+            hint="Every call, text, DM or quote request that isn't a customer yet goes here. Website boat quotes and email signups land on their own; add the rest so nothing gets forgotten."
+            action={
+              <button className="btn" onClick={() => setEdit("new")}>
+                Add a lead
+              </button>
+            }
+          />
+        ) : (
+          groups.map((g) => (
+            <section key={g.queue}>
+              <SectionLabel trailing={g.hint}>
+                {g.title} <span className="num">{g.rows.length}</span>
+              </SectionLabel>
+              <div className="card divide-y divide-line">{g.rows.map(row)}</div>
+            </section>
+          ))
+        )}
+      </div>
+
+      {current && <LeadSheet lead={current === "new" ? null : current} today={today} campaigns={campaigns} onClose={close} />}
+    </>
   );
 }
 
-function LeadSheet({ lead, campaigns, onClose }: { lead: MkLead | null; campaigns: MarketingCampaign[]; onClose: () => void }) {
+function LeadSheet({ lead, today, campaigns, onClose }: { lead: MkLead | null; today: string; campaigns: MarketingCampaign[]; onClose: () => void }) {
   const router = useRouter();
   const [name, setName] = useState(lead?.name ?? "");
   const [phone, setPhone] = useState(fmtPhone(lead?.phone) || "");
@@ -139,6 +231,14 @@ function LeadSheet({ lead, campaigns, onClose }: { lead: MkLead | null; campaign
     router.refresh();
     after?.(res.id);
   }
+
+  const landing = (lead?.attribution as { first?: { landing?: string } | null } | null)?.first?.landing;
+  const chasing = lead?.status === "contacted" || lead?.status === "quoted";
+  const followUps = [
+    { label: "Tomorrow", on: addDays(today, 1) },
+    { label: "In 3 days", on: addDays(today, 3) },
+    { label: "Next week", on: addDays(today, 7) },
+  ];
 
   const fields = () => ({ name, phone, email, kind, channel, campaignId, estValue: value ? Number(value) : null, notes });
 
@@ -183,8 +283,42 @@ function LeadSheet({ lead, campaigns, onClose }: { lead: MkLead | null; campaign
               <p className="mt-1.5 text-xs text-faint num">
                 Came in {fmtDateShort(dateOfInstant(lead.created_at))}
                 {lead.contacted_at ? ` · first reply after ${fmtMinutes(minutesBetween(lead.created_at, lead.contacted_at))}` : " · not answered yet"}
+                {landing ? ` · came in on ${landing}` : ""}
               </p>
             </div>
+            {chasing && (
+              <div>
+                <p className="label mb-1.5">Follow up</p>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {followUps.map((f) => (
+                    <button
+                      key={f.on}
+                      type="button"
+                      className="choice px-1 text-sm"
+                      aria-pressed={lead.follow_up_on === f.on}
+                      disabled={!!pending}
+                      onClick={() => run(`follow-${f.on}`, () => setLeadFollowUp(lead.id, lead.follow_up_on === f.on ? null : f.on))}
+                    >
+                      {pending === `follow-${f.on}` ? <Busy>{f.label}</Busy> : f.label}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="date"
+                  className="input num mt-1.5"
+                  aria-label="Follow-up date"
+                  min={today}
+                  value={lead.follow_up_on ?? ""}
+                  disabled={!!pending}
+                  onChange={(e) => run("follow-date", () => setLeadFollowUp(lead.id, e.target.value || null))}
+                />
+                <p className="mt-1.5 text-xs text-faint">
+                  {lead.follow_up_on
+                    ? `Comes back to the top of your inbox ${followUpLabel(lead.follow_up_on, today)}. Tap the same choice again to turn the reminder off.`
+                    : "No reminder set. This lead stays under Waiting on them until you close it."}
+                </p>
+              </div>
+            )}
             {lead.status === "lost" && (
               <Field label="Why they didn't book" hint="Price, timing, outside the area, went with someone else. These become better ads.">
                 <input

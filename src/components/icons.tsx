@@ -39,6 +39,7 @@ export {
   CaretUpDown as IconCaretUpDown,
   Eye as IconEye,
   Megaphone as IconMarketing,
+  Tray as IconInbox,
   CheckCircle as IconCheckCircle,
   Circle as IconCircle,
   CaretDown as IconChevronDown,

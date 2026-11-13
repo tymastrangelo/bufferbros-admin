@@ -402,6 +402,8 @@ export interface Lead {
   lost_reason: string | null;
   est_value: number | null;
   contacted_at: string | null;
+  /** next touch (ymd); set on a first reply or quote, cleared when the lead closes */
+  follow_up_on: string | null;
   customer_id: string | null;
   email_signup_id: string | null;
   attribution: unknown;

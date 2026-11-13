@@ -8,6 +8,7 @@ import { getRealRole, getViewAs } from "@/lib/auth";
 import { reconcileGcal } from "@/lib/gcal";
 import { LARP_COOKIE } from "@/lib/larp/client";
 import { createClient } from "@/lib/supabase/server";
+import { todayYmd } from "@/lib/time";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -35,6 +36,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       ? (user.user_metadata?.full_name as string | undefined) ?? (user.user_metadata?.name as string | undefined) ?? "Tyler"
       : me?.name ?? user.email?.split("@")[0] ?? "Crew";
 
+  // The Leads badge: unanswered inquiries + follow-ups that have come due (same split as
+  // leadQueue() in src/lib/marketing.ts). Always the real leads, like the rest of Marketing.
+  let leadsDue = 0;
+  if (realRole === "owner" && !previewing) {
+    const { count } = await (await createClient({ realData: true }))
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .or(`and(status.eq.new,kind.neq.email_signup),and(status.in.(contacted,quoted),follow_up_on.lte.${todayYmd()})`);
+    leadsDue = count ?? 0;
+  }
+
   return (
     <ToastProvider>
       <Shell
@@ -43,6 +55,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         crew={realRole === "owner" ? crew.map((e) => ({ id: e.id, name: e.name })) : []}
         previewing={previewing ? { id: previewing.id, name: previewing.name } : null}
         larp={realRole === "owner" && (await cookies()).get(LARP_COOKIE)?.value === "1"}
+        leadsDue={leadsDue}
       >
         {children}
       </Shell>
