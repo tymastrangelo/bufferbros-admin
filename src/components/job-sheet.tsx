@@ -31,6 +31,7 @@ import { CustomerPicker, type PickedCustomer } from "./customer-picker";
 import { WhoPicker, type EmployeeLite } from "./who-picker";
 import { ChecklistSection, MoneySection, TimelineSection, VehiclesSection, WhereSection } from "./job-detail-sections";
 import { JobPhotos } from "./job-photos";
+import { NotesSection } from "./notes-section";
 import { checklistProgress } from "@/lib/checklist";
 import { VehiclePicker } from "./vehicle-picker";
 import { SlotPicker } from "./slot-picker";
@@ -212,6 +213,10 @@ export function JobSheet({
             Open customer profile
           </Link>
         )}
+        <div className="flex flex-col gap-1.5">
+          <p className="label">Notes</p>
+          <NotesSection customerId={job.customer_id} appointmentId={job.id} />
+        </div>
 
         <ChecklistSection appointmentId={job.id} items={job.checklist ?? []} readOnly={job.status === "cancelled"} />
         <div className="flex flex-col gap-1.5">

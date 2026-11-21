@@ -209,7 +209,7 @@ const EVENT_LABEL: Record<string, string> = {
   edited: "Edited",
 };
 
-const fmtAt = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
+export const fmtAt = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
 
 /** Collapsed by default: what happened and when, written by the DB trigger. */
 export function TimelineSection({ appointmentId, names }: { appointmentId: string; names: Record<string, string> }) {

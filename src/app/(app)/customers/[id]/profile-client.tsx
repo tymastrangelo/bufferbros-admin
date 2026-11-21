@@ -7,6 +7,7 @@ import { AppointmentSheet } from "@/components/appointment-sheet";
 import { IconMail, IconMessage, IconPhone, IconPin, IconPlus, IconWrench, IconX } from "@/components/icons";
 import { JobSheet, type JobWithCustomer } from "@/components/job-sheet";
 import { LedgerEntrySheet } from "@/components/ledger-entry-sheet";
+import { NotesSection } from "@/components/notes-section";
 import { RelationsCard } from "@/components/relations-card";
 import { CustomerPicker, type PickedCustomer } from "@/components/customer-picker";
 import { ChannelSelect } from "@/components/marketing-bits";
@@ -313,12 +314,17 @@ export function CustomerProfile({
             </div>
           </section>
 
-          {customer.notes && (
-            <section>
-              <h2 className="label mb-2">Notes</h2>
-              <div className="card px-4 py-3 text-sm whitespace-pre-wrap">{customer.notes}</div>
-            </section>
-          )}
+          <section>
+            <h2 className="label mb-2">Notes</h2>
+            {customer.notes && <div className="card px-4 py-3 text-sm whitespace-pre-wrap mb-2">{customer.notes}</div>}
+            <NotesSection
+              customerId={customer.id}
+              jobLabel={(id) => {
+                const a = appointments.find((x) => x.id === id);
+                return a ? `${fmtDateShort(a.date)} job` : "on a job";
+              }}
+            />
+          </section>
 
           <div className="flex flex-wrap gap-1.5">
             <button className="btn btn-ghost btn-sm text-faint" onClick={() => setMergeOpen(true)}>

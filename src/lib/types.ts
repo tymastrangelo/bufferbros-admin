@@ -254,6 +254,17 @@ export type AppointmentEventKind =
   | "booked" | "started" | "completed" | "cancelled" | "no_show" | "reopened"
   | "rescheduled" | "assigned" | "price_changed" | "edited";
 
+/** A signed crew note on a client and/or one job (0042). appointment_id null = about the client. */
+export interface CustomerNote {
+  id: string;
+  created_at: string;
+  customer_id: string | null;
+  appointment_id: string | null;
+  author_user_id: string;
+  author_name: string;
+  body: string;
+}
+
 /** One line of a job's timeline, written by the appointments_timeline trigger (0030). */
 export interface AppointmentEvent {
   id: number;
