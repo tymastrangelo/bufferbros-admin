@@ -5,7 +5,15 @@ import type { ChecklistItem } from "@/lib/types";
 
 export type { ChecklistItem };
 
-/** Steps for a job. ids are stable slugs so re-seeding can keep ticks: svc:N, addon:ID, boat:ID. */
+/** Ticked on every job, whatever the service: the content that sells the next one.
+ *  Website bookings never get seeded, so they get the same two from the column default
+ *  on appointments.checklist (migration 0044) — change the wording in both places. */
+export const EVERY_JOB: ChecklistItem[] = [
+  { id: "always:story", name: "Post a story: video or photo with music, suds on the car", done: false },
+  { id: "always:album", name: "Add photos to our photo album", done: false },
+];
+
+/** Steps for a job. ids are stable slugs so re-seeding can keep ticks: svc:N, addon:ID, boat:ID, always:X. */
 export function seedChecklist(
   serviceSteps: string[],
   addons: { id: string; name: string }[],
@@ -15,6 +23,7 @@ export function seedChecklist(
     ...serviceSteps.map((name, i) => ({ id: `svc:${i}`, name, done: false })),
     ...addons.map((a) => ({ id: `addon:${a.id}`, name: a.name, done: false })),
     ...boatComponents.map((b) => ({ id: `boat:${b.id}`, name: b.name, done: false })),
+    ...EVERY_JOB,
   ];
 }
 
