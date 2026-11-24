@@ -57,3 +57,4 @@ graphify-out/
 
 # superpowers plan workspaces (ledgers, briefs)
 .superpowers/
+.serena/

@@ -20,18 +20,19 @@ import {
 import { useOwner } from "@/lib/use-owner";
 import { useToast } from "./toast";
 import { Wheel } from "@/components/brand";
-import { addonQuote, computeQuote, computeVehiclesQuote, type Catalog } from "@/lib/catalog";
+import { addonQuote, computeVehiclesQuote, repriceVisit, type Catalog } from "@/lib/catalog";
 import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { fmtDateShort, minToLabel, whenLabel } from "@/lib/time";
 import { setJobAttribution } from "@/lib/actions/appointments";
-import { PAYMENT_METHODS, SIZES, sizeLabel, vehicleLabel, type Appointment, type Customer, type PaymentMethod, type SizeId, type Vehicle } from "@/lib/types";
-import { IconMail, IconMessage, IconPhone, IconPin, IconPlay } from "./icons";
+import { PAYMENT_METHODS, SIZES, sizeLabel, vehicleLabel, type Appointment, type Customer, type PaymentMethod, type PlanCadence, type SizeId, type Vehicle } from "@/lib/types";
+import { IconCheckCircle, IconCircle, IconMail, IconMessage, IconPhone, IconPin, IconPlay } from "./icons";
 import { CustomerPicker, type PickedCustomer } from "./customer-picker";
 import { WhoPicker, type EmployeeLite } from "./who-picker";
 import { ChecklistSection, MoneySection, TimelineSection, VehiclesSection, WhereSection } from "./job-detail-sections";
 import { JobPhotos } from "./job-photos";
 import { NotesSection } from "./notes-section";
+import { ContactsSection } from "./contacts";
 import { checklistProgress } from "@/lib/checklist";
 import { VehiclePicker } from "./vehicle-picker";
 import { SlotPicker } from "./slot-picker";
@@ -104,6 +105,27 @@ export function JobSheet({
     };
   }, [owner]);
 
+  // What pricing and payment need to know about this job: the plan's cadence (plan visits
+  // re-price at plan rates) and where the customer's balance stands.
+  const jobId = job?.id;
+  const planId = job?.plan_id;
+  const customerId = job?.customer_id;
+  const [ctx, setCtx] = useState<{ id: string; cadence: PlanCadence | null; balance: number } | null>(null);
+  useEffect(() => {
+    if (!jobId) return;
+    let stale = false;
+    const db = createClient();
+    Promise.all([
+      planId ? db.from("plans").select("cadence").eq("id", planId).maybeSingle() : null,
+      customerId ? db.from("customer_balances").select("balance").eq("customer_id", customerId).maybeSingle() : null,
+    ]).then(([p, b]) => {
+      if (!stale) setCtx({ id: jobId, cadence: (p?.data?.cadence as PlanCadence | undefined) ?? null, balance: Number(b?.data?.balance ?? 0) });
+    });
+    return () => {
+      stale = true;
+    };
+  }, [jobId, planId, customerId]);
+
   // Reset panels when a different job opens (state adjustment during render).
   const [prevJobId, setPrevJobId] = useState(job?.id);
   if (prevJobId !== job?.id) {
@@ -120,6 +142,12 @@ export function JobSheet({
   const phone = job.customers?.phone ?? job.contact_phone;
   const email = job.customers?.email ?? job.contact_email;
   const unlinked = !job.customer_id;
+  const cadence = ctx?.id === job.id ? ctx.cadence : null;
+  // Before completion the balance is everything from earlier visits: negative = they still owe.
+  const balance = ctx?.id === job.id && job.status === "scheduled" ? ctx.balance : 0;
+  const owed = Math.max(0, -balance);
+  const credit = Math.max(0, balance);
+  const seesMoney = owner || (!!myEmployeeId && job.employee_id === myEmployeeId);
 
   /** Undo for cancel / no-show: back on the schedule, then re-render the route. */
   async function putBack(id: string) {
@@ -208,6 +236,7 @@ export function JobSheet({
             Link to a customer
           </button>
         )}
+        {job.customer_id && <ContactsSection customerId={job.customer_id} editable={false} />}
         {job.customers && (
           <Link href={`/customers/${job.customers.id}`} className="link text-dense self-start">
             Open customer profile
@@ -246,6 +275,17 @@ export function JobSheet({
             ) : (
               <p className="text-dense font-medium note note-ok">
                 On the clock since <span className="num">{fmtClock(job.started_at)}</span>
+              </p>
+            )}
+            {seesMoney && owed > 0 && (
+              <p className="text-dense font-medium note note-warn">
+                Owes <span className="num">{money(owed)}</span> from earlier visits. Collect it with today&apos;s payment.
+              </p>
+            )}
+            {seesMoney && credit > 0 && (
+              <p className="text-dense note note-ok">
+                Prepaid: <span className="num">{money(credit)}</span> credit on their account
+                {credit >= Number(job.price) ? " covers this visit." : "."}
               </p>
             )}
             <button className="btn btn-primary h-11" onClick={() => setPanel("complete")}>
@@ -356,10 +396,15 @@ export function JobSheet({
             job={job}
             owner={owner}
             employees={employees}
+            catalog={catalog}
+            vehicles={vehicles}
+            cadence={cadence}
+            owed={seesMoney ? owed : 0}
+            credit={credit}
             pending={pending}
             onCancel={() => setPanel("none")}
-            onSubmit={(finalPrice, payment, note, stripeLink, keepAll, employeeId) =>
-              run(() => completeAppointment(job.id, finalPrice, payment, note, stripeLink, keepAll, employeeId)).then((ok) => ok && onClose())
+            onSubmit={(finalPrice, payment, note, stripeLink, keepAll, employeeId, doneVehicleIds) =>
+              run(() => completeAppointment(job.id, finalPrice, payment, note, stripeLink, keepAll, employeeId, doneVehicleIds)).then((ok) => ok && onClose())
             }
           />
         )}
@@ -398,6 +443,7 @@ export function JobSheet({
           <EditPanel
             job={job}
             catalog={catalog}
+            cadence={cadence}
             pending={pending}
             onCancel={() => setPanel("none")}
             onSubmit={(fields, vehicleIds) =>
@@ -449,6 +495,11 @@ function CompletePanel({
   job,
   owner,
   employees,
+  catalog,
+  vehicles,
+  cadence,
+  owed,
+  credit,
   pending,
   onCancel,
   onSubmit,
@@ -456,6 +507,15 @@ function CompletePanel({
   job: JobWithCustomer;
   owner: boolean;
   employees: EmployeeLite[];
+  catalog: Catalog;
+  /** The vehicles booked on this visit; with 2+ the crew can say which actually got done. */
+  vehicles: Vehicle[];
+  /** Set on plan visits, so dropping a car re-prices at plan rates. */
+  cadence: PlanCadence | null;
+  /** What the customer still owes from earlier visits. */
+  owed: number;
+  /** Prepaid credit on their account. */
+  credit: number;
   pending: boolean;
   onCancel: () => void;
   onSubmit: (
@@ -464,7 +524,8 @@ function CompletePanel({
     note: string,
     stripeLink: boolean,
     keepAll: boolean,
-    employeeId: string | null
+    employeeId: string | null,
+    doneVehicleIds: string[] | null
   ) => void;
 }) {
   const email = job.customers?.email ?? null;
@@ -476,10 +537,36 @@ function CompletePanel({
   const [finalPrice, setFinalPrice] = useState(String(job.price));
   const [payMode, setPayMode] = useState<PayMode>(() => {
     if (!job.customer_id) return "balance";
+    if (credit >= Number(job.price)) return "balance"; // already paid for: never bill a prepaid visit again
     if (canStripe && job.customers?.stripe_payments) return "stripe"; // their usual way
     return job.plan_id ? "balance" : "now";
   });
-  const [amount, setAmount] = useState(String(job.price));
+  // Which of the booked vehicles got done. Dropping one re-prices the visit (plan rate for
+  // what's left); the plan and its later visits don't change.
+  const [doneIds, setDoneIds] = useState<string[]>(() => vehicles.map((v) => v.id));
+  const skipped = vehicles.filter((v) => !doneIds.includes(v.id));
+  const addonIds = job.addons.map((a) => a.id);
+  function toggleDone(id: string) {
+    const next = doneIds.includes(id) ? doneIds.filter((i) => i !== id) : [...doneIds, id];
+    if (next.length === 0) return; // nothing done at all is a cancel or a no-show, not a completion
+    setDoneIds(next);
+    setFinalPrice(
+      String(
+        repriceVisit(
+          catalog,
+          { price: Number(job.price), vehicles, addonIds },
+          { vehicles: vehicles.filter((v) => next.includes(v.id)), addonIds },
+          cadence,
+          catalog.ceramic && job.service_name === catalog.ceramic.name ? "ceramic" : "standard"
+        )
+      )
+    );
+    setAmountTyped(null);
+  }
+  // The amount follows the final price (plus what they owe from before) until it's typed over.
+  const [collectOwed, setCollectOwed] = useState(owed > 0);
+  const [amountTyped, setAmountTyped] = useState<string | null>(null);
+  const amount = amountTyped ?? String(Math.round((Number(finalPrice || 0) + (collectOwed ? owed : 0)) * 100) / 100);
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [memo, setMemo] = useState("");
   const [tip, setTip] = useState("");
@@ -500,6 +587,18 @@ function CompletePanel({
           {todo.total - todo.done} of {todo.total} checklist items not ticked — fine if they were done, just saying.
         </p>
       )}
+      {vehicles.length > 1 && (
+        <Field label="What got done?" hint={skipped.length ? `Skipping ${skipped.map(vehicleLabel).join(" + ")} this visit only${job.plan_id ? ". The plan stays the same" : ""}.` : "Untick a vehicle you didn't do today."}>
+          <div className="flex flex-col gap-1">
+            {vehicles.map((v) => (
+              <button key={v.id} type="button" className="choice min-h-[38px] px-3 py-1.5 text-sm text-left justify-start gap-2.5" aria-pressed={doneIds.includes(v.id)} onClick={() => toggleDone(v.id)}>
+                {doneIds.includes(v.id) ? <IconCheckCircle width={18} height={18} weight="fill" className="shrink-0 text-ok" aria-hidden /> : <IconCircle width={18} height={18} className="shrink-0 text-faint" aria-hidden />}
+                <span className={doneIds.includes(v.id) ? "" : "line-through text-ink-2"}>{vehicleLabel(v)}</span>
+              </button>
+            ))}
+          </div>
+        </Field>
+      )}
       <Field label="Final price" hint={Number(finalPrice) !== Number(job.price) ? `Quoted ${money(Number(job.price))}` : undefined}>
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-faint">$</span>
@@ -510,7 +609,7 @@ function CompletePanel({
             min={0}
             onChange={(e) => {
               setFinalPrice(e.target.value);
-              if (payMode === "now") setAmount(e.target.value);
+              setAmountTyped(null);
             }}
           />
         </div>
@@ -536,7 +635,7 @@ function CompletePanel({
             <div className="grid grid-cols-2 gap-2">
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-faint">$</span>
-                <input type="number" className="input num pl-7" value={amount} min={0} onChange={(e) => setAmount(e.target.value)} aria-label="Payment amount" />
+                <input type="number" className="input num pl-7" value={amount} min={0} onChange={(e) => setAmountTyped(e.target.value)} aria-label="Payment amount" />
               </div>
               <select className="select" value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} aria-label="Payment method">
                 {PAYMENT_METHODS.map((m) => (
@@ -550,6 +649,21 @@ function CompletePanel({
                 <input type="number" inputMode="decimal" min={0} className="input num pl-7" placeholder="Tip" value={tip} onChange={(e) => setTip(e.target.value)} aria-label="Tip" />
               </div>
               <input className="input" placeholder="Memo" value={memo} onChange={(e) => setMemo(e.target.value)} aria-label="Memo" />
+              {owed > 0 && (
+                <label className="col-span-2 flex items-center gap-2.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={collectOwed}
+                    onChange={(e) => {
+                      setCollectOwed(e.target.checked);
+                      setAmountTyped(null);
+                    }}
+                  />
+                  <span>
+                    Also collecting the <span className="num font-medium">{money(owed)}</span> they owe from earlier visits
+                  </span>
+                </label>
+              )}
               <p className="col-span-2 text-xs text-faint -mt-1">
                 Money already in hand — cash, Zelle, or a card you ran yourself.
               </p>
@@ -563,7 +677,9 @@ function CompletePanel({
           )}
           {payMode === "balance" && (
             <p className="text-dense text-ink-2 -mt-1">
-              The charge goes on the ledger; the balance shows what they owe. No email goes out.
+              {credit >= Number(finalPrice || 0)
+                ? `Comes out of their ${money(credit)} prepaid credit. Nothing to collect.`
+                : "The charge goes on the ledger and shows as owed on their next visit, ready to collect then. No email goes out."}
             </p>
           )}
         </>
@@ -596,7 +712,8 @@ function CompletePanel({
               note.trim(),
               payMode === "stripe",
               keepAll,
-              employeeId
+              employeeId,
+              skipped.length ? doneIds : null
             )
           }
         >
@@ -831,12 +948,15 @@ function ReschedulePanel({
 function EditPanel({
   job,
   catalog,
+  cadence,
   pending,
   onCancel,
   onSubmit,
 }: {
   job: JobWithCustomer;
   catalog: Catalog;
+  /** Set on plan visits: vehicle and add-on changes re-price at plan rates, not one-off rates. */
+  cadence: PlanCadence | null;
   pending: boolean;
   onCancel: () => void;
   onSubmit: (fields: Parameters<typeof updateAppointment>[1], vehicleIds?: string[]) => void;
@@ -849,6 +969,7 @@ function EditPanel({
   // Linked customer: edit which of their cars this visit covers.
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [vehicleIds, setVehicleIds] = useState<string[]>([]);
+  const [origIds, setOrigIds] = useState<string[]>([]);
   const [vehiclesLoaded, setVehiclesLoaded] = useState(false);
   // Recompute against the right base service (a ceramic job re-quotes as ceramic).
   const service = catalog.ceramic && job.service_name === catalog.ceramic.name ? ("ceramic" as const) : ("standard" as const);
@@ -864,7 +985,9 @@ function EditPanel({
       ]);
       if (stale) return;
       setVehicles((vQ.data as Vehicle[]) ?? []);
-      setVehicleIds(((avQ.data ?? []) as { vehicle_id: string }[]).map((r) => r.vehicle_id));
+      const ids = ((avQ.data ?? []) as { vehicle_id: string }[]).map((r) => r.vehicle_id);
+      setVehicleIds(ids);
+      setOrigIds(ids);
       setVehiclesLoaded(true);
     })();
     return () => {
@@ -874,12 +997,25 @@ function EditPanel({
 
   const selVehicles = vehicles.filter((v) => vehicleIds.includes(v.id));
   const selCars = selVehicles.filter((v) => v.kind !== "boat");
-  const requote = (ids: string[], addons: string[]) => {
+  // No cars picked = quote by the size dropdown, as one car of that size.
+  const asCar = (size: SizeId) => [{ kind: "car" as const, size_id: size, length_ft: null }];
+  const quoted = (ids: string[], size: SizeId) => {
     const sel = vehicles.filter((v) => ids.includes(v.id));
-    return sel.length
-      ? computeVehiclesQuote(catalog, sel, addons, service)
-      : computeQuote(catalog, sizeId, addons, service);
+    return sel.length ? sel : asCar(size);
   };
+  const origAddonIds = job.addons.map((a) => a.id);
+  /** The job's current price scaled to the new vehicles/add-ons (plan rates on plan visits). */
+  const reprice = (ids: string[], addons: string[], size: SizeId = sizeId) =>
+    repriceVisit(
+      catalog,
+      { price: Number(job.price), vehicles: origIds.length ? quoted(origIds, sizeId) : job.size_id ? asCar(job.size_id as SizeId) : [], addonIds: origAddonIds },
+      { vehicles: quoted(ids, size), addonIds: addons },
+      cadence,
+      service
+    );
+  const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
+  // Only what changed gets saved: a notes-only edit must not reset the length or the add-ons.
+  const scopeChanged = !sameSet(vehicleIds, origIds) || !sameSet(addonIds, origAddonIds) || (selVehicles.length === 0 && sizeId !== ((job.size_id as SizeId) || "sedan"));
   // Add-ons are car things — boats don't take them.
   const addonPrice = (a: Catalog["addons"][number]) =>
     selVehicles.length
@@ -897,7 +1033,7 @@ function EditPanel({
             selected={vehicleIds}
             onChange={(ids) => {
               setVehicleIds(ids);
-              setPrice(String(requote(ids, addonIds).price));
+              setPrice(String(reprice(ids, addonIds)));
             }}
             onVehiclesChange={setVehicles}
           />
@@ -911,7 +1047,7 @@ function EditPanel({
             onChange={(e) => {
               const next = e.target.value as SizeId;
               setSizeId(next);
-              setPrice(String(computeQuote(catalog, next, addonIds, service).price));
+              setPrice(String(reprice(vehicleIds, addonIds, next)));
             }}
           >
             {SIZES.map((s) => (
@@ -932,7 +1068,7 @@ function EditPanel({
                 onChange={(e) => {
                   const next = e.target.checked ? [...addonIds, a.id] : addonIds.filter((i) => i !== a.id);
                   setAddonIds(next);
-                  setPrice(String(requote(vehicleIds, next).price));
+                  setPrice(String(reprice(vehicleIds, next)));
                 }}
               />
               <span className="grow">{a.name}</span>
@@ -963,17 +1099,21 @@ function EditPanel({
           onClick={() =>
             onSubmit(
               {
-                size_id: selVehicles.length > 1 ? null : selVehicles[0]?.size_id ?? sizeId,
-                size_label: selVehicles.length ? selVehicles.map(vehicleLabel).join(" + ") : sizeLabel(sizeId),
-                addons: catalog.addons
-                  .filter((a) => addonIds.includes(a.id))
-                  .map((a) => ({ id: a.id, name: a.name, price: addonPrice(a) })),
+                ...(scopeChanged
+                  ? {
+                      size_id: selVehicles.length > 1 ? null : selVehicles[0]?.size_id ?? sizeId,
+                      size_label: selVehicles.length ? selVehicles.map(vehicleLabel).join(" + ") : sizeLabel(sizeId),
+                      addons: catalog.addons
+                        .filter((a) => addonIds.includes(a.id))
+                        .map((a) => ({ id: a.id, name: a.name, price: addonPrice(a) })),
+                      duration_min: computeVehiclesQuote(catalog, quoted(vehicleIds, sizeId), addonIds, service).minutes,
+                    }
+                  : {}),
                 price: Number(price),
-                duration_min: requote(vehicleIds, addonIds).minutes,
                 address: address || null,
                 notes: notes || null,
               },
-              vehiclesLoaded ? vehicleIds : undefined
+              vehiclesLoaded && !sameSet(vehicleIds, origIds) ? vehicleIds : undefined
             )
           }
         >

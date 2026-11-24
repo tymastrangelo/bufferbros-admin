@@ -12,6 +12,7 @@ import { RelationsCard } from "@/components/relations-card";
 import { CustomerPicker, type PickedCustomer } from "@/components/customer-picker";
 import { ChannelSelect } from "@/components/marketing-bits";
 import { HelpSheet, InsightCard, TextThread } from "@/components/client-texts";
+import { ContactsSection } from "@/components/contacts";
 import { liveSuggestion } from "@/lib/suggestions";
 import { Avatar, Balance, Busy, CopyButton, ErrorNote, Field, PageHeader, Sheet, StatusChip, Tabs } from "@/components/ui";
 import { motion } from "motion/react";
@@ -24,7 +25,7 @@ import { fmtPhone, mapsHref, money, smsHref, telHref } from "@/lib/format";
 import { channelFromAttribution, channelLabel } from "@/lib/marketing";
 import { fmtDateShort, minToLabel } from "@/lib/time";
 import { useOwner } from "@/lib/use-owner";
-import { SIZES, sizeLabel, type Customer, type CustomerInsight, type CustomerMessage, type TextSyncRun, type EntryKind, type LedgerEntry, type OutreachLog, type PaymentRequest, type Plan, type SizeId, type Vehicle } from "@/lib/types";
+import { SIZES, sizeLabel, type Customer, type CustomerContact, type CustomerInsight, type CustomerMessage, type TextSyncRun, type EntryKind, type LedgerEntry, type OutreachLog, type PaymentRequest, type Plan, type SizeId, type Vehicle } from "@/lib/types";
 
 type Tab = "overview" | "visits" | "ledger" | "texts";
 
@@ -42,6 +43,7 @@ export function CustomerProfile({
   referrerName,
   referralCredit,
   texts,
+  contacts,
   insight,
   textSync,
   help,
@@ -61,6 +63,8 @@ export function CustomerProfile({
   referralCredit: number;
   /** null = not the owner (texts are owner-only) */
   texts: CustomerMessage[] | null;
+  /** The client's other contacts, to label whose thread a text is from. */
+  contacts: CustomerContact[];
   insight: CustomerInsight | null;
   textSync: TextSyncRun | null;
   /** latest "Handle an issue" request for this client (owner only) */
@@ -226,6 +230,8 @@ export function CustomerProfile({
             </div>
           </section>
 
+          <ContactsSection customerId={customer.id} editable={owner} />
+
           <RelationsCard
             customer={customer}
             referrerName={referrerName}
@@ -345,7 +351,7 @@ export function CustomerProfile({
 
       {tab === "texts" && texts && (
         <div key="texts" className="page-in mt-5">
-          <TextThread messages={texts} hasPhone={!!customer.phone} run={textSync} />
+          <TextThread messages={texts} hasPhone={!!customer.phone} run={textSync} contacts={contacts} />
         </div>
       )}
 

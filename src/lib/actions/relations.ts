@@ -128,10 +128,11 @@ export async function giveReferralCredit(customerId: string): Promise<ActionResu
   if (!(amount > 0)) return { ok: false, error: "Set a referral credit amount in Settings first." };
 
   const today = todayYmd();
+  // "discount", not "credit": a credit mirrors as cash received (revenue + payouts); this is money off.
   const { error: insErr } = await db.from("ledger_entries").insert([
     {
       customer_id: cust.id,
-      kind: "credit",
+      kind: "discount",
       amount,
       occurred_on: today,
       memo: `Referral credit — referred by ${referrer.name}`,
@@ -139,7 +140,7 @@ export async function giveReferralCredit(customerId: string): Promise<ActionResu
     },
     {
       customer_id: referrer.id,
-      kind: "credit",
+      kind: "discount",
       amount,
       occurred_on: today,
       memo: `Referral credit — sent us ${cust.name}`,

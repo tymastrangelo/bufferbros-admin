@@ -1,6 +1,6 @@
 // Runnable check for the multi-car quote math: `npx tsx src/lib/catalog.check.ts`
 import assert from "node:assert/strict";
-import { boatQuote, boatTrailerDiscountPct, computeMultiQuote, computeQuote, computeVehiclesQuote, type Catalog } from "./catalog";
+import { boatQuote, boatTrailerDiscountPct, computeMultiQuote, computeQuote, computeVehiclesQuote, planVehiclesPrice, repriceVisit, type Catalog } from "./catalog";
 
 const catalog: Catalog = {
   detail: { sedan: { price: 229, minutes: 120 }, midsize: { price: 249, minutes: 150 }, large: { price: 269, minutes: 180 } },
@@ -83,5 +83,32 @@ assert.deepEqual(
 const round = (raw: number, pct: number) => Math.round(raw * (1 - pct / 100));
 assert.equal(round(120 + 140, 5), 247); // 260 - 5% = 247
 assert.equal(round(120, 0), 120); // single car: no discount
+
+// Partial plan visits. Biweekly midsize $125 + large $145, 5% off for two = $257 (the real case:
+// both Range Rovers on the plan, only the Defender done on the day).
+const plans: Catalog = {
+  ...catalog,
+  planPricing: [
+    { cadence: "biweekly", size_id: "midsize", price: 125 },
+    { cadence: "biweekly", size_id: "large", price: 145 },
+  ],
+};
+const hse = { kind: "car" as const, size_id: "midsize" as const, length_ft: null };
+const defender = { kind: "car" as const, size_id: "large" as const, length_ft: null };
+assert.equal(planVehiclesPrice(plans, "biweekly", [hse, defender]), 257);
+assert.equal(planVehiclesPrice(plans, "biweekly", [defender]), 145); // one car: no multi-car discount
+assert.equal(planVehiclesPrice(plans, "weekly", [defender]), null); // no price at that cadence
+const both = { price: 257, vehicles: [hse, defender], addonIds: [] };
+assert.equal(repriceVisit(plans, both, { vehicles: [defender], addonIds: [] }, "biweekly"), 145);
+// and back again when the second car is added back
+assert.equal(repriceVisit(plans, { price: 145, vehicles: [defender], addonIds: [] }, { vehicles: [hse, defender], addonIds: [] }, "biweekly"), 257);
+// a negotiated plan rate ($240 instead of $257) keeps its proportion
+assert.equal(repriceVisit(plans, { ...both, price: 240 }, { vehicles: [defender], addonIds: [] }, "biweekly"), Math.round((240 * 145) / 257));
+// add-ons on a plan visit are charged at their normal price on top of the plan rate
+assert.equal(repriceVisit(plans, both, { vehicles: [hse, defender], addonIds: ["pet-hair"] }, "biweekly"), 257 + 80);
+// one-off job, two cars → one: scales by one-off detail prices
+assert.equal(repriceVisit(catalog, { price: 249 + 269, vehicles: [hse, defender], addonIds: [] }, { vehicles: [defender], addonIds: [] }), 269);
+// nothing to scale from → the plain catalog quote
+assert.equal(repriceVisit(catalog, { price: 0, vehicles: [], addonIds: [] }, { vehicles: [hse], addonIds: [] }), 249);
 
 console.log("catalog.check ok");

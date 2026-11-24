@@ -138,6 +138,50 @@ export async function deleteVehicle(vehicleId: string): Promise<ActionResult> {
   return { ok: true };
 }
 
+export interface ContactFields {
+  name: string;
+  relation?: string | null;
+  phone?: string | null;
+  notes?: string | null;
+}
+
+/** Another person on a client's account (spouse, assistant). Their texts sync onto the client. */
+export async function saveContact(customerId: string, fields: ContactFields, contactId?: string | null): Promise<ActionResult> {
+  const denied = await ownerOnly("edit a client's contacts");
+  if (denied) return denied;
+  if (!fields.name.trim()) return { ok: false, error: "Add their name." };
+  const db = await createClient();
+  const row = {
+    customer_id: customerId,
+    name: fields.name.trim(),
+    relation: fields.relation?.trim() || null,
+    phone: normalizePhone(fields.phone),
+    notes: fields.notes?.trim() || null,
+  };
+  const { error } = contactId ? await db.from("customer_contacts").update(row).eq("id", contactId) : await db.from("customer_contacts").insert(row);
+  if (error) return { ok: false, error: error.message };
+  await logActivity(
+    `${contactId ? "updated" : "added"} a contact for ${await customerName(customerId)}`,
+    [`${row.name}${row.relation ? ` (${row.relation})` : ""}`, row.phone],
+    `/customers/${customerId}`,
+    { tags: ["bust_in_silhouette"], priority: 3 }
+  );
+  refresh();
+  return { ok: true };
+}
+
+export async function deleteContact(contactId: string): Promise<ActionResult> {
+  const denied = await ownerOnly("remove a client's contacts");
+  if (denied) return denied;
+  const db = await createClient();
+  const { data: c } = await db.from("customer_contacts").select("customer_id,name").eq("id", contactId).maybeSingle();
+  const { error } = await db.from("customer_contacts").delete().eq("id", contactId);
+  if (error) return { ok: false, error: error.message };
+  if (c) await logActivity(`removed a contact from ${await customerName(c.customer_id)}`, [c.name], `/customers/${c.customer_id}`, { tags: ["wastebasket"], priority: 3 });
+  refresh();
+  return { ok: true };
+}
+
 export interface ImportRow {
   name: string;
   phone?: string | null;

@@ -206,6 +206,7 @@ const EVENT_LABEL: Record<string, string> = {
   rescheduled: "Rescheduled",
   assigned: "Assigned",
   price_changed: "Price changed",
+  vehicles_changed: "Vehicles changed",
   edited: "Edited",
 };
 
@@ -237,6 +238,7 @@ export function TimelineSection({ appointmentId, names }: { appointmentId: strin
     }
     if (e.kind === "assigned") return `to ${d.to ? names[String(d.to)] ?? "a worker" : "Me"}`;
     if (e.kind === "price_changed") return `${money(Number(d.from))} → ${money(Number(d.to))}`;
+    if (e.kind === "vehicles_changed") return `${d.from ?? "none"} → ${d.to ?? "none"}`;
     if (e.kind === "booked") return d.source === "web" ? "on the website" : d.source === "recurring" ? "from a plan" : "";
     return "";
   };

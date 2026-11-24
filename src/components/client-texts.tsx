@@ -10,7 +10,7 @@ import { applyMakeGood, markSuggestionSent, requestClientHelp, requestTextSync }
 import { money, smsHref, telHref } from "@/lib/format";
 import { GOAL_LABEL, type Suggestion, type SuggestionGoal } from "@/lib/suggestions";
 import { dateOfInstant, fmtDateLong, fmtDateShort, todayYmd } from "@/lib/time";
-import type { CustomerInsight, CustomerMessage, HelpResult, TextSyncRun } from "@/lib/types";
+import type { CustomerInsight, CustomerContact, CustomerMessage, HelpResult, TextSyncRun } from "@/lib/types";
 import { IconCalendar, IconChats, IconCheckCircle, IconEquals, IconMessage, IconPhone, IconStar, IconWarning, IconWave, type IconComponent } from "./icons";
 import { Busy, CopyButton, EmptyState, ErrorNote, LiveList, LiveRow, SectionLabel, Sheet } from "./ui";
 
@@ -382,7 +382,9 @@ function HelpDraft({ runId, result, first, phone }: { runId: string; result: Hel
 }
 
 /** The thread, oldest at top, opening scrolled to the newest message. */
-export function TextThread({ messages, hasPhone, run }: { messages: CustomerMessage[]; hasPhone: boolean; run: TextSyncRun | null }) {
+export function TextThread({ messages, hasPhone, run, contacts = [] }: { messages: CustomerMessage[]; hasPhone: boolean; run: TextSyncRun | null; contacts?: CustomerContact[] }) {
+  // Two people text about the same cars: say whose thread each text is from.
+  const who = new Map(contacts.map((c) => [c.id, c.name.split(/\s+/)[0]]));
   const scroller = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -423,7 +425,10 @@ export function TextThread({ messages, hasPhone, run }: { messages: CustomerMess
                   {m.body ?? <span className="italic">Photo or file</span>}
                   {m.body && m.has_attachment && <span className="block mt-1 text-xs italic opacity-80">+ photo or file</span>}
                 </p>
-                <span className="mt-0.5 text-xs text-faint num">{timeOf(m.sent_at)}</span>
+                <span className="mt-0.5 text-xs text-faint num">
+                  {m.contact_id && who.has(m.contact_id) ? `${m.from_me ? "to " : ""}${who.get(m.contact_id)} · ` : ""}
+                  {timeOf(m.sent_at)}
+                </span>
               </div>
             </div>
           );

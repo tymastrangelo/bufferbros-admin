@@ -74,6 +74,8 @@ Rules:
 - Use only what the texts and the record say. Never guess or invent; leave out anything not stated.
 - The Schedule block is the dashboard's calendar and is the truth about what is booked, when, and who is coming. Cross-check every text against it: if a visit is booked, name that exact day and time (never a different one); if they are on a plan, describe its rhythm exactly as the Schedule says (every week / every 2 weeks / every 4 weeks, which weekday, what time) and never ask them to rebook; if the texts asked to move or cancel a visit and the Schedule still shows the old time, that is an open item for Tyler, not something to confirm to the customer; if the Schedule shows a different time than the texts last agreed, a text confirming the new time is the right next step. Never offer a specific new date or time that is not already on the Schedule.
 - The Money block is their balance: a credit means they have prepaid, so never ask them to pay; an amount owed may get one gentle mention only if the texts show Tyler has not already asked.
+- If "Other contacts on this account" is listed, more than one person texts Tyler about the same cars (a spouse, an assistant). Read both threads as one relationship: what one of them agreed to or asked for counts for the account. In the summary and open items say who said what. Write the suggested text to whoever the open conversation is with (usually whoever texted last about it) and start it with that person's first name.
+- A past job's completion_note that starts "Partial visit" means only some of the booked vehicles were done that day and the price was lowered to match. That is normal, not a problem to apologize for. The plan and its later visits are unchanged.
 - Vehicles, addresses and site notes are reference only; use them to be specific when it fits, never to change what was agreed.
 - summary: 2 or 3 plain sentences. Who they are to the business, how it's going, anything notable.
 - facts: up to 8 short, durable, useful facts as {label, value}: vehicles or boats, where the car is and how to get in, timing preferences, when they're in town, pets or kids that matter on a job, how they like to pay, products or requests they care about. Skip one-off chatter.
@@ -161,12 +163,26 @@ export function schedule({ today, appts, plans, workerName }) {
   return lines.join(". ");
 }
 
+/** " (not yet collected for the visit on 2026-11-24)": the visits whose charge has no payment against it. */
+function unpaidDates(ledger) {
+  const net = new Map();
+  for (const e of ledger) {
+    if (!e.appointment_id) continue;
+    const j = net.get(e.appointment_id) ?? { net: 0, on: e.occurred_on };
+    j.net += Number(e.amount);
+    if (e.kind === "charge") j.on = e.occurred_on;
+    net.set(e.appointment_id, j);
+  }
+  const dates = [...net.values()].filter((j) => j.net < -0.004).map((j) => j.on).sort();
+  return dates.length ? ` (not yet collected for the visit${dates.length > 1 ? "s" : ""} on ${dates.join(", ")})` : "";
+}
+
 export function money({ ledger }) {
   const balance = ledger.reduce((s, e) => s + Number(e.amount), 0);
   const pays = ledger.filter((e) => e.kind === "payment").sort((a, b) => b.occurred_on.localeCompare(a.occurred_on));
   const last = pays[0];
   return [
-    balance > 0.004 ? `${usd(balance)} credit on account (prepaid)` : balance < -0.004 ? `owes ${usd(balance)}` : "balance even",
+    balance > 0.004 ? `${usd(balance)} credit on account (prepaid)` : balance < -0.004 ? `owes ${usd(balance)}${unpaidDates(ledger)}` : "balance even",
     last ? `last payment ${usd(last.amount)} by ${last.method ?? "unknown method"} on ${last.occurred_on}` : "no payments on record",
     pays.length ? `usually pays by ${[...pays.reduce((m, p) => m.set(p.method, (m.get(p.method) ?? 0) + 1), new Map())].sort((a, b) => b[1] - a[1])[0][0]}` : null,
   ]
@@ -191,27 +207,37 @@ export const workerNames = async (call) => new Map((await getAll(call, "employee
 /** Everything the dashboard knows about one customer, in prompt form: timing, the calendar,
  *  money, open reminders, the CRM record with past jobs, and the latest 200 texts. */
 export async function customerBrief(call, customerId, workerName) {
-  const [[c], vehicles, appts, plans, thread, ledger, reminders] = await Promise.all([
+  const [[c], vehicles, appts, plans, thread, ledger, reminders, contacts] = await Promise.all([
     call(`customers?id=eq.${customerId}&select=name,email,addresses,site_notes,notes,tags,outreach_status,resume_on,last_contacted_on,review_asked_on,review_left_on,acquired_via`),
     call(`vehicles?customer_id=eq.${customerId}&select=kind,year,make,model,color,size_id,length_ft,notes`),
-    call(`appointments?customer_id=eq.${customerId}&select=date,start_min,duration_min,status,service_name,size_label,addons,price,address,notes,employee_id,plan_id,source&order=date.desc&limit=30`),
+    call(`appointments?customer_id=eq.${customerId}&select=date,start_min,duration_min,status,service_name,size_label,addons,price,address,notes,completion_note,employee_id,plan_id,source&order=date.desc&limit=30`),
     call(`plans?customer_id=eq.${customerId}&select=id,cadence,interval_days,status,per_visit_price,preferred_dow,preferred_min,duration_min,employee_id,starts_on,ends_on,billing_note,notes`),
-    call(`customer_messages?customer_id=eq.${customerId}&select=sent_at,from_me,body,has_attachment&order=sent_at.desc&limit=200`),
-    call(`ledger_entries?customer_id=eq.${customerId}&select=kind,amount,method,occurred_on,memo`),
+    call(`customer_messages?customer_id=eq.${customerId}&select=sent_at,from_me,body,has_attachment,contact_id&order=sent_at.desc&limit=200`),
+    call(`ledger_entries?customer_id=eq.${customerId}&select=kind,amount,method,occurred_on,memo,appointment_id`),
     call(`reminders?customer_id=eq.${customerId}&done_at=is.null&select=due_on,title,body`),
+    call(`customer_contacts?customer_id=eq.${customerId}&select=id,name,relation,phone,notes`),
   ]);
   if (!c) throw new Error(`customer ${customerId} not found`);
   const first = c.name.split(/\s+/)[0];
+  // Two threads, one account: every line says who is talking (and who Tyler was answering).
+  const other = new Map(contacts.map((k) => [k.id, k.name.split(/\s+/)[0]]));
+  const speaker = (m) => {
+    const them = other.get(m.contact_id);
+    return m.from_me ? (them ? `Tyler (to ${them})` : contacts.length ? `Tyler (to ${first})` : "Tyler") : them ?? first;
+  };
   const lines = thread
     .reverse()
-    .map((m) => `${stamp(m.sent_at)} ${m.from_me ? "Tyler" : first}: ${(m.body ?? "").slice(0, 1000)}${m.has_attachment ? " [photo or file]" : ""}`);
+    .map((m) => `${stamp(m.sent_at)} ${speaker(m)}: ${(m.body ?? "").slice(0, 1000)}${m.has_attachment ? " [photo or file]" : ""}`);
   const today = day(new Date().toISOString());
-  const recent = appts.filter((a) => a.date < today || a.status !== "scheduled").map(({ date, start_min, status, service_name, size_label, addons, price, notes, employee_id, plan_id }) => ({ date, time: clock(start_min), status, service_name, size_label, addons: (addons ?? []).map((x) => x.name), price, notes, done_by: employee_id ? workerName.get(employee_id) ?? "worker" : "Tyler", plan_visit: !!plan_id }));
+  const recent = appts.filter((a) => a.date < today || a.status !== "scheduled").map(({ date, start_min, status, service_name, size_label, addons, price, notes, completion_note, employee_id, plan_id }) => ({ date, time: clock(start_min), status, service_name, size_label, addons: (addons ?? []).map((x) => x.name), price, notes, completion_note, done_by: employee_id ? workerName.get(employee_id) ?? "worker" : "Tyler", plan_visit: !!plan_id }));
   const input = [
     `Today is ${dayLabel(today)} (${today}).`,
     `Timing: ${timing({ today, appts, plans, c })}`,
     `Schedule (the dashboard calendar, authoritative): ${schedule({ today, appts, plans, workerName })}`,
     `Money: ${money({ ledger })}`,
+    contacts.length
+      ? `Other contacts on this account (same household or business, same cars; texts with them are labeled by first name): ${contacts.map((k) => `${k.name}${k.relation ? `, ${k.relation}` : ""}${k.notes ? ` (${k.notes})` : ""}`).join("; ")}`
+      : null,
     reminders.length ? `Open reminders Tyler set: ${reminders.map((r) => `${r.due_on} ${r.title}${r.body ? ` (${r.body.slice(0, 160)})` : ""}`).join("; ")}` : null,
     `CRM record: ${JSON.stringify({ customer: c, vehicles, past_jobs: recent })}`,
     `Text messages, oldest first (${lines.length} most recent):`,

@@ -27,7 +27,13 @@ export async function syncTexts(call, { dryRun = false } = {}) {
   const byKey = new Map();
   for (const c of customers) {
     const k = phoneKey(c.phone);
-    if (k && !byKey.has(k)) byKey.set(k, c.id);
+    if (k && !byKey.has(k)) byKey.set(k, { customer_id: c.id, contact_id: null });
+  }
+  // A client's other contacts (spouse, assistant; migration 0043): their threads land on the
+  // same client, tagged with who it is. A client's own number wins if two records share one.
+  for (const c of await getAll(call, "customer_contacts?select=id,customer_id,phone&phone=not.is.null&order=created_at")) {
+    const k = phoneKey(c.phone);
+    if (k && !byKey.has(k)) byKey.set(k, { customer_id: c.customer_id, contact_id: c.id });
   }
   const newKeys = [...byKey.keys()].filter((k) => !state.knownKeys.includes(k));
 
@@ -63,13 +69,14 @@ export async function syncTexts(call, { dryRun = false } = {}) {
 
   const out = [];
   for (const r of [...backfill, ...fresh]) {
-    const customerId = byKey.get(phoneKey(r.ident));
-    if (!customerId) continue;
+    const owner = byKey.get(phoneKey(r.ident));
+    if (!owner) continue;
     const body = cleanBody(r.text) ?? cleanBody(decodeAttributedBody(r.attributed));
     if (!body && !r.hasAttachment) continue;
     out.push({
       guid: r.guid,
-      customer_id: customerId,
+      customer_id: owner.customer_id,
+      contact_id: owner.contact_id,
       sent_at: appleDateToISO(r.dateSec),
       from_me: r.fromMe === 1,
       body,

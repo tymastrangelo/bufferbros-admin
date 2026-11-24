@@ -164,6 +164,49 @@ export function planPrice(catalog: Catalog, cadence: PlanCadence, sizeId: SizeId
   return catalog.planPricing.find((p) => p.cadence === cadence && p.size_id === sizeId)?.price ?? null;
 }
 
+type QuotedVehicle = { kind: "car" | "boat"; size_id: SizeId; length_ft: number | null };
+
+/**
+ * The catalog's per-visit plan rate for these vehicles: cars at their plan price, boats at the
+ * maintenance-wash rate, minus the multi-vehicle discount when 2+ are done together.
+ * Null when a car's size has no plan price at this cadence (custom cadence: price it by hand).
+ */
+export function planVehiclesPrice(catalog: Catalog, cadence: PlanCadence, vehicles: QuotedVehicle[]): number | null {
+  if (!vehicles.length) return null;
+  let raw = 0;
+  for (const v of vehicles) {
+    const p = v.kind === "boat" ? boatQuote(catalog, v.length_ft, { componentIds: [BOAT_MAINTENANCE_ID] }).price : planPrice(catalog, cadence, v.size_id);
+    if (p == null) return null;
+    raw += p;
+  }
+  return Math.round(raw * (1 - (vehicles.length > 1 ? catalog.rules.multiCarDiscountPct : 0) / 100));
+}
+
+/**
+ * Re-price a visit whose vehicles or add-ons changed (on site: "only do the Defender today").
+ * Scales the price already on the job by the catalog ratio new/old, so a negotiated rate
+ * stays negotiated. Plan visits (cadence given) weigh by plan rates, which drops the
+ * multi-car discount when one car is left; everything else weighs by one-off detail prices.
+ * With nothing to scale from (no vehicles before, or a $0 catalog), it's the plain catalog quote.
+ */
+export function repriceVisit(
+  catalog: Catalog,
+  current: { price: number; vehicles: QuotedVehicle[]; addonIds: string[] },
+  next: { vehicles: QuotedVehicle[]; addonIds: string[] },
+  cadence?: PlanCadence | null,
+  service: BaseService = "standard"
+): number {
+  const weigh = (vs: QuotedVehicle[], addonIds: string[]) => {
+    const full = computeVehiclesQuote(catalog, vs, addonIds, service).price;
+    const plan = cadence ? planVehiclesPrice(catalog, cadence, vs) : null;
+    // plan rate for the wash itself + add-ons at their normal price
+    return plan == null ? full : plan + full - computeVehiclesQuote(catalog, vs, [], service).price;
+  };
+  const was = weigh(current.vehicles, current.addonIds);
+  const now = weigh(next.vehicles, next.addonIds);
+  return was > 0 && current.price > 0 ? Math.round((current.price * now) / was) : now;
+}
+
 /** Visits in ~a quarter (13 weeks) — the minimum block for the prepay discount. */
 export function visitsPerQuarter(cadence: PlanCadence, intervalDays?: number | null): number {
   if (cadence === "weekly") return 13;

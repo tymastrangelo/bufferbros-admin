@@ -11,7 +11,7 @@ import { syncAppointmentToGcal } from "@/lib/gcal";
 import { change, customerName, logActivity, notify as sendPush, usd } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/server";
 import { addDays, diffDays, fmtDateShort, nowMinutes, todayYmd, whenLabel } from "@/lib/time";
-import type { Addon, Appointment, PaymentMethod } from "@/lib/types";
+import { vehicleLabel, type Addon, type Appointment, type PaymentMethod, type Vehicle } from "@/lib/types";
 import { cancelPaymentRequest, sendPaymentRequest } from "./stripe";
 
 export type ActionResult = { ok: true; id?: string } | { ok: false; error: string };
@@ -254,7 +254,14 @@ export async function rescheduleAppointment(
     before.date !== next.date || before.start_min !== next.startMin || before.duration_min !== next.durationMin;
   const { error } = await db
     .from("appointments")
-    .update({ date: next.date, start_min: next.startMin, duration_min: next.durationMin, status: "scheduled" })
+    .update({
+      date: next.date,
+      start_min: next.startMin,
+      duration_min: next.durationMin,
+      status: "scheduled",
+      // moved to another day: the clock started on the old day no longer counts
+      ...(before.date !== next.date ? { started_at: null } : {}),
+    })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
 
@@ -335,7 +342,7 @@ export async function setAppointmentStatus(id: string, status: "scheduled" | "no
   }
   const { error } = await db
     .from("appointments")
-    .update({ status, completed_at: null })
+    .update({ status, completed_at: null, started_at: null })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
   if (appt.status === "completed") {
@@ -409,6 +416,39 @@ export async function adjustJobTimes(
   return { ok: true, id };
 }
 
+type Db = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * Earlier visits this customer still owes for, oldest first, so money collected today beyond
+ * today's price lands on the job it actually pays (and splits to whoever did that job).
+ * Empty unless they owe overall: a prepaid balance covers its visits with no per-job payment.
+ */
+async function unpaidVisits(db: Db, customerId: string, exceptAppointmentId: string) {
+  // ponytail: one page (1000 ledger rows per customer); paginate if a customer ever gets there
+  const { data } = await db.from("ledger_entries").select("appointment_id,plan_id,kind,amount,occurred_on").eq("customer_id", customerId);
+  const rows = ((data ?? []) as { appointment_id: string | null; plan_id: string | null; kind: string; amount: number; occurred_on: string }[]).filter(
+    (r) => r.appointment_id !== exceptAppointmentId
+  );
+  let owedOverall = -rows.reduce((s, r) => s + Number(r.amount), 0);
+  const jobs = new Map<string, { plan_id: string | null; net: number; on: string }>();
+  for (const r of rows) {
+    if (!r.appointment_id) continue;
+    const j = jobs.get(r.appointment_id) ?? { plan_id: r.plan_id, net: 0, on: r.occurred_on };
+    j.net += Number(r.amount);
+    if (r.kind === "charge") j.on = r.occurred_on;
+    jobs.set(r.appointment_id, j);
+  }
+  const out: { appointmentId: string; planId: string | null; on: string; owed: number }[] = [];
+  for (const [appointmentId, j] of [...jobs].sort((a, b) => a[1].on.localeCompare(b[1].on))) {
+    if (owedOverall <= 0.004) break;
+    if (j.net >= -0.004) continue;
+    const owed = Math.round(Math.min(-j.net, owedOverall) * 100) / 100;
+    out.push({ appointmentId, planId: j.plan_id, on: j.on, owed });
+    owedOverall -= owed;
+  }
+  return out;
+}
+
 export async function completeAppointment(
   id: string,
   finalPrice: number,
@@ -419,7 +459,9 @@ export async function completeAppointment(
   /** Keep-all-the-money: no worker split on this job (owner did it himself). */
   keepAll = false,
   /** Who did the detail; null = the owner. Ignored for washers (always themselves). */
-  employeeId?: string | null
+  employeeId?: string | null,
+  /** The vehicles actually done, when that's fewer than were booked ("only the Defender today"). */
+  doneVehicleIds?: string[] | null
 ): Promise<ActionResult> {
   const db = await createClient();
   const appt = await getAppt(id);
@@ -442,9 +484,44 @@ export async function completeAppointment(
     if (!mine || !count) return { ok: false, error: "This job isn't assigned to you. Ask Tyler to add you to it, then complete it." };
     empId = mine.id;
   }
+  // Re-completing a reopened job: its payments survived the reopen, so don't book another.
+  // Checked before anything is written, or the job would end up completed with no charge.
+  if (appt.customer_id && payment && payment.amount > 0) {
+    const { data: paid } = await db.from("ledger_entries").select("amount").eq("appointment_id", id).eq("kind", "payment");
+    const already = (paid ?? []).reduce((s, r) => s + Number(r.amount), 0);
+    if (already > 0) {
+      return {
+        ok: false,
+        error: `${usd(already)} was already collected on this job. Pick "On balance" to complete it without a second payment, or adjust the existing one on the customer's ledger.`,
+      };
+    }
+  }
   const self = keepAll && role === "owner" && !empId;
   // Whoever gets paid for it was on it: add them to the assignees (never drop the others).
   if (role === "owner") await ensureAssignee(db, id, empId);
+
+  // What actually got done. A visit can shrink on site (they only wanted one car today); the
+  // plan itself stays as it is. "Skipped" = anything booked on this visit or covered by its
+  // plan that wasn't done, whether it was dropped here or earlier through Edit.
+  const asVehicles = (rows: unknown) => ((rows ?? []) as { vehicles: Vehicle | null }[]).map((r) => r.vehicles).filter(Boolean) as Vehicle[];
+  const booked = asVehicles((await db.from("appointment_vehicles").select("vehicles(*)").eq("appointment_id", id)).data);
+  const picked = doneVehicleIds?.length ? booked.filter((v) => doneVehicleIds.includes(v.id)) : [];
+  const done = picked.length ? picked : booked;
+  const onPlan = appt.plan_id ? asVehicles((await db.from("plan_vehicles").select("vehicles(*)").eq("plan_id", appt.plan_id)).data) : [];
+  const skipped = [...booked, ...onPlan.filter((v) => !booked.some((b) => b.id === v.id))].filter((v) => !done.some((d) => d.id === v.id));
+  const labels = (vs: Vehicle[]) => vs.map(vehicleLabel).join(" + ");
+  const partial = done.length && skipped.length ? `Partial visit: did ${labels(done)} only, skipped ${labels(skipped)}.` : null;
+  const fullNote = [partial, note].filter(Boolean).join(" ") || null;
+  if (done.length < booked.length) {
+    const { error: vehErr } = await db
+      .from("appointment_vehicles")
+      .delete()
+      .eq("appointment_id", id)
+      .not("vehicle_id", "in", `(${done.map((v) => v.id).join(",")})`);
+    if (vehErr) return { ok: false, error: vehErr.message };
+  }
+  // Paying more than today's price clears what they still owe from earlier visits first.
+  const earlier = appt.customer_id && payment && payment.amount > finalPrice ? await unpaidVisits(db, appt.customer_id, id) : [];
   const completedAt = new Date();
   // self_done/employee_id land before the payment insert so the mirror trigger splits it right.
   const { error } = await db
@@ -453,9 +530,12 @@ export async function completeAppointment(
       status: "completed",
       completed_at: completedAt.toISOString(),
       price: finalPrice,
-      completion_note: note || null,
+      completion_note: fullNote,
       self_done: self,
       employee_id: empId,
+      ...(done.length < booked.length
+        ? { vehicle_id: done[0].id, size_id: done.length === 1 ? done[0].size_id : null, size_label: labels(done) }
+        : {}),
     })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
@@ -468,6 +548,7 @@ export async function completeAppointment(
       [
         `${appt.service_name} · ${usd(finalPrice)}${Number(appt.price) !== finalPrice ? ` (booked at ${usd(appt.price)})` : ""}`,
         tookMin != null && tookMin > 0 ? `Took ${fmtDur(tookMin)} (booked ${fmtDur(appt.duration_min)})` : "No start time — clock wasn't started",
+        partial,
         payment && payment.amount > 0
           ? `Collected ${usd(payment.amount)} ${payment.method}${payment.amount < finalPrice ? ` — ${usd(finalPrice - payment.amount)} still owed` : ""}`
           : stripeLink
@@ -475,6 +556,7 @@ export async function completeAppointment(
             : appt.customer_id
               ? `No payment collected — ${usd(finalPrice)} now owed`
               : "No payment collected (not linked to a customer)",
+        earlier.length > 0 && `Includes ${usd(Math.min(payment!.amount - finalPrice, earlier.reduce((s, u) => s + u.owed, 0)))} they owed from ${earlier.map((u) => fmtDateShort(u.on)).join(", ")}`,
         note && `Note: “${note}”`,
       ],
       appt.customer_id ? `/customers/${appt.customer_id}` : "/",
@@ -516,17 +598,6 @@ export async function completeAppointment(
   }
 
   if (appt.customer_id) {
-    // Re-completing a reopened job: its payments survived the reopen, so don't book another.
-    if (payment && payment.amount > 0) {
-      const { data: paid } = await db.from("ledger_entries").select("amount").eq("appointment_id", id).eq("kind", "payment");
-      const already = (paid ?? []).reduce((s, r) => s + Number(r.amount), 0);
-      if (already > 0) {
-        return {
-          ok: false,
-          error: `${usd(already)} was already collected on this job. Pick "Put on balance" to complete it without a second payment, or adjust the existing one on the customer's ledger.`,
-        };
-      }
-    }
     const { error: chargeErr } = await db.from("ledger_entries").insert({
       customer_id: appt.customer_id,
       appointment_id: id,
@@ -539,12 +610,37 @@ export async function completeAppointment(
     if (chargeErr) return { ok: false, error: chargeErr.message };
 
     if (payment && payment.amount > 0) {
+      // The part beyond today's price goes on the earlier unpaid jobs, one payment row each,
+      // so each job reads paid and the split follows whoever did that job.
+      let here = Math.abs(payment.amount);
+      if (earlier.length) {
+        const { data: theirs } = await db.from("appointments").select("id,self_done").in("id", earlier.map((u) => u.appointmentId));
+        const selfDone = new Set((theirs ?? []).filter((a) => a.self_done).map((a) => a.id));
+        for (const u of earlier) {
+          const part = Math.round(Math.min(here - finalPrice, u.owed) * 100) / 100;
+          if (part <= 0) break;
+          const { error: earlierErr } = await db.from("ledger_entries").insert({
+            customer_id: appt.customer_id,
+            appointment_id: u.appointmentId,
+            plan_id: u.planId,
+            kind: "payment",
+            amount: part,
+            method: payment.method,
+            occurred_on: appt.date,
+            memo: `Collected at the ${fmtDateShort(appt.date)} visit`,
+            collected_by: role,
+            ...(role === "owner" && selfDone.has(u.appointmentId) ? { settled_on: appt.date } : {}),
+          });
+          // A worker can't book money onto a job that wasn't theirs: it stays on today's payment.
+          if (!earlierErr) here = Math.round((here - part) * 100) / 100;
+        }
+      }
       const { error: payErr } = await db.from("ledger_entries").insert({
         customer_id: appt.customer_id,
         appointment_id: id,
         plan_id: appt.plan_id,
         kind: "payment",
-        amount: Math.abs(payment.amount),
+        amount: here,
         method: payment.method,
         occurred_on: appt.date,
         memo: payment.memo || null,

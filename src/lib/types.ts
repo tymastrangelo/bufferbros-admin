@@ -252,7 +252,7 @@ export interface LedgerEntry {
 
 export type AppointmentEventKind =
   | "booked" | "started" | "completed" | "cancelled" | "no_show" | "reopened"
-  | "rescheduled" | "assigned" | "price_changed" | "edited";
+  | "rescheduled" | "assigned" | "price_changed" | "vehicles_changed" | "edited";
 
 /** A signed crew note on a client and/or one job (0042). appointment_id null = about the client. */
 export interface CustomerNote {
@@ -441,6 +441,18 @@ export interface CustomerMessage {
   from_me: boolean;
   body: string | null;
   has_attachment: boolean;
+  /** Whose thread this text is from: one of the client's other contacts, or null = the client. */
+  contact_id?: string | null;
+}
+
+/** Someone else who speaks for a client (0043): a spouse, an assistant, a property manager. */
+export interface CustomerContact {
+  id: string;
+  customer_id: string;
+  name: string;
+  relation: string | null;
+  phone: string | null;
+  notes: string | null;
 }
 
 export interface CustomerInsight {

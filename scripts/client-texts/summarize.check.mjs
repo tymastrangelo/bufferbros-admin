@@ -52,5 +52,7 @@ assert.match(sched, /next plan date is Tuesday, Nov 10/);
 assert.match(money({ ledger: [{ kind: "payment", amount: 500, method: "zelle", occurred_on: "2026-10-01" }, { kind: "charge", amount: -257, method: null, occurred_on: "2026-10-05" }] }), /^\$243 credit on account \(prepaid\); last payment \$500 by zelle on 2026-10-01; usually pays by zelle$/);
 assert.match(money({ ledger: [{ kind: "charge", amount: -60, method: null, occurred_on: "2026-10-05" }] }), /^owes \$60; no payments on record$/);
 assert.equal(money({ ledger: [] }), "balance even; no payments on record");
+// An unpaid visit is named, so a draft can say "we'll grab it next visit" about the right day.
+assert.match(money({ ledger: [{ kind: "charge", amount: -145, method: null, occurred_on: "2026-11-24", appointment_id: "a" }, { kind: "charge", amount: -250, method: null, occurred_on: "2026-11-10", appointment_id: "b" }, { kind: "payment", amount: 250, method: "cash", occurred_on: "2026-11-10", appointment_id: "b" }] }), /^owes \$145 \(not yet collected for the visit on 2026-11-24\); last payment \$250 by cash/);
 
 console.log("summarize.check.mjs ok");
