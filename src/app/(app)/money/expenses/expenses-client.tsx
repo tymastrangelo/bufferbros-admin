@@ -11,7 +11,7 @@ import { EXPENSE_CATEGORIES, type Expense, type RecurringExpense } from "@/lib/t
 
 type Payer = { id: string; name: string };
 
-/** Me + each worker: who actually paid. A worker's pick makes it a fronted expense (Payouts owes it back). */
+/** Me + each worker: who actually paid. A worker's pick makes it a fronted expense (it comes off their Payouts balance). */
 function PaidBy({ value, onChange, employees }: { value: string | null; onChange: (id: string | null) => void; employees: Payer[] }) {
   if (employees.length === 0) return null;
   return (
@@ -116,7 +116,7 @@ export function ExpensesClient({
         {employees.length > 0 && (
           <div className="mt-2.5 flex flex-col gap-1">
             <PaidBy value={paidBy} onChange={setPaidBy} employees={employees} />
-            {paidBy && <p className="text-xs text-ink-2">Out of {nameOf(paidBy)}&apos;s pocket — it lands on Payouts as money you owe them until you mark it paid back.</p>}
+            {paidBy && <p className="text-xs text-ink-2">Out of {nameOf(paidBy)}&apos;s pocket — it comes straight off what they owe you on Payouts.</p>}
           </div>
         )}
         <div className="mt-2">
@@ -159,8 +159,8 @@ export function ExpensesClient({
                   <td data-label="Memo" className="text-ink-2 max-w-[240px] truncate">
                     {r.memo}
                     {r.paid_by_employee_id && (
-                      <span className={`chip ml-1.5 ${r.reimbursed_on ? "chip-ok" : "chip-warn"}`}>
-                        {nameOf(r.paid_by_employee_id)} paid{r.reimbursed_on ? " · paid back" : " · owed"}
+                      <span className={`chip ml-1.5 ${r.reimbursed_on ? "chip-ok" : ""}`}>
+                        {nameOf(r.paid_by_employee_id)} paid{r.reimbursed_on ? " · settled" : " · off their balance"}
                       </span>
                     )}
                   </td>
@@ -420,7 +420,7 @@ function ExpenseEditSheet({ expense, employees, onClose }: { expense: Expense; e
           <input className="input" value={memo} onChange={(e) => setMemo(e.target.value)} />
         </Field>
         {employees.length > 0 && (
-          <Field label="Who paid" hint={expense.reimbursed_on ? `Paid back ${expense.reimbursed_on}` : paidBy ? "Owed back on Payouts until you mark it paid" : undefined}>
+          <Field label="Who paid" hint={expense.reimbursed_on ? `Settled ${expense.reimbursed_on}` : paidBy ? "Comes off what they owe you on Payouts" : undefined}>
             <PaidBy value={paidBy} onChange={setPaidBy} employees={employees} />
           </Field>
         )}

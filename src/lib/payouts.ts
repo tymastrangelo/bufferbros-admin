@@ -32,7 +32,7 @@ export function transfer(row: PayoutRow, washerPct: number) {
   return { direction: "washer_to_owner" as const, amount: net - workerCut };
 }
 
-/** An expense a worker paid out of pocket; Tyler owes it back until `reimbursedOn` is set. */
+/** An expense a worker paid out of pocket; it comes off what they owe Tyler until `reimbursedOn` (settled) is set. */
 export interface FrontedExpense {
   amount: number;
   reimbursedOn: string | null;

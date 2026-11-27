@@ -219,7 +219,7 @@ export async function saveExpense(fields: ExpenseFields, id?: string | null): Pr
   const { data: payer } = fields.paidByEmployeeId ? await db.from("employees").select("name").eq("id", fields.paidByEmployeeId).maybeSingle() : { data: null };
   await logActivity(
     `${id ? "edited" : "logged"} an expense${payer ? ` ${payer.name} paid for` : ""}`,
-    [`${usd(row.amount)} · ${row.category} · ${row.occurred_on}`, row.memo, payer && `You owe ${payer.name} ${usd(row.amount)} back — settle it on Payouts`],
+    [`${usd(row.amount)} · ${row.category} · ${row.occurred_on}`, row.memo, payer && `${usd(row.amount)} comes off what ${payer.name} owes you on Payouts`],
     payer ? "/money/payouts" : "/money/expenses",
     { tags: ["receipt"] }
   );

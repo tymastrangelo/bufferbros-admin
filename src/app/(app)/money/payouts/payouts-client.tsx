@@ -70,9 +70,9 @@ export function PayoutsClient({ rows, fronted = [], washerPct, name }: { rows: P
     router.refresh();
     if (!res.ok) return toast({ title: "Couldn't update that", detail: res.error, tone: "bad" });
     toast({
-      title: paidBack ? `Paid ${name} back ${money(f.amount)}` : `Marked ${money(f.amount)} still owed`,
+      title: paidBack ? `Marked settled · ${money(f.amount)}` : `Marked unsettled · ${money(f.amount)}`,
       detail: f.memo ?? f.category,
-      undoneTitle: paidBack ? "Still owed" : "Paid back",
+      undoneTitle: paidBack ? "Unsettled again" : "Settled again",
       undo: async () => {
         const back = await setExpenseReimbursed(f.id, !paidBack);
         if (back.ok) router.refresh();
@@ -125,7 +125,7 @@ export function PayoutsClient({ rows, fronted = [], washerPct, name }: { rows: P
       {shownFronted.length > 0 && (
         <div className="card overflow-hidden">
           <div className="px-4 py-2.5 border-b border-line flex items-center justify-between">
-            <p className="label">Paid out of pocket</p>
+            <p className="label">{name} paid for · comes off their balance</p>
             <Link href={`/money/expenses?paidBy=${fronted[0]?.paid_by_employee_id ?? ""}`} className="link text-dense">
               Log one
             </Link>
@@ -138,14 +138,14 @@ export function PayoutsClient({ rows, fronted = [], washerPct, name }: { rows: P
                   {f.memo ?? f.category}
                   <span className="text-faint capitalize"> · {f.category}</span>
                 </span>
-                <span className="num font-medium text-bad whitespace-nowrap">owe {money(f.amount)}</span>
+                <span className="num font-medium whitespace-nowrap">−{money(f.amount)}</span>
                 {f.reimbursed_on ? (
                   <button className="inline-flex items-center gap-1 text-ok text-dense font-medium hover:underline underline-offset-2 disabled:opacity-50" disabled={busy === f.id} onClick={() => toggleFronted(f)} title="Click to undo">
                     <IconCheck width={14} height={14} /> {fmtDateShort(f.reimbursed_on)}
                   </button>
                 ) : (
-                  <button className="btn btn-sm btn-primary" disabled={busy === f.id} onClick={() => toggleFronted(f)}>
-                    {busy === f.id ? <Busy>Saving…</Busy> : "Paid back"}
+                  <button className="btn btn-sm" disabled={busy === f.id} onClick={() => toggleFronted(f)}>
+                    {busy === f.id ? <Busy>Saving…</Busy> : "Mark settled"}
                   </button>
                 )}
               </li>

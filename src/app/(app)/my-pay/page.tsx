@@ -54,7 +54,7 @@ export default async function MyPayPage() {
         <div className="mt-4 card overflow-hidden">
           <div className="px-4 py-2.5 border-b border-line">
             <p className="label">Paid out of your pocket</p>
-            <p className="text-xs text-ink-2">{owedBack > 0 ? `Tyler owes you ${money(owedBack)} back.` : "All paid back."} Text Tyler the receipt for anything new.</p>
+            <p className="text-xs text-ink-2">{owedBack > 0 ? `${money(owedBack)} comes off what you send Tyler.` : "All settled."} Text Tyler the receipt for anything new.</p>
           </div>
           <ul className="divide-y divide-line">
             {fronted.map((f) => (
@@ -62,7 +62,7 @@ export default async function MyPayPage() {
                 <span className="num text-faint whitespace-nowrap">{fmtDateShort(f.occurred_on)}</span>
                 <span className="min-w-0 grow truncate">{f.memo ?? f.category}</span>
                 <span className="num font-medium">{money(f.amount)}</span>
-                {f.reimbursed_on ? <span className="chip chip-ok">paid back</span> : <span className="chip">owed</span>}
+                {f.reimbursed_on ? <span className="chip chip-ok">settled</span> : <span className="chip">off your balance</span>}
               </li>
             ))}
           </ul>

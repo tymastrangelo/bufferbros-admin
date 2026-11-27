@@ -152,7 +152,7 @@ export async function settleWorker(employeeId: string): Promise<ActionResult & {
   await logActivity(
     `settled up with ${emp.name}`,
     [
-      `${ids.length} payment${ids.length === 1 ? "" : "s"}${expenseIds.length ? ` + ${expenseIds.length} out-of-pocket expense${expenseIds.length === 1 ? "" : "s"} paid back` : ""}`,
+      `${ids.length} payment${ids.length === 1 ? "" : "s"}${expenseIds.length ? ` + ${expenseIds.length} out-of-pocket expense${expenseIds.length === 1 ? "" : "s"} netted in` : ""}`,
       net === 0 ? "Even" : net > 0 ? `${emp.name} paid you ${usd(net)}` : `You paid ${emp.name} ${usd(-net)}`,
     ],
     "/money/payouts",

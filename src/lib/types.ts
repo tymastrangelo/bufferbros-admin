@@ -337,7 +337,7 @@ export interface Expense {
   /** 'google_ads' = written by the sync (one row per Google campaign per month). */
   source: string | null;
   google_campaign_id: string | null;
-  /** A worker fronted this out of pocket; the owner owes it back until reimbursed_on. */
+  /** A worker fronted this out of pocket; it comes off their Payouts balance until reimbursed_on (settled). */
   paid_by_employee_id: string | null;
   reimbursed_on: string | null;
   created_at: string;
