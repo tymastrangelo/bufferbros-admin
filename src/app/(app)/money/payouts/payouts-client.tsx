@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import { IconCheck } from "@/components/icons";
 import { Busy, EmptyState, Segmented } from "@/components/ui";
 import { useToast } from "@/components/toast";
-import { attributeLedgerEntry, setExpenseReimbursed, setPaymentSettled } from "@/lib/actions/money";
+import { attributeLedgerEntry, setPaymentSettled } from "@/lib/actions/money";
 import { WhoPicker, type EmployeeLite } from "@/components/who-picker";
 import { money } from "@/lib/format";
 import { netOwed, transfer } from "@/lib/payouts";
@@ -61,25 +61,6 @@ export function PayoutsClient({ rows, fronted = [], washerPct, name }: { rows: P
     [rows, fronted, washerPct]
   );
   const shownFronted = fronted.filter((f) => (filter === "all" ? true : filter === "settled" ? f.reimbursed_on : !f.reimbursed_on));
-
-  async function toggleFronted(f: FrontedRow) {
-    const paidBack = !f.reimbursed_on;
-    setBusy(f.id);
-    const res = await setExpenseReimbursed(f.id, paidBack);
-    setBusy(null);
-    router.refresh();
-    if (!res.ok) return toast({ title: "Couldn't update that", detail: res.error, tone: "bad" });
-    toast({
-      title: paidBack ? `Marked settled · ${money(f.amount)}` : `Marked unsettled · ${money(f.amount)}`,
-      detail: f.memo ?? f.category,
-      undoneTitle: paidBack ? "Unsettled again" : "Settled again",
-      undo: async () => {
-        const back = await setExpenseReimbursed(f.id, !paidBack);
-        if (back.ok) router.refresh();
-        return back;
-      },
-    });
-  }
 
   const shown = rows.filter((r) => (filter === "all" ? true : filter === "settled" ? r.settled_on : !r.settled_on));
 
@@ -139,14 +120,10 @@ export function PayoutsClient({ rows, fronted = [], washerPct, name }: { rows: P
                   <span className="text-faint capitalize"> · {f.category}</span>
                 </span>
                 <span className="num font-medium whitespace-nowrap">−{money(f.amount)}</span>
-                {f.reimbursed_on ? (
-                  <button className="inline-flex items-center gap-1 text-ok text-dense font-medium hover:underline underline-offset-2 disabled:opacity-50" disabled={busy === f.id} onClick={() => toggleFronted(f)} title="Click to undo">
+                {f.reimbursed_on && (
+                  <span className="inline-flex items-center gap-1 text-ok text-dense font-medium">
                     <IconCheck width={14} height={14} /> {fmtDateShort(f.reimbursed_on)}
-                  </button>
-                ) : (
-                  <button className="btn btn-sm" disabled={busy === f.id} onClick={() => toggleFronted(f)}>
-                    {busy === f.id ? <Busy>Saving…</Busy> : "Mark settled"}
-                  </button>
+                  </span>
                 )}
               </li>
             ))}

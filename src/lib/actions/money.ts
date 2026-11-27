@@ -227,17 +227,6 @@ export async function saveExpense(fields: ExpenseFields, id?: string | null): Pr
   return { ok: true };
 }
 
-/** Owner-only: mark a worker-fronted expense paid back (or undo). */
-export async function setExpenseReimbursed(expenseId: string, reimbursed: boolean): Promise<ActionResult> {
-  // activity: owner-only (returns early for workers); settling pushes nothing, like setPaymentSettled
-  if ((await getRole()) !== "owner") return { ok: false, error: "Only the owner can mark reimbursements." };
-  const db = await createClient();
-  const { error } = await db.from("expenses").update({ reimbursed_on: reimbursed ? todayYmd() : null }).eq("id", expenseId).not("paid_by_employee_id", "is", null);
-  if (error) return { ok: false, error: error.message };
-  refresh();
-  return { ok: true, id: expenseId };
-}
-
 export async function deleteExpense(id: string): Promise<ActionResult> {
   const denied = await ownerOnly("delete expenses");
   if (denied) return denied;
